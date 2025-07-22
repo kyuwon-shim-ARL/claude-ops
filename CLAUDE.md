@@ -20,20 +20,29 @@ You are an automation agent for the 'Notion-Git dual-space system' that integrat
 
 Available tools: Notion API, GitHub API, local Git CLI, GitHub CLI (`gh`), and **Git-LFS CLI**
 
-**Notion Database Information:**
-- Tasks DB ID: `[actual_Task_DB_ID]`
-- Projects DB ID: `[actual_Project_DB_ID]`
-- Knowledge Hub ID: `[actual_Knowledge_Hub_ID]`
+**Environment Configuration:**
+Environment variables must be set in `.env` file (copy from `.env.example`):
+- `NOTION_API_KEY`: Notion integration token
+- `NOTION_TASKS_DB_ID`: Tasks database ID  
+- `NOTION_PROJECTS_DB_ID`: Projects database ID
+- `NOTION_KNOWLEDGE_HUB_ID`: Knowledge Hub page ID
+- `GITHUB_PAT`: GitHub Personal Access Token
+- `GITHUB_REPO_OWNER`: GitHub repository owner
+- `GITHUB_REPO_NAME`: GitHub repository name
 
 ## Command Structure
 
 ### Core Workflow Commands
-- `project plan --source <file> --project <PID>`: Create Epic/Task tickets in Notion from proposal documents
-- `task start <TID>`: Start Notion task and create Git branch
-- `task archive <TID>`: **Export entire terminal session conversation log using `/export` and archive in Notion Task anchor page toggle blocks**
-- `task finish <TID> --pr`: Complete task, create PR, and update Notion
-- `task publish <TID>`: Publish completed task knowledge to Knowledge Hub
-- `task add-result <file_path>`: Track specific result files with Git-LFS and commit
+- `python main.py project-plan --source <file> --project <PID>`: Create Epic/Task tickets in Notion from proposal documents
+- `python main.py task-start <TID>`: Start Notion task and create Git branch
+- `python main.py task-archive <TID>`: **Export entire terminal session conversation log using `/export` and archive in Notion Task anchor page toggle blocks**
+- `python main.py task-finish <TID> --pr`: Complete task, create PR, and update Notion
+- `python main.py task-publish <TID>`: Publish completed task knowledge to Knowledge Hub
+
+### Pipeline Execution Commands
+- `python main.py workflow-a --fastq-dir <dir> --reference-genome <file> --metadata <file>`: Run FASTQ-based pipeline
+- `python main.py workflow-b --count-table <file> --metadata <file> --annotation <file>`: Run count table-based pipeline
+- `python main.py results --outdir <dir>`: List and summarize pipeline results
 
 ### Development Commands
 
@@ -66,17 +75,27 @@ nextflow run src/main.nf --output_dir /path/to/results
 ## Architecture and Structure
 
 ### Directory Structure
-- `main.py`: Entry point for the Python automation system
-- `src/`: Contains Nextflow pipeline files
-  - `main.nf`: Main Nextflow pipeline
-  - `nextflow.config`: Nextflow configuration with local/cluster profiles
+- `main.py`: Entry point for the unified pipeline + workflow management system
+- `src/`: Contains both Nextflow pipelines and workflow management
+  - `workflows/`: Nextflow workflow implementations
+    - `workflow_a.nf`: FASTQ-based pipeline
+    - `workflow_b.nf`: Count table-based pipeline
+  - `modules/`: Modular Nextflow processes (qc, dge, annotation, enrichment)
+  - `workflow_manager.py`: Python automation for Notion-Git integration
+  - `bin/`: R and Python scripts for analysis modules
+  - `configs/`: Environment-specific configurations
+- `data/`: Input data organized by workflow type
+  - `workflow_b/`: Count tables, metadata, and annotation files
 - `prompts/`: System prompt templates for AI workflow automation
 - `docs/`: Project documentation including PRDs and proposals
-- `pyproject.toml`: Python project configuration with notion-client and pygithub dependencies
+- `pyproject.toml`: Python project configuration with all dependencies
+- `.env`: Environment variables for API tokens and database IDs
+- `.env.example`: Template for environment configuration
 
 ### Key Dependencies
 - `notion-client>=2.4.0`: For Notion API integration
 - `pygithub>=2.6.1`: For GitHub API operations
+- `python-dotenv>=1.0.0`: For environment variable management from .env files
 - Git-LFS: For managing large result files
 - Additional tools may include domain-specific workflow engines (e.g., Nextflow for computational pipelines)
 

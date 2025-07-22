@@ -1,0 +1,11 @@
+sample_id,group,category,batch,description
+sample_001,treatment,type_A,batch_1,Treatment group sample from type A
+sample_002,treatment,type_A,batch_1,Treatment group sample from type A
+sample_003,control,type_A,batch_1,Control group sample from type A
+sample_004,control,type_A,batch_1,Control group sample from type A
+sample_005,treatment,type_B,batch_2,Treatment group sample from type B
+sample_006,treatment,type_B,batch_2,Treatment group sample from type B
+sample_007,control,type_B,batch_2,Control group sample from type B
+sample_008,control,type_B,batch_2,Control group sample from type B
+sample_009,treatment,type_A,batch_1,Treatment group sample from type A
+sample_010,control,type_A,batch_1,Control group sample from type A
