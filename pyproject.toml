@@ -1,0 +1,10 @@
+[project]
+name = "claude-ops"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "notion-client>=2.4.0",
+    "pygithub>=2.6.1",
+]
