@@ -15,7 +15,8 @@
 
 ### 전제 조건 (Prerequisites)
 
-1.  **도구 설치:** `git`, `git-lfs`, `node.js`, 그리고 터미널 AI(`claude-code` 등)가 설치되어 있어야 합니다.
+1.  **도구 설치:** `git`, `git-lfs`, `node.js`, 그리고 터미널 AI(`claude-cod
+)가 설치되어 있어야 합니다.
 2.  **API 키 발급:**
     -   Notion Integration Token
     -   GitHub Personal Access Token
