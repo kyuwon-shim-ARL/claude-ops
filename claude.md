@@ -20,7 +20,7 @@
 # 4. 주요 명령어 체계 (Core Command Structure)
 - `project plan --source <file> --project <PID>`: 제안서를 바탕으로 Notion에 Epic/Task를 발행한다.
 - `task start <TID>`: Notion 태스크를 시작하고 Git 브랜치를 생성한다.
-- `task archive <TID>`: 현재 터미널 세션의 대화록을 Notion의 해당 Task 앵커 페이지에 아카이빙한다.
+- `task archive <TID>`: **현재 터미널 세션의 전체 대화록을 `/export`하여,** Notion의 해당 Task 앵커 페이지 **토글(Toggle) 블록 안에 아카이빙한다.**
 - `task finish <TID> --pr`: 작업을 마치고 PR을 생성하며 Notion을 업데이트한다.
 - `task publish <TID>`: 완료된 태스크의 지식을 `지식 저장소`에 발행한다.
 - `task add-result <file_path>`: 특정 결과 파일을 Git-LFS로 추적하고 커밋한다.
