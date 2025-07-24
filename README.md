@@ -10,12 +10,14 @@
 
 ## ⚡ 빠른 시작
 
+### 🆕 새 프로젝트 시작
+
 **5분 만에 설정하고 바로 사용하세요:**
 
 ```bash
 # 1. Clone & 의존성 설치
-git clone <your-repo>
-cd MC_test_ops
+git clone https://github.com/kyuwon-shim-ARL/claude-ops.git my-project
+cd my-project
 uv sync
 
 # 2. 환경 설정
@@ -29,6 +31,24 @@ cp .env.example .env
 /task-start <생성된-TID>
 # ... 작업 수행 ...
 /task-finish <TID> --pr --auto-merge  # 완전 자동화!
+```
+
+### 🔧 기존 프로젝트에 추가
+
+**기존 작업 중인 프로젝트에 Claude Code 워크플로우를 추가하려면:**
+
+```bash
+# 방법 1: 원클릭 설치 (권장)
+curl -sSL https://raw.githubusercontent.com/kyuwon-shim-ARL/claude-ops/main/install-to-existing.sh | bash
+
+# 방법 2: 수동 설치
+git clone https://github.com/kyuwon-shim-ARL/claude-ops.git /tmp/claude-ops-template
+cp /tmp/claude-ops-template/CLAUDE.md .
+cp /tmp/claude-ops-template/.env.example .
+cp -r /tmp/claude-ops-template/slash_commands/ .
+cp /tmp/claude-ops-template/src/workflow_manager.py ./src/
+cat /tmp/claude-ops-template/.gitattributes >> .gitattributes
+rm -rf /tmp/claude-ops-template
 ```
 
 **👉 [상세 설정 가이드](./QUICK_START.md)**
