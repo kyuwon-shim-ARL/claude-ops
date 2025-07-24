@@ -482,6 +482,10 @@ class WorkflowManager:
             
             print(f"✅ Read conversation log ({len(conversation_content)} characters)")
             
+            # Create summary of conversation for better readability
+            conversation_summary = self._create_conversation_summary(conversation_content, notion_tid)
+            print(f"📋 Created conversation summary ({len(conversation_summary)} characters)")
+            
             # Find the toggle block for AI conversation records
             page_blocks = self.notion.blocks.children.list(block_id=notion_tid)
             toggle_block_id = None
@@ -494,8 +498,8 @@ class WorkflowManager:
                     break
             
             if toggle_block_id:
-                # Split conversation into chunks (Notion has 2000 character limit)
-                chunks = [conversation_content[i:i+1800] for i in range(0, len(conversation_content), 1800)]
+                # Split conversation summary into chunks (Notion has 2000 character limit)
+                chunks = [conversation_summary[i:i+1800] for i in range(0, len(conversation_summary), 1800)]
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 
                 print(f"📦 Splitting conversation into {len(chunks)} chunks")
@@ -541,6 +545,56 @@ class WorkflowManager:
         except Exception as e:
             print(f"❌ Failed to archive task: {e}")
             return False
+
+    def _create_conversation_summary(self, raw_content: str, task_id: str) -> str:
+        """Create a structured summary of the conversation for archiving"""
+        
+        # Extract key information
+        summary_parts = [
+            f"# 작업 대화 요약 - Task {task_id[:8]}",
+            f"생성일시: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            "",
+            "## 주요 작업 내용",
+        ]
+        
+        # Look for key implementation sections
+        if "def " in raw_content:
+            summary_parts.append("✅ 코드 구현 완료")
+        if "git commit" in raw_content:
+            summary_parts.append("✅ Git 커밋 수행")
+        if "test" in raw_content.lower():
+            summary_parts.append("✅ 테스트 실행")
+        if "error" in raw_content.lower():
+            summary_parts.append("⚠️ 오류 해결 과정 포함")
+        if "success" in raw_content.lower():
+            summary_parts.append("🎉 작업 성공적 완료")
+            
+        # Extract user questions and key decisions
+        lines = raw_content.split('\n')
+        user_inputs = [line for line in lines if line.startswith('Human:')]
+        
+        if user_inputs:
+            summary_parts.extend([
+                "",
+                "## 사용자 요청사항",
+            ])
+            for i, user_input in enumerate(user_inputs[:3], 1):  # Limit to first 3
+                clean_input = user_input.replace('Human:', '').strip()[:100]
+                summary_parts.append(f"{i}. {clean_input}...")
+        
+        # Add technical details section
+        summary_parts.extend([
+            "",
+            "## 기술적 세부사항",
+            "- 전체 대화 길이: {:,} 문자".format(len(raw_content)),
+            "- 주요 도구 사용: Claude Code 자동화 시스템",
+            "- 결과물: Git LFS 추적 대상 포함",
+            "",
+            "---",
+            "*이 요약은 AI 대화 기록을 구조화한 것입니다. 전체 로그는 연구 재현성을 위해 보관됩니다.*"
+        ])
+        
+        return '\n'.join(summary_parts)
 
     def finish_task(self, notion_tid: str, create_pr: bool = False, auto_merge: bool = False) -> bool:
         """Complete task, create PR, and update Notion"""
