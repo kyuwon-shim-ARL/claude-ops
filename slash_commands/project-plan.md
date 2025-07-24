@@ -15,18 +15,18 @@ PRD 문서를 기반으로 Notion에 Project → Epics → Tasks 계층 구조�
 - 전체 프로젝트 개요 및 배경 정보 추가
 
 ### 2. Epic 생성 (Tasks DB, IsEpic=True)
-- PRD 분석을 통한 3-5개 Epic 도출
+- PRD 분석을 토대로 Epic 도출
 - Epic별 실행 순서 번호 자동 할당 (Epic 1, Epic 2...)
 - Epic간 의존성 관계 설정
 
 ### 3. Task 생성 (Tasks DB, ParentTask 연결)
-- Epic당 3-5개 SubTask 생성
+- Epic당 SubTask 생성
 - Task별 실행 순서 번호 할당 (Task 1.1, 1.2, 1.3...)
 - Notion TID 자동 생성 및 활용
 
 ### 4. 페이지 내용 자동 생성
 - **Epic 페이지**: 목표, 설명, SubTask 리스트, 의존성 정보
-- **Task 페이지**: 작업 목표, 체크리스트, 참고 자료, AI 대화 토글
+- **Task 페이지**: 작업 목표, 체크리스트, 참고 자료, AI 대화 토글, 산출물 및 산출물 위치
 
 ### 5. 출력 정보
 ```
