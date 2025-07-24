@@ -6,7 +6,7 @@
 
 ---
 ### 1. 어떤 작업을 했나요? (Core Idea)
-- 관련 Notion 태스크: `[T-XXX]` (자동으로 채워줘)
+- 관련 Notion 태스크: `[CCT-XXX]` (자동으로 채워줘)
 
 ### 2. 왜 이 작업이 필요한가요? (Elaborate - So What?)
 - (Notion 태스크의 목표를 참고하여 작성)
