@@ -24,13 +24,13 @@
 
 ### 시스템 설정
 
-이 프로젝트의 모든 자동화는 루트 디렉토리의 `claude.md` 파일과 `prompts/` 디렉토리의 지침서들을 기반으로 작동합니다. 새로운 프로젝트를 시작할 때 이 구조를 그대로 복사하여 사용하세요.
+이 프로젝트의 모든 자동화는 루트 디렉토리의 `CLAUDE.md` 파일과 `slash_commands/` 디렉토리의 슬래시 명령어 스펙들을 기반으로 작동합니다. Claude Code의 네이티브 슬래시 명령어 시스템을 통해 Notion TID를 직접 활용하여 작업합니다.
 
 ## 🚀 워크플로우 요약 (Workflow in Action)
 
-1.  **계획 수립:** 연구 제안서(`.md`)를 작성한 뒤, 터미널에서 `claude-code project plan ...` 명령어로 Notion에 Epic과 Task를 자동으로 발행합니다.
-2.  **작업 착수:** `claude-code task start <TID>` 명령어로 작업을 시작합니다. AI가 자동으로 Git 브랜치를 생성하고 Notion 상태를 업데이트합니다.
+1.  **계획 수립:** 연구 제안서(`.md`)를 작성한 뒤, Claude Code에서 `/project-plan docs/proposal.md` 슬래시 명령어로 Notion에 Project → Epic → Task 계층을 자동 생성합니다.
+2.  **작업 착수:** `/task-start [TID]` 명령어로 작업을 시작합니다. AI가 자동으로 Git 브랜치를 생성하고 Notion 상태를 업데이트합니다.
 3.  **탐색 및 개발:** 터미널에서 AI와 대화하며 코드를 작성, 수정, 실행하고 커밋합니다.
-4.  **과정 아카이빙:** `claude-code task archive <TID>` 명령어로, AI와의 모든 대화 기록을 Notion의 해당 `Task` 앵커 페이지에 자동으로 보관합니다.
-5.  **작업 완료:** `claude-code task finish <TID> --pr` 명령어로 작업을 마칩니다. AI가 PR을 생성하고(설명까지 자동 요약), Notion 상태를 업데이트합니다.
-6.  **지식 발행:** `claude-code task publish <TID>` 명령어로, 완료된 작업의 결과와 통찰을 `지식 저장소`에 공식 문서로 자동 발행합니다.
+4.  **과정 아카이빙:** `/task-archive` 명령어로 (TID 자동감지), AI와의 모든 대화 기록을 Notion의 해당 `Task` 앵커 페이지에 자동으로 보관합니다.
+5.  **작업 완료:** `/task-finish [TID] --pr` 명령어로 작업을 마칩니다. AI가 PR을 생성하고(설명까지 자동 요약), Notion 상태를 업데이트합니다.
+6.  **지식 발행:** `/task-publish [TID]` 명령어로, 완료된 작업의 결과와 통찰을 `지식 저장소`에 공식 문서로 자동 발행합니다.

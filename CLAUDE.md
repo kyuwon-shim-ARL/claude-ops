@@ -10,7 +10,7 @@ You are an automation agent for the 'Notion-Git dual-space system' that integrat
 
 - **Dual Architecture**: Notion is the strategic headquarters (Studio) managing "why" and "what", while Git/Terminal is the development workshop managing "how"
 - All work starts from Notion `Task` tickets; all Git branches must be linked to Notion Task IDs
-- Git branches follow naming convention: `feature/T-XXX-...` or `fix/T-XXX-...`
+- Git branches follow naming convention: `feature/TID-XXXXXXXX-...` using real Notion TIDs
 - Pull Requests are formal technical reports, not just code submissions
 - **Output files follow the 'Output Management Principles' and must be managed via Git-LFS or shared NAS, ensuring code-result connectivity**
 - **All exploration process records (AI conversation logs) must be archived in Notion Task anchor pages as toggle blocks - this serves as the research 'black box' for reproducibility and debugging**
@@ -32,12 +32,18 @@ Environment variables must be set in `.env` file (copy from `.env.example`):
 
 ## Command Structure
 
-### Core Workflow Commands
-- `python main.py project-plan --source <file> --project <PID>`: Create Epic/Task tickets in Notion from proposal documents
-- `python main.py task-start <TID>`: Start Notion task and create Git branch
-- `python main.py task-archive <TID>`: **Export entire terminal session conversation log using `/export` and archive in Notion Task anchor page toggle blocks**
-- `python main.py task-finish <TID> --pr`: Complete task, create PR, and update Notion
-- `python main.py task-publish <TID>`: Publish completed task knowledge to Knowledge Hub
+### Core Workflow Commands (Claude Code Slash Commands)
+- `/project-plan <file>`: Create Project → Epic → Task hierarchy in Notion from proposal documents
+- `/task-start <TID>`: Start Notion task and create Git branch using real Notion TID
+- `/task-archive [TID]`: Export conversation log using `/export` and archive in Notion Task anchor page (auto-detects TID from Git branch if not provided)
+- `/task-finish <TID> --pr`: Complete task, create PR, and update Notion status to Done
+- `/task-publish <TID>`: Publish completed task knowledge to Knowledge Hub
+
+**Key Improvements:**
+- **Claude Code Native**: No separate `python main.py` execution needed
+- **Notion TID Direct Usage**: Use real Notion Task IDs instead of mapping files
+- **Task Ordering System**: Epic 1,2,3... Task 1.1,1.2,1.3... for clear priority
+- **Auto-Detection**: `/task-archive` can auto-detect current task from Git branch name
 
 ### Pipeline Execution Commands
 - `python main.py workflow-a --fastq-dir <dir> --reference-genome <file> --metadata <file>`: Run FASTQ-based pipeline
@@ -75,20 +81,21 @@ nextflow run src/main.nf --output_dir /path/to/results
 ## Architecture and Structure
 
 ### Directory Structure
-- `main.py`: Entry point for the unified pipeline + workflow management system
-- `src/`: Contains both Nextflow pipelines and workflow management
-  - `workflows/`: Nextflow workflow implementations
-    - `workflow_a.nf`: FASTQ-based pipeline
-    - `workflow_b.nf`: Count table-based pipeline
-  - `modules/`: Modular Nextflow processes (qc, dge, annotation, enrichment)
-  - `workflow_manager.py`: Python automation for Notion-Git integration
-  - `bin/`: R and Python scripts for analysis modules
+- `CLAUDE.md`: Central guidance file for Claude Code automation
+- `slash_commands/`: Claude Code slash command specifications
+  - `project-plan.md`: `/project-plan` command specification
+  - `task-start.md`: `/task-start` command specification  
+  - `task-archive.md`: `/task-archive` command specification
+- `src/`: Contains workflow management and optional domain-specific tools
+  - `workflow_manager.py`: Core Notion-Git integration system
+  - `workflows/`: Optional domain-specific pipeline implementations
+  - `modules/`: Optional modular processes for domain workflows
+  - `bin/`: Optional analysis scripts
   - `configs/`: Environment-specific configurations
-- `data/`: Input data organized by workflow type
-  - `workflow_b/`: Count tables, metadata, and annotation files
+- `data/`: Input data organized by domain type (optional)
 - `prompts/`: System prompt templates for AI workflow automation
 - `docs/`: Project documentation including PRDs and proposals
-- `pyproject.toml`: Python project configuration with all dependencies
+- `pyproject.toml`: Python project configuration with dependencies
 - `.env`: Environment variables for API tokens and database IDs
 - `.env.example`: Template for environment configuration
 
@@ -122,7 +129,7 @@ All outputs follow these management principles:
 
 ## Work Unit Definitions
 
-When executing `project plan` commands, follow `prompts/2_create_project_plan.md` criteria for distinguishing Epics vs Tasks and structuring page content.
+When executing `/project-plan` commands, follow `prompts/2_create_project_plan.md` criteria for distinguishing Epics vs Tasks and structuring page content.
 
 ### Epic Criteria (2+ criteria required)
 - **Time**: 2+ weeks completion time?
@@ -149,4 +156,4 @@ When using computational workflow tools, typical execution profiles include:
 - `local`: For development and testing (limited resources)  
 - `cluster`: For production runs on distributed systems
 
-Always ensure terminal conversation logs are exported and archived in Notion Task toggle blocks using the `task archive` command.
+Always ensure terminal conversation logs are exported and archived in Notion Task toggle blocks using the `/task-archive` slash command.
