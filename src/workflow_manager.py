@@ -293,7 +293,7 @@ class WorkflowManager:
             tid = task_info["id"].replace("-", "")[:8]  # Use first 8 chars as TID
             print(f"/task-start {tid}  # {task_info['title']}")
         print(f"/task-archive [TID]")
-        print(f"/task-finish [TID] --pr")
+        print(f"/task-finish [TID] --pr [--auto-merge]")
 
     def start_task(self, notion_tid: str) -> bool:
         """Start a Notion task and create Git branch using Notion TID"""
@@ -542,7 +542,7 @@ class WorkflowManager:
             print(f"❌ Failed to archive task: {e}")
             return False
 
-    def finish_task(self, notion_tid: str, create_pr: bool = False) -> bool:
+    def finish_task(self, notion_tid: str, create_pr: bool = False, auto_merge: bool = False) -> bool:
         """Complete task, create PR, and update Notion"""
         print(f"🏁 Finishing task: {notion_tid}")
         
@@ -587,6 +587,38 @@ Co-Authored-By: Claude <noreply@anthropic.com>
                     base="main"
                 )
                 print(f"✅ Created PR: {pr.html_url}")
+                
+                # Auto-merge if requested
+                if auto_merge:
+                    try:
+                        # Wait a moment for PR to be ready
+                        import time
+                        time.sleep(2)
+                        
+                        # Merge the PR
+                        merge_result = pr.merge(
+                            commit_title=f"Auto-merge: {pr_title}",
+                            commit_message="🤖 Auto-merged by Claude Code workflow",
+                            merge_method="squash"
+                        )
+                        print(f"🔀 Auto-merged PR successfully: {merge_result.sha}")
+                        
+                        # Delete the feature branch
+                        try:
+                            repo.get_git_ref(f"heads/{current_branch}").delete()
+                            print(f"🗑️  Deleted remote branch: {current_branch}")
+                        except Exception as e:
+                            print(f"⚠️  Could not delete remote branch: {e}")
+                        
+                        # Switch to main and delete local branch
+                        subprocess.run(['git', 'checkout', 'main'], check=True)
+                        subprocess.run(['git', 'pull', 'origin', 'main'], check=True)
+                        subprocess.run(['git', 'branch', '-D', current_branch], check=True)
+                        print(f"🧹 Cleaned up local branch: {current_branch}")
+                        
+                    except Exception as e:
+                        print(f"⚠️  Auto-merge failed: {e}")
+                        print(f"💡 PR created but needs manual merge: {pr.html_url}")
             
             # Update Notion task status to Done
             if self.notion and self.check_environment():
@@ -634,6 +666,7 @@ def main():
     finish_parser = subparsers.add_parser("task-finish", help="Finish a task")
     finish_parser.add_argument("notion_tid", help="Notion Task ID")
     finish_parser.add_argument("--pr", action="store_true", help="Create pull request")
+    finish_parser.add_argument("--auto-merge", action="store_true", help="Auto-merge PR after creation")
     
     publish_parser = subparsers.add_parser("task-publish", help="Publish task knowledge")
     publish_parser.add_argument("notion_tid", help="Notion Task ID")
@@ -654,7 +687,7 @@ def main():
     elif args.command == "task-archive":
         success = manager.archive_task(args.notion_tid, args.file)
     elif args.command == "task-finish":
-        success = manager.finish_task(args.notion_tid, args.pr)
+        success = manager.finish_task(args.notion_tid, args.pr, args.auto_merge)
     elif args.command == "task-publish":
         success = manager.publish_task(args.notion_tid)
     
