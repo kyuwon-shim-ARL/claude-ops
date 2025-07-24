@@ -1,0 +1,5 @@
+sample	condition	timepoint
+SA0m	Control	0min
+SAM0m	Drug	0min
+SA30m	Control	30min
+SAM30m	Drug	30min
