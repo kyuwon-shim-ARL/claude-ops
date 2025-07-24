@@ -432,10 +432,25 @@ class WorkflowManager:
                 
                 # Extract TID from branch name like "feature/TID-12346abc-api-integration"
                 if current_branch.startswith('feature/TID-'):
-                    tid_part = current_branch.split('TID-')[1].split('-')[0]
-                    # Find matching Notion page ID (this is simplified - in production you'd search properly)
-                    notion_tid = tid_part
-                    print(f"🔍 Auto-detected TID from branch: {notion_tid}")
+                    tid_short = current_branch.split('TID-')[1].split('-')[0]
+                    print(f"🔍 Extracted short TID from branch: {tid_short}")
+                    
+                    # Query Notion database to find the matching task
+                    if self.notion and self.tasks_db_id:
+                        response = self.notion.databases.query(database_id=self.tasks_db_id)
+                        
+                        for task in response['results']:
+                            if tid_short in task['id']:
+                                notion_tid = task['id']
+                                title_prop = task['properties'].get('Task name', {})
+                                if title_prop.get('title'):
+                                    title = title_prop['title'][0]['text']['content']
+                                    print(f"✅ Found matching task: {title}")
+                                    break
+                    
+                    if not notion_tid:
+                        print(f"❌ Could not find Notion task matching TID: {tid_short}")
+                        return False
                 else:
                     print("❌ Could not auto-detect TID from current Git branch")
                     print("💡 Use: /task-archive [TID] or switch to a task branch")
@@ -479,24 +494,45 @@ class WorkflowManager:
                     break
             
             if toggle_block_id:
-                # Add conversation content to toggle block
+                # Split conversation into chunks (Notion has 2000 character limit)
+                chunks = [conversation_content[i:i+1800] for i in range(0, len(conversation_content), 1800)]
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                conversation_block = {
+                
+                print(f"📦 Splitting conversation into {len(chunks)} chunks")
+                
+                # Add header block
+                header_block = {
                     "object": "block",
                     "type": "paragraph",
                     "paragraph": {
                         "rich_text": [
-                            {"type": "text", "text": {"content": f"🕐 {timestamp}\n"}, "annotations": {"bold": True}},
-                            {"type": "text", "text": {"content": conversation_content[:2000] + "..." if len(conversation_content) > 2000 else conversation_content}}
+                            {"type": "text", "text": {"content": f"🕐 {timestamp} - Conversation Archive ({len(chunks)} chunks)\n"}, "annotations": {"bold": True}}
                         ]
                     }
                 }
                 
+                blocks_to_add = [header_block]
+                
+                # Add chunks to blocks
+                for i, chunk in enumerate(chunks):
+                    chunk_block = {
+                        "object": "block",
+                        "type": "paragraph",
+                        "paragraph": {
+                            "rich_text": [
+                                {"type": "text", "text": {"content": f"📝 Part {i+1}/{len(chunks)}\n"}, "annotations": {"italic": True}},
+                                {"type": "text", "text": {"content": chunk}}
+                            ]
+                        }
+                    }
+                    blocks_to_add.append(chunk_block)
+                
+                # Add all blocks at once
                 self.notion.blocks.children.append(
                     block_id=toggle_block_id, 
-                    children=[conversation_block]
+                    children=blocks_to_add
                 )
-                print(f"✅ Archived conversation to Notion Task page")
+                print(f"✅ Archived conversation ({len(chunks)} chunks) to Notion Task page")
             else:
                 print(f"⚠️  Could not find conversation toggle block in task page")
             
