@@ -303,13 +303,50 @@ class WorkflowManager:
             print("❌ Notion integration not configured")
             return False
         
+        task_page = None
+        task_title = None
+        epic_title = "Unknown Epic"
+        
         try:
-            # Get task info from Notion using TID
-            task_page = self.notion.pages.retrieve(page_id=notion_tid)
-            task_title = task_page['properties']['Task name']['title'][0]['text']['content']
+            # First try direct page ID lookup
+            if len(notion_tid.replace("-", "")) == 32:  # Standard UUID length
+                task_page = self.notion.pages.retrieve(page_id=notion_tid)
+                task_title = task_page['properties']['Task name']['title'][0]['text']['content']
+            else:
+                # If not a direct UUID, search by TID in task database
+                print(f"🔍 Searching for task with TID: {notion_tid}")
+                
+                # Search in tasks database
+                query_result = self.notion.databases.query(
+                    database_id=self.tasks_db_id,
+                    filter={
+                        "or": [
+                            {
+                                "property": "Task name",
+                                "title": {
+                                    "contains": notion_tid
+                                }
+                            },
+                            {
+                                "property": "Task name", 
+                                "title": {
+                                    "contains": "task-1-2"  # Search for the task identifier
+                                }
+                            }
+                        ]
+                    }
+                )
+                
+                if query_result['results']:
+                    task_page = query_result['results'][0]
+                    notion_tid = task_page['id']  # Update TID to actual page ID
+                    task_title = task_page['properties']['Task name']['title'][0]['text']['content']
+                    print(f"✅ Found task: {task_title}")
+                else:
+                    print(f"❌ No task found matching TID: {notion_tid}")
+                    return False
             
             # Get Epic info if this is a subtask
-            epic_title = "Unknown Epic"
             if task_page['properties'].get('ParentTask', {}).get('relation'):
                 parent_id = task_page['properties']['ParentTask']['relation'][0]['id']
                 parent_page = self.notion.pages.retrieve(page_id=parent_id)

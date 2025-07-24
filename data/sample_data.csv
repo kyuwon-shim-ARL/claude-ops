@@ -1,11 +1,3 @@
-sample_id,measurement_A,measurement_B,measurement_C,group,category
-sample_001,23.5,45.2,12.8,treatment,type_A
-sample_002,21.3,42.1,11.5,treatment,type_A
-sample_003,19.8,38.9,10.2,control,type_A
-sample_004,22.1,41.3,12.1,control,type_A
-sample_005,25.7,48.6,14.3,treatment,type_B
-sample_006,24.2,47.1,13.9,treatment,type_B
-sample_007,20.5,39.8,11.8,control,type_B
-sample_008,21.9,40.2,12.3,control,type_B
-sample_009,26.3,49.1,15.1,treatment,type_A
-sample_010,18.7,37.2,9.8,control,type_A
+version https://git-lfs.github.com/spec/v1
+oid sha256:ee58133e7820ebc9982abfa441c4559b0fea62f77e82a8b01e84caf274c79401
+size 485
