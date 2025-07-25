@@ -11,8 +11,8 @@ PRD 문서를 기반으로 Notion에 Project → Epics → Tasks 계층 구조�
 ## 시스템 동작
 
 ### 1. 프로젝트 생성 (Projects DB)
-- 프로젝트명과 핵심 목표 설정
-- 전체 프로젝트 개요 및 배경 정보 추가
+- 제안서의 핵심 'Why'를 분석하여 프로젝트를 정의하고, 그 자체로 독립적인 가치를 갖는지 판별합니다.
+- 프로젝트 명, 최종 목표, 핵심 질문(Core Question)을 Notion 페이지에 자동으로 설정합니다.
 
 ### 2. Epic 생성 (Tasks DB, IsEpic=True)
 - PRD 분석을 토대로 Epic 도출

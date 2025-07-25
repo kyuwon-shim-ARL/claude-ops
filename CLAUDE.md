@@ -167,7 +167,11 @@ All outputs follow these management principles:
 
 ## Work Unit Definitions
 
-When executing `/project-plan` commands, follow `prompts/2_create_project_plan.md` criteria for distinguishing Epics vs Tasks and structuring page content.
+모든 작업 단위는 **Project → Epic → Task**의 명확한 위계를 따릅니다. `/project-plan` 명령어 실행 시, `prompts/2_create_project_plan.md`에 명시된 기준을 따라 세 단위를 구분하고 페이지 내용을 구성해야 합니다.
+
+- **Project:** **전략적 'Why'에 답하는 독립적인 가치 단위입니다.** (예: 논문 한 편, 제품 출시)
+- **Epic:** **Project를 구성하는 기능적 'What'의 묶음입니다.** (예: Figure 1 제작, 인증 시스템 구축)
+- **Task:** **Epic을 실행하는 구체적 'How'의 단위입니다.** (예: 특정 스크립트 작성, 데이터 검증)
 
 ### Epic Criteria (2+ criteria required)
 - **Time**: 2+ weeks completion time?
