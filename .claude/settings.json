@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s -X POST https://api.telegram.org/bot8457753601:AAFardQ9v4q0M1JY0R0P15XHwf9GDMisc24/sendMessage -d chat_id=985052105 -d text='✅ Claude 작업이 완료되었습니다.'"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": {
+          "regex": "Do you want to .+\\?"
+        },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s -X POST https://api.telegram.org/bot8457753601:AAFardQ9v4q0M1JY0R0P15XHwf9GDMisc24/sendMessage -d chat_id=985052105 -d text='⚠️ Claude가 작업을 시작합니다. (확인 필요할 수 있음)'"
+          }
+        ]
+      }
+    ]
+  }
+}

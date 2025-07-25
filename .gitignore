@@ -1,0 +1,78 @@
+# Nextflow work directories
+work/
+.nextflow/
+.nextflow.log*
+
+# Results directories  
+results*/
+test_results/
+dummy_results/
+null/
+
+# Data files (large)
+data/*.fastq.gz
+data/*.fq.gz
+*.fastq.gz
+*.fq.gz
+
+# Temporary files
+tmp/
+temp/
+
+# Log files
+*.log
+*.err
+*.out
+
+# Database files (large)
+db/
+databases/
+*.dmnd
+*.faa
+*.fna
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Singularity/Apptainer containers
+*.sif
+*.img
+
+# Conda environments
+envs/
+conda-meta/

@@ -1,0 +1,3 @@
+sample,short_reads_1,short_reads_2
+TARA_ERR599039,data/ERR599039_1.fastq.gz,data/ERR599039_2.fastq.gz
+TARA_ERR599042,data/ERR599042_1.fastq.gz,data/ERR599042_2.fastq.gz
