@@ -1,15 +1,16 @@
 {
   "hooks": {
-    "PostToolUse": [
+    "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "curl -s -X POST https://api.telegram.org/bot8457753601:AAFardQ9v4q0M1JY0R0P15XHwf9GDMisc24/sendMessage -d chat_id=985052105 -d text='✅ Claude 작업이 완료되었습니다.'"
+            "command": "curl -s -X POST https://api.telegram.org/bot8457753601:AAFardQ9v4q0M1JY0R0P15XHwf9GDMisc24/sendMessage -d chat_id=985052105 -d text='✅ Claude의 모든 작업이 종료되었습니다.'"
           }
         ]
       }
     ],
+    
     "Notification": [
       {
         "matcher": {
