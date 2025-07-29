@@ -13,7 +13,7 @@ if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
     # 전체 화면 캡처
     FULL_CAPTURE=$(tmux capture-pane -t "$TMUX_SESSION" -p)
     
-    # 마지막 bullet point (●) 이후의 모든 내용 추출 (단순화된 접근)
+    # 마지막 bullet point (●) 이후의 모든 내용 추출 (기존 방식 복원)
     LAST_BULLET_LINE=$(echo "$FULL_CAPTURE" | grep -n '●' | tail -n 1 | cut -d: -f1)
     
     if [ -n "$LAST_BULLET_LINE" ]; then
@@ -24,11 +24,11 @@ if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
         CLAUDE_RESPONSE=""
         
         while IFS= read -r line; do
-            # 박스 문자 제거 (바운딩 박스만 제거)
+            # 박스 문자 제거하되 선택지 구조 보존
             CLEAN_LINE=$(echo "$line" | sed 's/[│─╭╮╯╰┌┐┘└┤├┬┴┼]//g' | sed 's/^[ \t]*//')
             
-            # 빈 줄이 아니면 추가
-            if [ -n "$CLEAN_LINE" ]; then
+            # 빈 줄이 아니거나 선택지 관련 줄이면 추가
+            if [ -n "$CLEAN_LINE" ] || echo "$line" | grep -q -E '(❯|[0-9]+\.|Yes|No)'; then
                 CLAUDE_RESPONSE="$CLAUDE_RESPONSE
 $CLEAN_LINE"
             fi
