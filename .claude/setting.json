@@ -1,0 +1,26 @@
+{
+    "hooks": {
+      "Stop": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "sh /home/kyuwon/claude-ops/send_smart_notification.sh"
+            }
+          ]
+        }
+      ],
+      
+      "Notification": [
+        {
+          "matcher": "Do you want to .+\\?",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "sh /home/kyuwon/claude-ops/send_smart_notification.sh"
+            }
+          ]
+        }
+      ]
+    }
+  }

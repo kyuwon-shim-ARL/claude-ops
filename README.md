@@ -28,6 +28,29 @@ cp .env.example .env
 /project-plan docs/proposals/2025-07-24_improved-data-analysis-pipeline.md
 
 # 4. 작업 시작!
+
+## 📱 텔레그램 원격 제어 (선택사항)
+
+Claude Code를 텔레그램으로 원격 제어할 수 있습니다:
+
+```bash
+# 1. 텔레그램 봇 설정
+# @BotFather에서 봇 생성 후 토큰을 .env에 추가:
+# TELEGRAM_BOT_TOKEN=your_bot_token
+# TELEGRAM_CHAT_ID=your_chat_id
+# ALLOWED_USER_IDS=your_user_id
+
+# 2. 시스템 시작
+./start_telegram_system.sh
+
+# 3. 텔레그램에서 Claude와 대화!
+```
+
+**주요 기능:**
+- 🤖 **양방향 통신**: 텔레그램 ↔ Claude Code 실시간 대화
+- 🔔 **자동 알림**: Claude 작업 완료/질문 시 즉시 알림
+- 🛡️ **보안**: 사용자 인증 + 명령어 검증
+- 📊 **상태 모니터링**: Claude 응답 지능적 캡처
 /task-start <생성된-TID>
 # ... 작업 수행 ...
 /task-finish <TID> --pr --auto-merge  # 완전 자동화!

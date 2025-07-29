@@ -53,3 +53,14 @@ Thumbs.db
 
 # Logs
 *.log
+telegram_bot.log
+telegram_bridge.log
+claude_monitor.log
+monitor.log
+
+# Telegram system temporary files
+/tmp/claude_last_output
+
+# Test files (개발 중에만 생성)
+test_*.sh
+*_test.sh
