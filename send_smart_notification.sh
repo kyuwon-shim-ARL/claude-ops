@@ -13,28 +13,42 @@ if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
     # 전체 화면 캡처
     FULL_CAPTURE=$(tmux capture-pane -t "$TMUX_SESSION" -p)
     
-    # 마지막 bullet point (●) 이후의 내용만 추출
+    # 마지막 bullet point (●) 이후의 모든 내용 추출 (단순화된 접근)
     LAST_BULLET_LINE=$(echo "$FULL_CAPTURE" | grep -n '●' | tail -n 1 | cut -d: -f1)
     
     if [ -n "$LAST_BULLET_LINE" ]; then
-        # 마지막 bullet point 이후의 모든 내용 가져오기
-        AFTER_BULLET=$(echo "$FULL_CAPTURE" | tail -n +$((LAST_BULLET_LINE + 1)))
+        # bullet point부터 화면 끝까지 모든 내용 포함
+        RAW_RESPONSE=$(echo "$FULL_CAPTURE" | tail -n +$LAST_BULLET_LINE | grep -v 'Running' | grep -v 'Frolicking' | grep -v 'esc to interrupt')
         
-        # 마지막 bullet point 이후의 모든 내용 - 안전한 필터링
-        CLAUDE_RESPONSE=$(echo "$AFTER_BULLET" | grep -v '│.*│' | grep -v '^[[:space:]]*$' | grep -v 'Running' | grep -v 'Frolicking' | grep -v 'esc to interrupt' | sed '/^[│─╭╮╯╰┌┐┘└┤├┬┴┼]*$/d')
+        # 단순한 처리: 박스 문자만 제거하고 모든 내용 표시
+        CLAUDE_RESPONSE=""
         
-        # 내용이 있으면 응답 유형 판단
+        while IFS= read -r line; do
+            # 박스 문자 제거 (바운딩 박스만 제거)
+            CLEAN_LINE=$(echo "$line" | sed 's/[│─╭╮╯╰┌┐┘└┤├┬┴┼]//g' | sed 's/^[ \t]*//')
+            
+            # 빈 줄이 아니면 추가
+            if [ -n "$CLEAN_LINE" ]; then
+                CLAUDE_RESPONSE="$CLAUDE_RESPONSE
+$CLEAN_LINE"
+            fi
+        done <<< "$RAW_RESPONSE"
+        
+        # 응답 타입 결정
         if [ -n "$CLAUDE_RESPONSE" ] && [ ${#CLAUDE_RESPONSE} -gt 10 ]; then
-            if echo "$CLAUDE_RESPONSE" | grep -q -E '(Do you want|Would you like|Should I|Can I).*\?'; then
-                RESPONSE_TYPE="질문"
-            elif echo "$CLAUDE_RESPONSE" | grep -q -E '(완료|완성|성공|실패|✅|❌|🎉)'; then
+            if echo "$CLAUDE_RESPONSE" | grep -q -E '(완료|완성|성공|실패|✅|❌|🎉)'; then
                 RESPONSE_TYPE="완료"
+            elif echo "$CLAUDE_RESPONSE" | grep -q -E '([0-9]+\.|Yes|No|keep planning|manually approve)'; then
+                RESPONSE_TYPE="질문"
             else
                 RESPONSE_TYPE="응답"
             fi
         else
             CLAUDE_RESPONSE=""
         fi
+        
+        # 앞뒤 공백 정리
+        CLAUDE_RESPONSE=$(echo "$CLAUDE_RESPONSE" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
     fi
     
     # bullet point가 없거나 이후 내용이 없다면 대체 방법
@@ -45,8 +59,8 @@ if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
         if [ -n "$CLAUDE_RESPONSE" ] && [ ${#CLAUDE_RESPONSE} -gt 20 ]; then
             RESPONSE_TYPE="상태"
         else
-            CLAUDE_RESPONSE="Claude가 백그라운드에서 작업을 수행하고 있습니다."
-            RESPONSE_TYPE="작업중"
+            # 의미있는 응답이 없으면 알림을 보내지 않음
+            exit 0
         fi
     fi
     
@@ -65,16 +79,11 @@ fi
 # 메시지 구성
 MESSAGE="${1:-✅ Claude 작업 알림}"
 
-if [ -n "$CLAUDE_RESPONSE" ] && [ "$CLAUDE_RESPONSE" != "Claude가 백그라운드에서 작업을 수행하고 있습니다." ]; then
-    FULL_MESSAGE="$MESSAGE
+# 의미있는 응답이 있을 때만 메시지 구성
+FULL_MESSAGE="$MESSAGE
 
 🤖 Claude 응답 (${RESPONSE_TYPE}):
 $CLAUDE_RESPONSE"
-else
-    FULL_MESSAGE="$MESSAGE
-
-💭 Claude가 작업을 수행하고 있습니다."
-fi
 
 # 최종 메시지 길이 체크 (텔레그램 한도: 4096자)
 if [ ${#FULL_MESSAGE} -gt 4000 ]; then
