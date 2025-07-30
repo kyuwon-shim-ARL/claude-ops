@@ -1,25 +1,28 @@
 # Git LFS Configuration for Claude Code Workflow
 # These patterns will automatically track large files with Git LFS
 
-# Data files (common formats)
-*.csv filter=lfs diff=lfs merge=lfs -text
-*.tsv filter=lfs diff=lfs merge=lfs -text
-*.txt filter=lfs diff=lfs merge=lfs -text
-*.json filter=lfs diff=lfs merge=lfs -text
-# Scientific data formats
+# Data files (ONLY large data files)
+# *.csv filter=lfs diff=lfs merge=lfs -text  # Disabled for template compatibility
+# *.tsv filter=lfs diff=lfs merge=lfs -text  # Disabled for template compatibility
+# *.json filter=lfs diff=lfs merge=lfs -text # Disabled for template compatibility
+# Scientific data formats (large files only)
 *.h5 filter=lfs diff=lfs merge=lfs -text
 *.hdf5 filter=lfs diff=lfs merge=lfs -text
 *.pkl filter=lfs diff=lfs merge=lfs -text
 *.pickle filter=lfs diff=lfs merge=lfs -text
-# Large binary files
+# Large binary files (typically > 100MB)
 *.zip filter=lfs diff=lfs merge=lfs -text
 *.tar.gz filter=lfs diff=lfs merge=lfs -text
-# Model files
+# Model files (typically large)
 *.model filter=lfs diff=lfs merge=lfs -text
 *.joblib filter=lfs diff=lfs merge=lfs -text
-# Exclude documentation and config files from LFS
+# Explicitly EXCLUDE config and documentation files from LFS
+.claude/**/*.json -filter
 docs/**/*.md -filter
 *.md -filter
 .env.example -filter
 README.md -filter
+CLAUDE.md -filter
+*.py -filter
+*.sh -filter
 *.json !text !filter !merge !diff
