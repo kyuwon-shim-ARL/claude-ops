@@ -1,19 +1,18 @@
-# 🚀 Claude Code 워크플로우 빠른 시작 가이드
+# 🚀 Claude-Ops 통합 시스템 빠른 시작 가이드
 
-이 가이드는 repository clone 후 **5분 이내**에 완벽한 워크플로우를 사용할 수 있도록 설계되었습니다.
+이 가이드는 repository clone 후 **5분 이내**에 완전한 Notion-Git-Claude-Telegram 워크플로우를 사용할 수 있도록 설계되었습니다.
 
-## ⚡ 빠른 시작 (5분)
+## ⚡ 원클릭 빠른 시작 (5분)
 
-### 1단계: 환경 설정 (2분)
+### 1단계: 자동 설치 (2분)
 
 ```bash
 # 1. Repository clone 후 이동
-git clone <your-repo-url>
-cd MC_test_ops
+git clone https://github.com/kyuwon-shim-ARL/claude-ops.git
+cd claude-ops
 
-# 2. 의존성 설치
-uv sync
-# 또는 pip install -r requirements.txt
+# 2. 원클릭 설치 (모든 의존성 자동 설치)
+./install.sh
 
 # 3. 환경 변수 설정
 cp .env.example .env
@@ -22,6 +21,11 @@ cp .env.example .env
 
 **.env 설정 (필수):**
 ```bash
+# Telegram Bridge 설정 (모니터링용)
+TELEGRAM_BOT_TOKEN=your_bot_token_from_botfather
+TELEGRAM_CHAT_ID=your_chat_id
+ALLOWED_USER_IDS=123456789,987654321
+
 # Notion API 설정
 NOTION_API_KEY=secret_your_notion_integration_token
 NOTION_TASKS_DB_ID=your_tasks_database_id
@@ -75,6 +79,28 @@ echo "# My Implementation" > my_implementation.py
 - `*.txt`, `*.csv`, `*.tsv` 파일 자동 추적
 - 결과물이 자동으로 버전 관리됨
 
+## 🤖 Telegram Bridge 사용
+
+### 즉시 시작하기
+```bash
+# Telegram 봇 시작 (백그라운드)
+./scripts/start_telegram_bridge.sh
+
+# 상태 확인
+./scripts/check_status.sh
+```
+
+### Telegram에서 사용 가능한 명령어
+- `/start` - Claude Code 세션 시작
+- `/stop` - 세션 종료  
+- `/status` - 현재 상태 확인
+- `/run <명령>` - 원격 명령 실행
+
+### 모니터링 알림 자동 수신
+- 세션 시작/종료 알림
+- 오류 발생 시 즉시 알림
+- 작업 진행 상황 실시간 모니터링
+
 ## 🔧 설정 세부사항
 
 ### Notion 설정
@@ -99,6 +125,20 @@ echo "# My Implementation" > my_implementation.py
    - "Generate new token" (classic)
    - Scopes: `repo`, `workflow` 선택
    - 토큰 복사 → `.env`의 `GITHUB_PAT`
+
+### Telegram Bot 설정
+
+1. **Bot 생성 (BotFather 사용):**
+   - Telegram에서 @BotFather 검색
+   - `/newbot` 명령어로 봇 생성
+   - 봇 이름과 username 설정
+   - 받은 토큰 → `.env`의 `TELEGRAM_BOT_TOKEN`
+
+2. **Chat ID 확인:**
+   - 생성한 봇에게 메시지 전송
+   - 브라우저에서: `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates`
+   - `"chat":{"id":YOUR_CHAT_ID}` 값 확인
+   - Chat ID → `.env`의 `TELEGRAM_CHAT_ID`
 
 ### Git LFS 설정 (자동)
 
