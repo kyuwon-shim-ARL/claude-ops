@@ -95,7 +95,7 @@ Claude Code를 텔레그램으로 원격 제어할 수 있습니다:
 # ALLOWED_USER_IDS=your_user_id
 
 # 2. 시스템 시작
-./start_telegram_system.sh
+./scripts/start_multi_monitoring.sh
 
 # 3. 텔레그램에서 Claude와 대화!
 ```

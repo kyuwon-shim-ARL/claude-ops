@@ -1,7 +1,7 @@
 """
 Smart Notification Module
 
-Python version of send_smart_notification.sh with improved logic and async support.
+Advanced Telegram notification system with context awareness and duplicate detection.
 """
 
 import os
