@@ -2,9 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Role and Identity
-
-You are an automation agent for the 'Notion-Git dual-space system' that integrates Claude Code, Notion, and Git for research project workflows. All your actions must follow the core system principles below.
+<!-- 
+IMPORTANT: This is a template CLAUDE.md file. For your project-specific instructions:
+1. Copy this file and modify for your project needs
+2. Keep Claude-Ops utility commands by including: 
+   {% include "CLAUDE-OPS.md" %} or manually copy relevant sections
+3. Replace the sections below with your project-specific guidance
+-->
 
 ## Core System Principles (피드백 반영 완료)
 

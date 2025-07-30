@@ -101,19 +101,35 @@ class ClaudeOpsConfig:
     
     @property
     def working_directory(self) -> str:
-        """Current working directory"""
+        """Working directory for Claude sessions"""
+        # Allow override via environment variable
+        custom_dir = os.getenv("CLAUDE_WORKING_DIR")
+        if custom_dir and os.path.exists(custom_dir):
+            return custom_dir
         return os.getcwd()
     
     @property
     def session_name(self) -> str:
-        """Dynamic session name based on current directory"""
-        dir_name = os.path.basename(self.working_directory)
-        return f"{self.tmux_session_prefix}_{dir_name}"
+        """Get currently active session name from session manager"""
+        try:
+            from .session_manager import session_manager
+            return session_manager.get_active_session()
+        except ImportError:
+            # Fallback to directory-based session name
+            dir_name = os.path.basename(self.working_directory)
+            return f"{self.tmux_session_prefix}_{dir_name}"
     
     @property
     def status_file(self) -> str:
-        """Path to status file"""
-        return f"/tmp/claude_work_status_{os.path.basename(self.working_directory)}"
+        """Get status file for currently active session"""
+        try:
+            from .session_manager import session_manager
+            active_session = session_manager.get_active_session()
+            return session_manager.get_status_file_for_session(active_session)
+        except ImportError:
+            # Fallback to directory-based status file
+            dir_name = os.path.basename(self.working_directory)
+            return f"/tmp/claude_work_status_{dir_name}"
     
     def _validate_required_vars(self) -> None:
         """Validate required environment variables based on enabled features"""

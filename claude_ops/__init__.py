@@ -30,6 +30,7 @@ __url__ = "https://github.com/kyuwon-shim-ARL/claude-ops"
 from .telegram import TelegramBridge, TelegramMonitor, SmartNotifier
 from .notion import WorkflowManager, TaskManager
 from .config import ClaudeOpsConfig
+from .session_manager import SessionManager, session_manager
 
 __all__ = [
     "TelegramBridge",
@@ -38,6 +39,8 @@ __all__ = [
     "WorkflowManager",
     "TaskManager",
     "ClaudeOpsConfig",
+    "SessionManager",
+    "session_manager",
     "__version__",
     "__author__",
     "__description__",

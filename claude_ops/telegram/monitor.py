@@ -170,8 +170,8 @@ class TelegramMonitor:
 def main():
     """Main entry point for standalone monitoring"""
     try:
-        config = BridgeConfig()
-        monitor = ClaudeMonitor(config)
+        config = ClaudeOpsConfig()
+        monitor = TelegramMonitor(config)
         monitor.monitor_loop()
     except KeyboardInterrupt:
         logger.info("모니터가 사용자에 의해 중단되었습니다.")

@@ -62,6 +62,26 @@ class TelegramBridge:
             return False, "tmux 세션이 존재하지 않습니다"
         return True, "세션이 활성 상태입니다"
     
+    def get_all_claude_sessions(self) -> list[str]:
+        """Get list of all Claude sessions"""
+        try:
+            import subprocess
+            result = subprocess.run(
+                "tmux list-sessions 2>/dev/null | grep '^claude' | cut -d: -f1",
+                shell=True,
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode == 0:
+                sessions = [s.strip() for s in result.stdout.split('\n') if s.strip()]
+                return sessions
+            else:
+                return []
+        except Exception as e:
+            logger.error(f"세션 목록 조회 실패: {str(e)}")
+            return []
+    
     def ensure_claude_session(self) -> Optional[str]:
         """Ensure Claude session exists, create if not"""
         session_ok, message = self.check_claude_session()
@@ -145,26 +165,16 @@ class TelegramBridge:
         session_ok, message = self.check_claude_session()
         if not session_ok:
             logger.info("사용자 요청으로 Claude 세션을 시작합니다...")
-            os.system(f"tmux new-session -d -s {self.config.session_name}")
+            # Start tmux session in the configured working directory
+            os.system(f"cd {self.config.working_directory} && tmux new-session -d -s {self.config.session_name}")
             os.system(f"tmux send-keys -t {self.config.session_name} -l 'claude'")
             os.system(f"tmux send-keys -t {self.config.session_name} Enter")
             status_msg = "🚀 Claude 세션을 시작했습니다!"
         else:
             status_msg = "✅ Claude 세션이 이미 실행 중입니다."
         
-        # Inline keyboard
-        keyboard = [
-            [
-                InlineKeyboardButton("📊 Status", callback_data="status"),
-                InlineKeyboardButton("📺 Log", callback_data="log")
-            ],
-            [
-                InlineKeyboardButton("⛔ Stop", callback_data="stop"),
-                InlineKeyboardButton("❓ Help", callback_data="help")
-            ]
-        ]
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        # Use standardized keyboard
+        reply_markup = self.get_main_keyboard()
         
         welcome_msg = f"""🤖 **Claude-Telegram Bridge**
 
@@ -215,25 +225,6 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         
         await update.message.reply_text(help_text, parse_mode='Markdown')
     
-    async def clear_command(self, update, context):
-        """Clear Claude screen command"""
-        user_id = update.effective_user.id
-        
-        if not self.check_user_authorization(user_id):
-            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
-            return
-        
-        try:
-            result1 = os.system(f"tmux send-keys -t {self.config.session_name} -l 'clear'")
-            result2 = os.system(f"tmux send-keys -t {self.config.session_name} Enter")
-            result = result1 or result2
-            if result == 0:
-                await update.message.reply_text("🧹 Claude 화면이 정리되었습니다.")
-            else:
-                await update.message.reply_text("❌ 화면 정리에 실패했습니다.")
-        except Exception as e:
-            logger.error(f"화면 정리 중 오류: {str(e)}")
-            await update.message.reply_text("❌ 내부 오류가 발생했습니다.")
     
     async def log_command(self, update, context):
         """Show current Claude screen command"""
@@ -258,9 +249,9 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                 if current_screen:
                     lines = current_screen.split('\n')
                     if len(lines) > 30:
-                        display_lines = lines[-30:]
+                        display_lines = lines[-50:]
                         screen_text = '\n'.join(display_lines)
-                        message = f"📺 **Claude 현재 화면** (마지막 30줄):\n\n```\n{screen_text}\n```"
+                        message = f"📺 **Claude 현재 화면** (마지막 50줄):\n\n```\n{screen_text}\n```"
                     else:
                         message = f"📺 **Claude 현재 화면**:\n\n```\n{current_screen}\n```"
                     
@@ -298,33 +289,69 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             logger.error(f"작업 중단 중 오류: {str(e)}")
             await update.message.reply_text("❌ 내부 오류가 발생했습니다.")
     
-    async def menu_command(self, update, context):
-        """Show inline keyboard menu"""
+    async def sessions_command(self, update, context):
+        """Show active sessions command"""
         user_id = update.effective_user.id
         
         if not self.check_user_authorization(user_id):
             await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
             return
         
+        try:
+            from ..session_manager import session_manager
+            
+            sessions = session_manager.get_all_claude_sessions()
+            active_session = session_manager.get_active_session()
+            
+            if not sessions:
+                await update.message.reply_text("🔍 활성 Claude 세션이 없습니다.")
+                return
+            
+            message = "🔄 활성 Claude 세션 목록\n\n"
+            
+            for session in sessions:
+                if session == active_session:
+                    message += f"▶️ {session} (현재 활성)\n"
+                else:
+                    message += f"⏸️ {session}\n"
+            
+            # Add inline keyboard for session switching
+            keyboard = []
+            for session in sessions:
+                if session != active_session:
+                    keyboard.append([InlineKeyboardButton(
+                        f"🔄 {session}로 전환",
+                        callback_data=f"select_session:{session}"
+                    )])
+            
+            if keyboard:
+                keyboard.append([InlineKeyboardButton("🔙 뒤로", callback_data="back_to_menu")])
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await update.message.reply_text(message, reply_markup=reply_markup)
+            else:
+                await update.message.reply_text(message)
+                
+        except Exception as e:
+            logger.error(f"세션 목록 조회 중 오류: {str(e)}", exc_info=True)
+            await update.message.reply_text(f"❌ 오류 발생: {str(e)}")
+    
+    def get_main_keyboard(self):
+        """Get standardized keyboard layout"""
         keyboard = [
             [
-                InlineKeyboardButton("📊 Status", callback_data="status"),
-                InlineKeyboardButton("📺 Log", callback_data="log")
+                InlineKeyboardButton("📺 Log", callback_data="log"),
+                InlineKeyboardButton("⛔ Stop", callback_data="stop")
             ],
             [
-                InlineKeyboardButton("⛔ Stop", callback_data="stop"),
+                InlineKeyboardButton("🔄 Sessions", callback_data="sessions"),
+                InlineKeyboardButton("📊 Status", callback_data="status")
+            ],
+            [
+                InlineKeyboardButton("🚀 Start", callback_data="start"),
                 InlineKeyboardButton("❓ Help", callback_data="help")
             ]
         ]
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(
-            "🤖 **Telegram-Claude Bridge 제어판**\n\n"
-            "원하는 명령어를 버튼으로 선택하세요:",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
+        return InlineKeyboardMarkup(keyboard)
     
     async def button_callback(self, update, context):
         """Handle inline keyboard button callbacks"""
@@ -344,8 +371,17 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             await self._log_callback(query, context)
         elif callback_data == "stop":
             await self._stop_callback(query, context)
+        elif callback_data == "sessions":
+            await self._sessions_callback(query, context)
+        elif callback_data == "start":
+            await self._start_callback(query, context)
         elif callback_data == "help":
             await self._help_callback(query, context)
+        elif callback_data.startswith("select_session:"):
+            session_name = callback_data.split(":", 1)[1]
+            await self._select_session_callback(query, context, session_name)
+        elif callback_data == "back_to_menu":
+            await self._back_to_menu_callback(query, context)
     
     async def _status_callback(self, query, context):
         """Status check callback"""
@@ -381,9 +417,9 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                 if current_screen:
                     lines = current_screen.split('\n')
                     if len(lines) > 30:
-                        display_lines = lines[-30:]
+                        display_lines = lines[-50:]
                         screen_text = '\n'.join(display_lines)
-                        message = f"📺 **Claude 현재 화면** (마지막 30줄):\n\n```\n{screen_text}\n```"
+                        message = f"📺 **Claude 현재 화면** (마지막 50줄):\n\n```\n{screen_text}\n```"
                     else:
                         message = f"📺 **Claude 현재 화면**:\n\n```\n{current_screen}\n```"
                     
@@ -454,8 +490,9 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         self.app.add_handler(CommandHandler("help", self.help_command))
         self.app.add_handler(CommandHandler("log", self.log_command))
         self.app.add_handler(CommandHandler("stop", self.stop_command))
-        self.app.add_handler(CommandHandler("clear", self.clear_command))
-        self.app.add_handler(CommandHandler("menu", self.menu_command))
+        # clear command removed - not needed
+        # menu command removed - use inline keyboard buttons instead
+        self.app.add_handler(CommandHandler("sessions", self.sessions_command))
         
         # Callback query handler for inline buttons
         self.app.add_handler(CallbackQueryHandler(self.button_callback))
@@ -473,13 +510,204 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             BotCommand("status", "📊 봇 및 tmux 세션 상태 확인"),
             BotCommand("log", "📺 현재 Claude 화면 실시간 확인"),
             BotCommand("stop", "⛔ Claude 작업 중단 (ESC 키 전송)"),
-            BotCommand("help", "❓ 도움말 보기"),
-            BotCommand("clear", "🧹 Claude 화면 정리"),
-            BotCommand("menu", "📋 인라인 키보드 메뉴 표시")
+            BotCommand("sessions", "🔄 활성 세션 목록 보기"),
+            BotCommand("help", "❓ 도움말 보기")
         ]
         
         await self.app.bot.set_my_commands(commands)
         logger.info("봇 명령어 메뉴가 설정되었습니다.")
+    
+    async def _sessions_callback(self, query, context):
+        """Sessions list callback"""
+        try:
+            from ..session_manager import session_manager
+            
+            sessions = session_manager.get_all_claude_sessions()
+            active_session = session_manager.get_active_session()
+            
+            if not sessions:
+                await query.edit_message_text(
+                    "🔄 **세션 목록**\n\n❌ 활성 Claude 세션이 없습니다.\n\n"
+                    "/start 명령으로 새 세션을 시작하세요.",
+                    parse_mode='Markdown'
+                )
+                return
+            
+            # Create session selection keyboard
+            keyboard = []
+            for session in sessions:
+                session_info = session_manager.get_session_info(session)
+                
+                # Display name (remove claude_ prefix)
+                display_name = session_info["directory"]
+                
+                # Status icons
+                status_icon = "✅" if session_info["exists"] else "❌"
+                current_icon = "🎯 " if session_info["is_active"] else ""
+                
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"{current_icon}{status_icon} {display_name}",
+                        callback_data=f"select_session:{session}"
+                    )
+                ])
+            
+            # Add back button
+            keyboard.append([InlineKeyboardButton("🔙 메뉴로", callback_data="back_to_menu")])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            # Get status file info
+            status_file = session_manager.get_status_file_for_session(active_session)
+            
+            await query.edit_message_text(
+                f"🔄 **세션 목록** ({len(sessions)}개)\n\n"
+                f"🎯 현재 활성: `{active_session}`\n"
+                f"📁 상태 파일: `{status_file}`\n\n"
+                "전환할 세션을 선택하세요:",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+            
+        except Exception as e:
+            logger.error(f"세션 목록 조회 중 오류: {str(e)}")
+            await query.edit_message_text(
+                f"❌ **세션 목록 조회 실패**\n\n오류: {str(e)}",
+                parse_mode='Markdown'
+            )
+    
+    async def _select_session_callback(self, query, context, session_name):
+        """Session selection callback"""
+        try:
+            from ..session_manager import session_manager
+            
+            # Get current active session
+            current_session = session_manager.get_active_session()
+            
+            if session_name == current_session:
+                await query.edit_message_text(
+                    f"✅ **이미 활성 세션**\n\n"
+                    f"현재 세션: `{session_name}`\n\n"
+                    f"이미 이 세션에 연결되어 있습니다.",
+                    parse_mode='Markdown'
+                )
+                return
+            
+            # Check if target session exists
+            if not session_manager.session_exists(session_name):
+                await query.edit_message_text(
+                    f"❌ **세션 없음**\n\n"
+                    f"세션 `{session_name}`이 존재하지 않습니다.\n"
+                    f"먼저 해당 디렉토리에서 Claude Code를 시작해주세요.",
+                    parse_mode='Markdown'
+                )
+                return
+            
+            # Switch session
+            success = session_manager.switch_session(session_name)
+            
+            if success:
+                # Get session info
+                old_status_file = session_manager.get_status_file_for_session(current_session)
+                new_status_file = session_manager.get_status_file_for_session(session_name)
+                
+                await query.edit_message_text(
+                    f"✅ **세션 전환 완료**\n\n"
+                    f"이전 세션: `{current_session}`\n"
+                    f"새 세션: `{session_name}`\n\n"
+                    f"📁 상태 파일: `{new_status_file}`\n\n"
+                    f"이제 `{session_name}` 세션을 모니터링합니다.\n"
+                    f"모니터링 시스템이 자동으로 업데이트됩니다.",
+                    parse_mode='Markdown'
+                )
+                
+                # Restart monitoring for new session
+                await self._restart_monitoring()
+                
+            else:
+                await query.edit_message_text(
+                    f"❌ **세션 전환 실패**\n\n"
+                    f"세션 `{session_name}`으로 전환할 수 없습니다.\n"
+                    f"세션이 존재하는지 확인해주세요.",
+                    parse_mode='Markdown'
+                )
+                
+        except Exception as e:
+            logger.error(f"세션 전환 중 오류: {str(e)}")
+            await query.edit_message_text(
+                f"❌ **내부 오류**\n\n"
+                f"세션 전환 중 오류가 발생했습니다.\n"
+                f"오류: {str(e)}",
+                parse_mode='Markdown'
+            )
+    
+    async def _start_callback(self, query, context):
+        """Start Claude session callback"""
+        try:
+            session_ok, message = self.check_claude_session()
+            if not session_ok:
+                logger.info("사용자 요청으로 Claude 세션을 시작합니다...")
+                # Start tmux session in the configured working directory
+                os.system(f"cd {self.config.working_directory} && tmux new-session -d -s {self.config.session_name}")
+                os.system(f"tmux send-keys -t {self.config.session_name} -l 'claude'")
+                os.system(f"tmux send-keys -t {self.config.session_name} Enter")
+                status_msg = "🚀 Claude 세션을 시작했습니다!"
+            else:
+                status_msg = "✅ Claude 세션이 이미 실행 중입니다."
+            
+            reply_markup = self.get_main_keyboard()
+            
+            welcome_msg = f"""🤖 **Claude-Telegram Bridge**
+
+{status_msg}
+
+**📁 작업 디렉토리**: `{self.config.working_directory}`
+**🎯 세션 이름**: `{self.config.session_name}`
+
+**제어판을 사용하여 Claude를 제어하세요:**"""
+            
+            await query.edit_message_text(
+                welcome_msg,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Claude 세션 시작 중 오류: {str(e)}")
+            await query.edit_message_text("❌ 내부 오류가 발생했습니다.")
+    
+    async def _back_to_menu_callback(self, query, context):
+        """Back to main menu callback"""
+        reply_markup = self.get_main_keyboard()
+        
+        await query.edit_message_text(
+            "🤖 **Telegram-Claude Bridge 제어판**\n\n"
+            "원하는 명령어를 버튼으로 선택하세요:",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    
+    async def _restart_monitoring(self):
+        """Restart monitoring system for new session"""
+        try:
+            import subprocess
+            
+            # Kill existing monitor
+            subprocess.run("tmux kill-session -t claude-monitor 2>/dev/null", shell=True)
+            
+            # Wait a moment
+            import asyncio
+            await asyncio.sleep(1)
+            
+            # Start new monitor
+            subprocess.run(
+                "cd /home/kyuwon/claude-ops && ./scripts/start_monitoring.sh > /dev/null 2>&1 &",
+                shell=True
+            )
+            
+            logger.info("모니터링 시스템이 새 세션으로 재시작되었습니다")
+            
+        except Exception as e:
+            logger.error(f"모니터링 재시작 중 오류: {str(e)}")
     
     def run(self):
         """Start the Telegram bot"""
