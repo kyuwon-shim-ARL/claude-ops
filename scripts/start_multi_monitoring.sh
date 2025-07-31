@@ -24,6 +24,14 @@ if tmux has-session -t claude-monitor 2>/dev/null; then
     tmux kill-session -t claude-monitor 2>/dev/null
 fi
 
+# Kill any orphaned monitoring processes
+echo -e "${YELLOW}Checking for orphaned monitoring processes...${NC}"
+if pgrep -f "multi_monitor" > /dev/null; then
+    echo -e "${YELLOW}Found orphaned multi_monitor processes, cleaning up...${NC}"
+    pkill -f "multi_monitor" 2>/dev/null || true
+    sleep 2
+fi
+
 # Load environment variables
 if [ -f .env ]; then
     export $(cat .env | grep -v '^#' | xargs)

@@ -27,6 +27,8 @@ class MultiSessionMonitor:
         self.notifier = SmartNotifier(self.config)
         self.session_states: Dict[str, str] = {}  # session_name -> last_state
         self.status_files: Dict[str, str] = {}    # session_name -> status_file_path
+        self.active_threads: Dict[str, threading.Thread] = {}  # session_name -> thread
+        self.thread_lock = threading.Lock()  # Thread-safe operations
         self.running = False
         
     def discover_sessions(self) -> Set[str]:
@@ -117,51 +119,105 @@ class MultiSessionMonitor:
     
     def monitor_session(self, session_name: str, status_file: str):
         """Monitor a single session for state changes"""
-        previous_state = self.read_session_state(status_file)
+        try:
+            previous_state = self.read_session_state(status_file)
+            
+            # Add to session_states to track this session (thread-safe)
+            with self.thread_lock:
+                self.session_states[session_name] = previous_state
+            
+            logger.info(f"📊 Started monitoring {session_name}, initial state: {previous_state}")
+            
+            while self.running:
+                try:
+                    # Check if session still exists
+                    if not self.session_exists(session_name):
+                        logger.info(f"📤 Session {session_name} no longer exists, stopping monitor")
+                        break
+                    
+                    # Detect current state from tmux output (real-time analysis)
+                    detected_state = self.detect_session_state(session_name)
+                    
+                    # Read saved state from file
+                    saved_state = self.read_session_state(status_file)
+                    
+                    # Update state file if detected state differs from saved state
+                    if detected_state != saved_state:
+                        logger.debug(f"🔄 State mismatch in {session_name}: saved='{saved_state}' detected='{detected_state}' - updating file")
+                        self.save_session_state(status_file, detected_state)
+                    
+                    current_state = detected_state
+                    
+                    # Log state changes for debugging
+                    if current_state != previous_state:
+                        logger.info(f"🔄 State change in {session_name}: {previous_state} -> {current_state}")
+                    
+                    # Check for work completion (working -> idle)
+                    if previous_state == "working" and current_state == "idle":
+                        logger.info(f"🎯 Work completion detected in session: {session_name}")
+                        self.send_completion_notification(session_name)
+                    
+                    # Update previous state and session_states (thread-safe)
+                    previous_state = current_state
+                    with self.thread_lock:
+                        self.session_states[session_name] = current_state
+                    
+                    # Wait before next check
+                    time.sleep(self.config.check_interval)
+                    
+                except Exception as e:
+                    logger.error(f"Error monitoring session {session_name}: {e}")
+                    time.sleep(self.config.check_interval)
         
-        # Add to session_states to track this session
-        self.session_states[session_name] = previous_state
-        logger.info(f"📊 Started monitoring {session_name}, initial state: {previous_state}")
-        
-        while self.running:
-            try:
-                # Check if session still exists
-                if not self.session_exists(session_name):
-                    logger.debug(f"Session {session_name} no longer exists")
-                    break
-                
-                # Detect current state from tmux output (real-time analysis)
-                detected_state = self.detect_session_state(session_name)
-                
-                # Read saved state from file
-                saved_state = self.read_session_state(status_file)
-                
-                # Update state file if detected state differs from saved state
-                if detected_state != saved_state:
-                    logger.debug(f"🔄 State mismatch in {session_name}: saved='{saved_state}' detected='{detected_state}' - updating file")
-                    self.save_session_state(status_file, detected_state)
-                
-                current_state = detected_state
-                
-                # Log state changes for debugging
-                if current_state != previous_state:
-                    logger.info(f"🔄 State change in {session_name}: {previous_state} -> {current_state}")
-                
-                # Check for work completion (working -> idle)
-                if previous_state == "working" and current_state == "idle":
-                    logger.info(f"🎯 Work completion detected in session: {session_name}")
-                    self.send_completion_notification(session_name)
-                
-                # Update previous state and session_states
-                previous_state = current_state
-                self.session_states[session_name] = current_state
-                
-                # Wait before next check
-                time.sleep(self.config.check_interval)
-                
-            except Exception as e:
-                logger.error(f"Error monitoring session {session_name}: {e}")
-                time.sleep(self.config.check_interval)
+        finally:
+            # Clean up when thread exits
+            logger.info(f"🧹 Monitor thread for {session_name} is exiting")
+            with self.thread_lock:
+                if session_name in self.session_states:
+                    del self.session_states[session_name]
+                if session_name in self.active_threads:
+                    del self.active_threads[session_name]
+    
+    def start_session_thread(self, session_name: str) -> bool:
+        """Start monitoring thread for a session (thread-safe)"""
+        with self.thread_lock:
+            # Check if thread already exists and is alive
+            if session_name in self.active_threads:
+                existing_thread = self.active_threads[session_name]
+                if existing_thread.is_alive():
+                    logger.debug(f"🔄 Thread for {session_name} already running, skipping")
+                    return False
+                else:
+                    # Clean up dead thread
+                    del self.active_threads[session_name]
+            
+            # Start new thread
+            status_file = self.get_status_file_for_session(session_name)
+            logger.info(f"📊 Starting thread for session: {session_name} -> {status_file}")
+            
+            thread = threading.Thread(
+                target=self.monitor_session,
+                args=(session_name, status_file),
+                name=f"monitor-{session_name}",
+                daemon=True
+            )
+            thread.start()
+            self.active_threads[session_name] = thread
+            return True
+    
+    def cleanup_dead_threads(self):
+        """Clean up finished threads"""
+        with self.thread_lock:
+            dead_sessions = []
+            for session_name, thread in self.active_threads.items():
+                if not thread.is_alive():
+                    dead_sessions.append(session_name)
+            
+            for session_name in dead_sessions:
+                logger.debug(f"🧹 Cleaning up dead thread for {session_name}")
+                del self.active_threads[session_name]
+                if session_name in self.session_states:
+                    del self.session_states[session_name]
     
     def start_monitoring(self):
         """Start monitoring all Claude sessions"""
@@ -170,50 +226,36 @@ class MultiSessionMonitor:
         
         # Discover initial sessions
         active_sessions = self.discover_sessions()
-        threads = []
         
+        # Start monitoring threads for initial sessions
+        started_count = 0
         for session_name in active_sessions:
-            status_file = self.get_status_file_for_session(session_name)
-            logger.info(f"📊 Monitoring session: {session_name} -> {status_file}")
-            
-            # Start monitoring thread for this session
-            thread = threading.Thread(
-                target=self.monitor_session,
-                args=(session_name, status_file),
-                name=f"monitor-{session_name}",
-                daemon=True
-            )
-            thread.start()
-            threads.append(thread)
+            if self.start_session_thread(session_name):
+                started_count += 1
         
-        if not active_sessions:
+        if started_count == 0:
             logger.warning("❌ No Claude sessions found to monitor")
-            return
-        
-        logger.info(f"✅ Monitoring {len(active_sessions)} sessions: {list(active_sessions)}")
+        else:
+            logger.info(f"✅ Started monitoring {started_count} sessions: {list(active_sessions)}")
         
         # Session discovery loop
         while self.running:
             try:
                 time.sleep(30)  # Check for new sessions every 30 seconds
                 
+                # Clean up dead threads first
+                self.cleanup_dead_threads()
+                
+                # Discover current sessions
                 current_sessions = self.discover_sessions()
-                new_sessions = current_sessions - set(self.session_states.keys())
+                monitored_sessions = set(self.active_threads.keys())
+                new_sessions = current_sessions - monitored_sessions
                 
                 # Start monitoring new sessions
                 for session_name in new_sessions:
                     if self.session_exists(session_name):
-                        status_file = self.get_status_file_for_session(session_name)
-                        logger.info(f"🆕 New session detected: {session_name}")
-                        
-                        thread = threading.Thread(
-                            target=self.monitor_session,
-                            args=(session_name, status_file),
-                            name=f"monitor-{session_name}",
-                            daemon=True
-                        )
-                        thread.start()
-                        threads.append(thread)
+                        if self.start_session_thread(session_name):
+                            logger.info(f"🆕 New session detected and monitoring started: {session_name}")
                 
             except KeyboardInterrupt:
                 logger.info("🛑 Multi-session monitoring stopped by user")
@@ -226,8 +268,26 @@ class MultiSessionMonitor:
         logger.info("🏁 Multi-session monitoring stopped")
     
     def stop_monitoring(self):
-        """Stop monitoring"""
+        """Stop monitoring and clean up all threads"""
+        logger.info("🛑 Stopping multi-session monitoring...")
         self.running = False
+        
+        # Wait for all threads to finish (with timeout)
+        with self.thread_lock:
+            active_sessions = list(self.active_threads.keys())
+        
+        for session_name in active_sessions:
+            thread = self.active_threads.get(session_name)
+            if thread and thread.is_alive():
+                logger.debug(f"⏳ Waiting for {session_name} monitor thread to stop...")
+                thread.join(timeout=5)  # Wait max 5 seconds per thread
+        
+        # Force cleanup any remaining threads
+        with self.thread_lock:
+            self.active_threads.clear()
+            self.session_states.clear()
+        
+        logger.info("✅ All monitoring threads stopped and cleaned up")
 
 
 def main():
