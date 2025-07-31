@@ -18,31 +18,31 @@ CLAUDE_OPS_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Show help
 show_help() {
-    echo -e "${BLUE}🚀 Claude-Ops CLI${NC}"
-    echo ""
-    echo -e "${YELLOW}Usage:${NC}"
-    echo "  claude-ops <command> [args...]"
-    echo ""
-    echo -e "${YELLOW}Commands:${NC}"
-    echo "  ${GREEN}new-project${NC} <name> [path]     Create new Claude project session"
-    echo "  ${GREEN}start-monitoring${NC}             Start multi-session monitoring"
-    echo "  ${GREEN}stop-monitoring${NC}              Stop all monitoring processes"
-    echo "  ${GREEN}status${NC}                       Show system status"
-    echo "  ${GREEN}sessions${NC}                     List all Claude sessions"
-    echo "  ${GREEN}help${NC}                         Show this help message"
-    echo ""
-    echo -e "${YELLOW}Examples:${NC}"
-    echo "  claude-ops new-project my-ai-app"
-    echo "  claude-ops new-project web-scraper ~/work/client"
-    echo "  claude-ops start-monitoring"
-    echo "  claude-ops status"
-    echo ""
-    echo -e "${BLUE}💡 Tip:${NC} Add to PATH with: claude-ops install"
+    printf "${BLUE}🚀 Claude-Ops CLI${NC}\n"
+    printf "\n"
+    printf "${YELLOW}Usage:${NC}\n"
+    printf "  claude-ops <command> [args...]\n"
+    printf "\n"
+    printf "${YELLOW}Commands:${NC}\n"
+    printf "  ${GREEN}new-project${NC} <name> [path]     Create new Claude project session\n"
+    printf "  ${GREEN}start-monitoring${NC}             Start multi-session monitoring\n"
+    printf "  ${GREEN}stop-monitoring${NC}              Stop all monitoring processes\n"
+    printf "  ${GREEN}status${NC}                       Show system status\n"
+    printf "  ${GREEN}sessions${NC}                     List all Claude sessions\n"
+    printf "  ${GREEN}help${NC}                         Show this help message\n"
+    printf "\n"
+    printf "${YELLOW}Examples:${NC}\n"
+    printf "  claude-ops new-project my-ai-app\n"
+    printf "  claude-ops new-project web-scraper ~/work/client\n"
+    printf "  claude-ops start-monitoring\n"
+    printf "  claude-ops status\n"
+    printf "\n"
+    printf "${BLUE}💡 Tip:${NC} Add to PATH with: claude-ops install\n"
 }
 
 # Install to PATH
 install_to_path() {
-    echo -e "${BLUE}🔧 Installing claude-ops to PATH...${NC}"
+    printf "${BLUE}🔧 Installing claude-ops to PATH...${NC}\n"
     
     # Add to ~/.bashrc
     BASHRC_ENTRY="# Claude-Ops CLI
@@ -52,29 +52,29 @@ alias claude-ops='$SCRIPT_DIR/claude-ops.sh'"
     if ! grep -q "Claude-Ops CLI" ~/.bashrc 2>/dev/null; then
         echo "" >> ~/.bashrc
         echo "$BASHRC_ENTRY" >> ~/.bashrc
-        echo -e "${GREEN}✅ Added to ~/.bashrc${NC}"
+        printf "${GREEN}✅ Added to ~/.bashrc${NC}\n"
     else
-        echo -e "${YELLOW}⚠️  Already installed in ~/.bashrc${NC}"
+        printf "${YELLOW}⚠️  Already installed in ~/.bashrc${NC}\n"
     fi
     
     # Create symlink in /usr/local/bin if possible (optional)
     if [ -w "/usr/local/bin" ] 2>/dev/null; then
         ln -sf "$SCRIPT_DIR/claude-ops.sh" "/usr/local/bin/claude-ops" 2>/dev/null && \
-        echo -e "${GREEN}✅ Created symlink in /usr/local/bin${NC}" || \
-        echo -e "${YELLOW}⚠️  Could not create symlink in /usr/local/bin${NC}"
+        printf "${GREEN}✅ Created symlink in /usr/local/bin${NC}\n" || \
+        printf "${YELLOW}⚠️  Could not create symlink in /usr/local/bin${NC}\n"
     fi
     
-    echo ""
-    echo -e "${GREEN}🎉 Installation complete!${NC}"
-    echo -e "Run: ${YELLOW}source ~/.bashrc${NC} or restart your terminal"
-    echo -e "Then try: ${YELLOW}claude-ops help${NC}"
+    printf "\n"
+    printf "${GREEN}🎉 Installation complete!${NC}\n"
+    printf "Run: ${YELLOW}source ~/.bashrc${NC} or restart your terminal\n"
+    printf "Then try: ${YELLOW}claude-ops help${NC}\n"
 }
 
 # Create new project
 new_project() {
     if [ $# -eq 0 ]; then
-        echo -e "${RED}Error: Project name required${NC}"
-        echo "Usage: claude-ops new-project <name> [path]"
+        printf "${RED}Error: Project name required${NC}\n"
+        printf "Usage: claude-ops new-project <name> [path]\n"
         exit 1
     fi
     
@@ -89,83 +89,83 @@ start_monitoring() {
 
 # Stop monitoring
 stop_monitoring() {
-    echo -e "${YELLOW}🛑 Stopping all monitoring processes...${NC}"
+    printf "${YELLOW}🛑 Stopping all monitoring processes...${NC}\n"
     
     # Kill monitoring sessions
     tmux kill-session -t claude-multi-monitor 2>/dev/null && \
-        echo -e "${GREEN}✅ Stopped multi-monitor${NC}" || \
-        echo -e "${YELLOW}ℹ️  Multi-monitor not running${NC}"
+        printf "${GREEN}✅ Stopped multi-monitor${NC}\n" || \
+        printf "${YELLOW}ℹ️  Multi-monitor not running${NC}\n"
     
     tmux kill-session -t claude-monitor 2>/dev/null && \
-        echo -e "${GREEN}✅ Stopped single monitor${NC}" || \
-        echo -e "${YELLOW}ℹ️  Single monitor not running${NC}"
+        printf "${GREEN}✅ Stopped single monitor${NC}\n" || \
+        printf "${YELLOW}ℹ️  Single monitor not running${NC}\n"
     
     # Kill background processes
     pkill -f "multi_monitor" 2>/dev/null && \
-        echo -e "${GREEN}✅ Killed background processes${NC}" || \
-        echo -e "${YELLOW}ℹ️  No background processes found${NC}"
+        printf "${GREEN}✅ Killed background processes${NC}\n" || \
+        printf "${YELLOW}ℹ️  No background processes found${NC}\n"
     
-    echo -e "${GREEN}🎉 All monitoring stopped${NC}"
+    printf "${GREEN}🎉 All monitoring stopped${NC}\n"
 }
 
 # Show status
 show_status() {
-    echo -e "${BLUE}📊 Claude-Ops Status${NC}"
-    echo ""
+    printf "${BLUE}📊 Claude-Ops Status${NC}\n"
+    printf "\n"
     
     # Check monitoring sessions
-    echo -e "${YELLOW}Monitoring:${NC}"
+    printf "${YELLOW}Monitoring:${NC}\n"
     if tmux has-session -t claude-multi-monitor 2>/dev/null; then
-        echo -e "  ✅ Multi-session monitoring: ${GREEN}Running${NC}"
+        printf "  ✅ Multi-session monitoring: ${GREEN}Running${NC}\n"
     else
-        echo -e "  ❌ Multi-session monitoring: ${RED}Stopped${NC}"
+        printf "  ❌ Multi-session monitoring: ${RED}Stopped${NC}\n"
     fi
     
     if tmux has-session -t claude-monitor 2>/dev/null; then
-        echo -e "  ⚠️  Single-session monitoring: ${YELLOW}Running (should stop)${NC}"
+        printf "  ⚠️  Single-session monitoring: ${YELLOW}Running (should stop)${NC}\n"
     fi
     
     # Check Claude sessions
-    echo ""
-    echo -e "${YELLOW}Claude Sessions:${NC}"
+    printf "\n"
+    printf "${YELLOW}Claude Sessions:${NC}\n"
     CLAUDE_SESSIONS=$(tmux list-sessions 2>/dev/null | grep '^claude' | cut -d: -f1 || true)
     if [ -n "$CLAUDE_SESSIONS" ]; then
         echo "$CLAUDE_SESSIONS" | while read session; do
-            echo -e "  🎯 $session"
+            printf "  🎯 $session\n"
         done
     else
-        echo -e "  ${YELLOW}No Claude sessions found${NC}"
+        printf "  ${YELLOW}No Claude sessions found${NC}\n"
     fi
     
     # Check environment
-    echo ""
-    echo -e "${YELLOW}Environment:${NC}"
-    echo -e "  📁 Claude-Ops Directory: $CLAUDE_OPS_DIR"
+    printf "\n"
+    printf "${YELLOW}Environment:${NC}\n"
+    printf "  📁 Claude-Ops Directory: $CLAUDE_OPS_DIR\n"
     
     if [ -f "$CLAUDE_OPS_DIR/.env" ]; then
-        echo -e "  ⚙️  Configuration: ${GREEN}Found${NC}"
+        printf "  ⚙️  Configuration: ${GREEN}Found${NC}\n"
     else
-        echo -e "  ⚙️  Configuration: ${RED}Missing .env file${NC}"
+        printf "  ⚙️  Configuration: ${RED}Missing .env file${NC}\n"
     fi
 }
 
 # List sessions
 list_sessions() {
-    echo -e "${BLUE}🔄 Active Claude Sessions${NC}"
-    echo ""
+    printf "${BLUE}🔄 Active Claude Sessions${NC}\n"
+    printf "\n"
     
     CLAUDE_SESSIONS=$(tmux list-sessions 2>/dev/null | grep '^claude' || true)
     if [ -n "$CLAUDE_SESSIONS" ]; then
         echo "$CLAUDE_SESSIONS" | while IFS=: read session rest; do
             # Extract directory info if possible
             DIR_INFO=$(tmux display-message -t "$session" -p "#{pane_current_path}" 2>/dev/null || echo "Unknown")
-            echo -e "  🎯 ${GREEN}$session${NC}"
-            echo -e "     📁 $DIR_INFO"
+            printf "  🎯 ${GREEN}$session${NC}\n"
+            printf "     📁 $DIR_INFO\n"
         done
     else
-        echo -e "${YELLOW}No Claude sessions found${NC}"
-        echo ""
-        echo -e "Create one with: ${BLUE}claude-ops new-project my-project${NC}"
+        printf "${YELLOW}No Claude sessions found${NC}\n"
+        printf "\n"
+        printf "Create one with: ${BLUE}claude-ops new-project my-project${NC}\n"
     fi
 }
 
@@ -194,8 +194,8 @@ case "${1:-help}" in
         show_help
         ;;
     *)
-        echo -e "${RED}Unknown command: $1${NC}"
-        echo ""
+        printf "${RED}Unknown command: $1${NC}\n"
+        printf "\n"
         show_help
         exit 1
         ;;
