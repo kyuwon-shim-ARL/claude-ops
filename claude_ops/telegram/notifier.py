@@ -27,6 +27,11 @@ class SmartNotifier:
         self.config = config or ClaudeOpsConfig()
         self._last_notification_hash = None
     
+    def _get_current_time(self) -> str:
+        """Get current time formatted for display"""
+        from datetime import datetime
+        return datetime.now().strftime("%H:%M:%S")
+    
     def _is_work_currently_running(self) -> bool:
         """Check if work is currently running by examining current screen"""
         try:
@@ -222,18 +227,31 @@ class SmartNotifier:
         return await loop.run_in_executor(None, self.send_notification_sync, message, force)
     
     def send_work_completion_notification(self) -> bool:
-        """Send work completion notification with enhanced context"""
+        """Send work completion notification with enhanced context and session info"""
         # First check if work is really completed by checking current screen
         if self._is_work_currently_running():
             logger.info("Work still in progress, skipping notification")
             return False  # Return False to indicate notification was not sent
             
+        # Get session information
+        session_name = self.config.session_name
+        session_display = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
+        working_dir = self.config.working_directory
+        
         # Get rich context from current session
         context = self.extract_work_context()
         
         if context:
-            # For rich context, send directly without additional markdown formatting
-            message = f"✅ 작업 완료\n\n{context}"
+            # Enhanced message with session information for reply targeting
+            message = f"""✅ **작업 완료** [`{session_name}`]
+
+📁 **프로젝트**: `{working_dir}`
+🎯 **세션**: `{session_name}`
+⏰ **완료 시간**: {self._get_current_time()}
+
+{context}
+
+💡 **답장하려면** 이 메시지에 Reply로 응답하세요!"""
             
             # Check for duplicate notifications
             import hashlib
@@ -245,7 +263,16 @@ class SmartNotifier:
             self._last_notification_hash = message_hash
             return self._send_telegram_notification(message)
         else:
-            message = "✅ **작업 완료**\n\nClaude가 작업을 완료했습니다. 결과를 확인해보세요."
+            # Simple fallback message with session info
+            message = f"""✅ **작업 완료** [`{session_name}`]
+
+📁 **프로젝트**: `{working_dir}`
+🎯 **세션**: `{session_name}`
+⏰ **완료 시간**: {self._get_current_time()}
+
+Claude가 작업을 완료했습니다. 결과를 확인해보세요.
+
+💡 **답장하려면** 이 메시지에 Reply로 응답하세요!"""
             return self.send_notification_sync(message)
     
     def send_response_completion_notification(self) -> bool:

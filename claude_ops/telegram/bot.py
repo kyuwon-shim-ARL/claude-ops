@@ -93,10 +93,34 @@ class TelegramBridge:
             return "🆕 Claude 세션을 새로 시작했습니다"
         return None
     
+    def extract_session_from_message(self, message_text: str) -> Optional[str]:
+        """Extract session name from notification message"""
+        import re
+        
+        # Look for session patterns in the message
+        patterns = [
+            r'\*\*🎯 세션 이름\*\*: `([^`]+)`',  # From start command
+            r'세션: `([^`]+)`',                    # From notification
+            r'\[([^]]+)\]',                        # From completion notification [session_name]
+            r'claude_(\w+)',                       # Any claude_xxx pattern
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, message_text)
+            if match:
+                session_name = match.group(1)
+                # Ensure it starts with 'claude' prefix
+                if not session_name.startswith('claude'):
+                    session_name = f'claude_{session_name}'
+                return session_name
+        
+        return None
+    
     async def forward_to_claude(self, update, context):
-        """Forward user input to Claude tmux session"""
+        """Forward user input to Claude tmux session with reply-based targeting"""
         user_id = update.effective_user.id
         user_input = update.message.text
+        target_session = None
         
         logger.info(f"사용자 {user_id}로부터 입력 수신: {user_input[:100]}...")
         
@@ -111,18 +135,60 @@ class TelegramBridge:
             await update.message.reply_text(f"❌ {message}")
             return
         
-        session_msg = self.ensure_claude_session()
-        if session_msg:
-            await update.message.reply_text(session_msg)
+        # Check if this is a reply to a bot message
+        if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
+            original_text = update.message.reply_to_message.text
+            target_session = self.extract_session_from_message(original_text)
+            
+            if target_session:
+                logger.info(f"📍 Reply 기반 세션 타겟팅: {target_session}")
+                
+                # Check if target session exists
+                session_exists = os.system(f"tmux has-session -t {target_session}") == 0
+                if not session_exists:
+                    await update.message.reply_text(
+                        f"❌ 대상 세션 `{target_session}`이 존재하지 않습니다.\n"
+                        f"먼저 해당 세션을 시작해주세요."
+                    )
+                    return
+            else:
+                logger.debug("Reply 대상 메시지에서 세션 정보를 찾을 수 없음")
+        
+        # Use target session if found, otherwise use current active session
+        if not target_session:
+            target_session = self.config.session_name
+            logger.info(f"🎯 기본 활성 세션 사용: {target_session}")
+        
+        # Ensure target session exists
+        session_exists = os.system(f"tmux has-session -t {target_session}") == 0
+        if not session_exists:
+            logger.info(f"세션 {target_session}을 자동 생성합니다...")
+            
+            # Extract directory from session name for auto-creation
+            if target_session.startswith('claude_'):
+                project_name = target_session[7:]  # Remove 'claude_' prefix
+                home_dir = os.path.expanduser("~")
+                target_directory = os.path.join(home_dir, "projects", project_name)
+                os.makedirs(target_directory, exist_ok=True)
+                
+                os.system(f"cd {target_directory} && tmux new-session -d -s {target_session}")
+                os.system(f"tmux send-keys -t {target_session} -l 'claude'")
+                os.system(f"tmux send-keys -t {target_session} Enter")
+                
+                await update.message.reply_text(f"🆕 {target_session} 세션을 새로 시작했습니다")
+            else:
+                await update.message.reply_text(f"❌ 세션 {target_session}이 존재하지 않습니다.")
+                return
         
         try:
-            result1 = os.system(f"tmux send-keys -t {self.config.session_name} -l '{user_input}'")
-            result2 = os.system(f"tmux send-keys -t {self.config.session_name} Enter")
+            result1 = os.system(f"tmux send-keys -t {target_session} -l '{user_input}'")
+            result2 = os.system(f"tmux send-keys -t {target_session} Enter")
             result = result1 or result2
             
             if result == 0:
-                logger.info(f"성공적으로 전송됨: {user_input}")
-                await update.message.reply_text("✅ Claude에 입력이 전송되었습니다.")
+                logger.info(f"성공적으로 전송됨: {user_input} -> {target_session}")
+                session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+                await update.message.reply_text(f"✅ `{session_display}`에 입력이 전송되었습니다.")
             else:
                 logger.error(f"tmux 명령어 실행 실패: exit code {result}")
                 await update.message.reply_text("❌ 명령어 전송에 실패했습니다. tmux 세션을 확인해주세요.")
@@ -162,16 +228,50 @@ class TelegramBridge:
             await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
             return
         
-        session_ok, message = self.check_claude_session()
-        if not session_ok:
-            logger.info("사용자 요청으로 Claude 세션을 시작합니다...")
-            # Start tmux session in the configured working directory
-            os.system(f"cd {self.config.working_directory} && tmux new-session -d -s {self.config.session_name}")
-            os.system(f"tmux send-keys -t {self.config.session_name} -l 'claude'")
-            os.system(f"tmux send-keys -t {self.config.session_name} Enter")
-            status_msg = "🚀 Claude 세션을 시작했습니다!"
+        # Parse command arguments for project path support
+        args = context.args if context.args else []
+        
+        # Default behavior - use current session
+        target_session = self.config.session_name
+        target_directory = self.config.working_directory
+        
+        # If arguments provided, create new session
+        if args:
+            project_name = args[0]
+            
+            # Second argument is custom directory path
+            if len(args) > 1:
+                custom_dir = os.path.expanduser(args[1])
+                if os.path.exists(custom_dir):
+                    target_directory = custom_dir
+                else:
+                    await update.message.reply_text(f"❌ 디렉토리를 찾을 수 없습니다: {custom_dir}")
+                    return
+            else:
+                # Default to ~/projects/<project_name>
+                home_dir = os.path.expanduser("~")
+                target_directory = os.path.join(home_dir, "projects", project_name)
+                
+                # Create directory if it doesn't exist
+                if not os.path.exists(target_directory):
+                    os.makedirs(target_directory, exist_ok=True)
+                    logger.info(f"Created project directory: {target_directory}")
+            
+            # Create session name with claude_ prefix
+            target_session = f"claude_{project_name}"
+        
+        # Check if target session exists
+        session_exists = os.system(f"tmux has-session -t {target_session}") == 0
+        
+        if not session_exists:
+            logger.info(f"사용자 요청으로 {target_session} 세션을 시작합니다...")
+            # Start tmux session in the target directory
+            os.system(f"cd {target_directory} && tmux new-session -d -s {target_session}")
+            os.system(f"tmux send-keys -t {target_session} -l 'claude'")
+            os.system(f"tmux send-keys -t {target_session} Enter")
+            status_msg = f"🚀 {target_session} 세션을 시작했습니다!"
         else:
-            status_msg = "✅ Claude 세션이 이미 실행 중입니다."
+            status_msg = f"✅ {target_session} 세션이 이미 실행 중입니다."
         
         # Use standardized keyboard
         reply_markup = self.get_main_keyboard()
@@ -180,8 +280,8 @@ class TelegramBridge:
 
 {status_msg}
 
-**📁 작업 디렉토리**: `{self.config.working_directory}`
-**🎯 세션 이름**: `{self.config.session_name}`
+**📁 작업 디렉토리**: `{target_directory}`
+**🎯 세션 이름**: `{target_session}`
 
 **제어판을 사용하여 Claude를 제어하세요:**"""
         
@@ -205,10 +305,13 @@ class TelegramBridge:
 Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 
 **명령어:**
-• `/start` - Claude 세션 시작 및 제어판 표시
+• `/start` - 현재 세션 시작/재시작
+• `/start project_name` - ~/projects/project_name에서 claude_project_name 세션 시작
+• `/start project_name /custom/path` - 지정 경로에서 claude_project_name 세션 시작
 • `/status` - 봇 및 tmux 세션 상태 확인
 • `/log` - 현재 Claude 화면 실시간 확인
 • `/stop` - Claude 작업 중단 (ESC 키 전송)
+• `/sessions` - 활성 세션 목록 보기 및 전환
 • `/help` - 이 도움말 보기
 
 **사용법:**
@@ -459,10 +562,13 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 
 **명령어:**
-• `/start` - Claude 세션 시작 및 제어판 표시
+• `/start` - 현재 세션 시작/재시작
+• `/start project_name` - ~/projects/project_name에서 claude_project_name 세션 시작
+• `/start project_name /custom/path` - 지정 경로에서 claude_project_name 세션 시작
 • `/status` - 봇 및 tmux 세션 상태 확인
 • `/log` - 현재 Claude 화면 실시간 확인
 • `/stop` - Claude 작업 중단 (ESC 키 전송)
+• `/sessions` - 활성 세션 목록 보기 및 전환
 • `/help` - 이 도움말 보기
 
 **사용법:**
@@ -506,7 +612,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
     async def setup_bot_commands(self):
         """Setup bot command menu"""
         commands = [
-            BotCommand("start", "🚀 Claude 세션 시작 및 제어판 표시"),
+            BotCommand("start", "🚀 Claude 세션 시작 (옵션: project_name [path])"),
             BotCommand("status", "📊 봇 및 tmux 세션 상태 확인"),
             BotCommand("log", "📺 현재 Claude 화면 실시간 확인"),
             BotCommand("stop", "⛔ Claude 작업 중단 (ESC 키 전송)"),

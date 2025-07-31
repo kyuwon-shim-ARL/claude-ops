@@ -1,113 +1,145 @@
-# 🚀 Claude-Ops: AI 연구 워크플로우 자동화 도구
+# 🚀 Claude-Ops: Multi-Project AI Automation Hub
 
 **Claude Code + Notion + GitHub + Telegram 통합 자동화 시스템**
 
 [![Setup Time](https://img.shields.io/badge/Setup-5_minutes-green)](./QUICK_START.md)
+[![Multi Project](https://img.shields.io/badge/Multi_Project-Management-blue)](#multi-project-management)
+[![Reply Based](https://img.shields.io/badge/Telegram-Reply_Based_Targeting-green)](#telegram-reply-targeting)
 [![Auto Merge](https://img.shields.io/badge/Workflow-Fully_Automated-blue)](#자동화-기능)
-[![LFS Tracking](https://img.shields.io/badge/Storage-Git_LFS-orange)](#git-lfs-자동-추적)
 
-이 repository는 Claude Code와 Notion, GitHub을 연동한 **완전 자동화 연구 워크플로우 유틸리티**입니다.
+**홈 폴더에서 모든 Claude 프로젝트를 중앙 관리하는 완전 자동화 시스템**
 
-## 📦 설치 방법
+- 🏠 **홈 폴더 중앙 관리**: 한 곳에서 모든 프로젝트 제어
+- 🎯 **Reply 기반 타겟팅**: 텔레그램 Reply로 정확한 세션 선택
+- 🔄 **멀티 세션 모니터링**: 모든 프로젝트 동시 감시
+- 📱 **원격 프로젝트 생성**: 텔레그램에서 `/start new-project` 가능
 
-### 방법 1: 새 프로젝트로 시작 (권장)
+## 🏠 홈 폴더 중앙 관리 설정
+
+### 빠른 설정 (권장)
 
 ```bash
-# GitHub Template으로 새 repository 생성
-# 1. GitHub에서 "Use this template" 버튼 클릭
-# 2. 또는 직접 clone:
-git clone https://github.com/kyuwon-shim-ARL/claude-ops.git my-project
-cd my-project
-rm -rf .git  # 기존 git 히스토리 제거
-git init     # 새 프로젝트로 시작
+# 1. 홈 폴더에 Claude-Ops 설치
+cd ~
+git clone https://github.com/kyuwon-shim-ARL/claude-ops.git .claude-ops
+cd .claude-ops
 
-# 의존성 설치
+# 2. 환경 설정 복사 (기존 설정 재사용 가능)
+cp .env.example .env
+# .env 파일에 API 키 설정 (Notion, GitHub, Telegram)
+
+# 3. 의존성 설치
 uv sync
 
-# 환경 설정
-cp .env.example .env
-# .env 파일에 API 키 설정
-```
+# 4. 홈 디렉토리 설정
+echo "CLAUDE_WORKING_DIR=$HOME" >> .env
 
-### 방법 2: 기존 프로젝트에 통합
+# 5. 홈 Claude 세션 시작
+claude  # → claude_claude-ops 세션 생성
 
-```bash
-# 기존 프로젝트 디렉토리에서
-cd existing-project
-
-# claude-ops를 서브모듈로 추가
-git submodule add https://github.com/kyuwon-shim-ARL/claude-ops.git .claude-ops
-
-# 또는 필요한 파일만 복사
-wget https://raw.githubusercontent.com/kyuwon-shim-ARL/claude-ops/main/install.sh
-bash install.sh
-
-# 의존성 추가
-uv add notion-client python-telegram-bot pygithub python-dotenv
-
-# 환경 설정
-cp .claude-ops/.env.example .env
-```
-
-### 방법 3: 유틸리티만 선택적 사용
-
-```bash
-# 필요한 모듈만 복사
-mkdir -p claude_ops
-cp -r path/to/claude-ops/claude_ops/telegram ./claude_ops/
-cp -r path/to/claude-ops/scripts ./
-
-# 또는 pip 패키지로 설치 (준비 중)
-# pip install claude-ops
-```
-
-## ⚡ 빠른 시작
-
-**환경 설정 후 바로 사용하세요:**
-
-```bash
-# 1. 환경 변수 설정
-cp .env.example .env
-# .env 파일 수정 (Notion API, GitHub PAT, Telegram 토큰)
-
-# 2. 첫 프로젝트 생성 (Notion 연동 시)
-/project-plan docs/proposals/your-project-proposal.md
-
-# 3. 작업 시작!
-
-## 🔧 Claude Code 프로젝트 설정
-
-Claude Code는 `claude code init` 명령어로 프로젝트별 CLAUDE.md를 자동 생성합니다.
-
-Claude-Ops 명령어를 사용하려면:
-- `CLAUDE-OPS.md` 파일의 명령어 섹션을 참조하세요
-- 또는 Claude Code가 생성한 CLAUDE.md에 필요한 부분만 추가하세요
-
-## 📱 텔레그램 원격 제어 (선택사항)
-
-Claude Code를 텔레그램으로 원격 제어할 수 있습니다:
-
-```bash
-# 1. 텔레그램 봇 설정
-# @BotFather에서 봇 생성 후 토큰을 .env에 추가:
-# TELEGRAM_BOT_TOKEN=your_bot_token
-# TELEGRAM_CHAT_ID=your_chat_id
-# ALLOWED_USER_IDS=your_user_id
-
-# 2. 시스템 시작
+# 6. 멀티 프로젝트 모니터링 시작
 ./scripts/start_multi_monitoring.sh
-
-# 3. 텔레그램에서 Claude와 대화!
 ```
 
-**주요 기능:**
-- 🤖 **양방향 통신**: 텔레그램 ↔ Claude Code 실시간 대화
-- 🔔 **자동 알림**: Claude 작업 완료/질문 시 즉시 알림
-- 🛡️ **보안**: 사용자 인증 + 명령어 검증
-- 📊 **상태 모니터링**: Claude 응답 지능적 캡처
-/task-start <생성된-TID>
-# ... 작업 수행 ...
-/task-finish <TID> --pr --auto-merge  # 완전 자동화!
+
+## ⚡ 멀티 프로젝트 사용법
+
+### 🚀 새 프로젝트 생성
+
+**방법 1: 스크립트 사용 (데스크톱)**
+```bash
+# 어디서든 실행 가능
+~/.claude-ops/scripts/new-project.sh my-ai-app
+~/.claude-ops/scripts/new-project.sh web-scraper ~/work/client
+
+# 예시 결과
+# → ~/projects/my-ai-app에서 claude_my-ai-app 세션 생성
+# → ~/work/client에서 claude_web-scraper 세션 생성
+```
+
+**방법 2: 텔레그램 원격 제어**
+```
+/start my-ai-app                    # ~/projects/my-ai-app에서 claude_my-ai-app 시작
+/start web-scraper ~/work/client    # ~/work/client에서 claude_web-scraper 시작
+```
+
+**방법 3: 수동 tmux 세션 (100% 확실)**
+```bash
+# 수동으로 세션 생성 (가장 확실한 방법)
+mkdir -p ~/projects/my-project
+tmux new-session -d -s claude_my-project -c ~/projects/my-project
+tmux send-keys -t claude_my-project 'claude' Enter
+
+# 연결: tmux attach -t claude_my-project
+```
+
+### 🎯 Reply 기반 텔레그램 제어
+
+**1. 작업 완료 알림 받기**
+```
+✅ 작업 완료 [claude_my-ai-app]
+
+📁 프로젝트: ~/projects/my-ai-app
+🎯 세션: claude_my-ai-app
+⏰ 완료 시간: 14:30:25
+
+[작업 내용]
+
+💡 답장하려면 이 메시지에 Reply로 응답하세요!
+```
+
+**2. Reply로 정확한 세션에 답장**
+- 알림 메시지에 Reply → 자동으로 해당 세션으로 전송
+- 일반 메시지 → 현재 활성 세션으로 전송
+- 세션 혼동 걱정 없음! ✨
+
+## 🔧 시스템 관리
+
+### 🚀 시작하기
+
+**멀티 프로젝트 모니터링 시작**
+```bash
+cd ~/.claude-ops
+./scripts/start_multi_monitoring.sh
+```
+
+**단일 명령으로 모든 것 관리됩니다:**
+- ✅ 모든 `claude_*` 세션 자동 감지
+- ✅ 작업 완료 시 텔레그램 알림
+- ✅ Reply 기반 정확한 세션 타겟팅
+- ✅ 새 세션 자동 추가 모니터링
+
+### 🛑 종료하기
+
+**모니터링 완전 종료**
+```bash
+# 모든 모니터링 프로세스 종료
+tmux kill-session -t claude-multi-monitor 2>/dev/null  # 멀티 모니터
+tmux kill-session -t claude-monitor 2>/dev/null        # 기존 단일 모니터 (혹시나)
+pkill -f "multi_monitor"                               # 백그라운드 프로세스
+
+# 확인
+tmux list-sessions | grep monitor  # 아무것도 안 나오면 성공
+```
+
+**개별 프로젝트 세션 종료**
+```bash
+tmux kill-session -t claude_my-project  # 특정 프로젝트만
+tmux kill-session -t claude_*           # 모든 Claude 세션 (주의!)
+```
+
+### 📊 상태 확인
+
+**실행 중인 세션 확인**
+```bash
+tmux list-sessions | grep claude        # 모든 Claude 세션
+tmux attach -t claude-multi-monitor     # 모니터링 로그 보기
+```
+
+**텔레그램에서**
+```
+/sessions    # 모든 활성 세션 목록 + 전환
+/status      # 현재 봇 상태
 ```
 
 ### 🔧 기존 프로젝트에 추가

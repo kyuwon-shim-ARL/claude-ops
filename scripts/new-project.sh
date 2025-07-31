@@ -1,0 +1,85 @@
+#!/bin/bash
+
+# Create new Claude project with proper session setup
+# Usage: ./new-project.sh project-name [custom-directory]
+
+set -e
+
+# Colors for output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Check arguments
+if [ $# -eq 0 ]; then
+    echo -e "${RED}Usage: $0 project-name [custom-directory]${NC}"
+    echo ""
+    echo "Examples:"
+    echo "  $0 my-ai-app                    # Creates ~/projects/my-ai-app"
+    echo "  $0 web-scraper ~/work/client   # Creates ~/work/client/web-scraper"
+    echo "  $0 data-analysis /tmp/test     # Creates /tmp/test/data-analysis"
+    exit 1
+fi
+
+PROJECT_NAME="$1"
+SESSION_NAME="claude_${PROJECT_NAME}"
+
+# Determine target directory
+if [ $# -ge 2 ]; then
+    # Custom directory provided
+    CUSTOM_DIR="$2"
+    if [[ "$CUSTOM_DIR" == /* ]]; then
+        # Absolute path
+        TARGET_DIR="$CUSTOM_DIR"
+    else
+        # Relative path - make it absolute
+        TARGET_DIR="$(pwd)/$CUSTOM_DIR"
+    fi
+else
+    # Default to ~/projects
+    TARGET_DIR="$HOME/projects/$PROJECT_NAME"
+fi
+
+echo -e "${BLUE}🚀 Creating new Claude project...${NC}"
+echo -e "📁 Project: ${YELLOW}$PROJECT_NAME${NC}"
+echo -e "📂 Directory: ${YELLOW}$TARGET_DIR${NC}"
+echo -e "🎯 Session: ${YELLOW}$SESSION_NAME${NC}"
+echo ""
+
+# Check if session already exists
+if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+    echo -e "${YELLOW}⚠️  Session '$SESSION_NAME' already exists!${NC}"
+    echo -e "Use: ${BLUE}tmux attach -t $SESSION_NAME${NC} to connect"
+    exit 0
+fi
+
+# Create directory if it doesn't exist
+if [ ! -d "$TARGET_DIR" ]; then
+    echo -e "${GREEN}📁 Creating directory: $TARGET_DIR${NC}"
+    mkdir -p "$TARGET_DIR"
+else
+    echo -e "${YELLOW}📁 Directory already exists: $TARGET_DIR${NC}"
+fi
+
+# Create tmux session
+echo -e "${GREEN}🎯 Creating tmux session: $SESSION_NAME${NC}"
+tmux new-session -d -s "$SESSION_NAME" -c "$TARGET_DIR"
+
+# Start Claude in the session
+echo -e "${GREEN}🤖 Starting Claude Code...${NC}"
+tmux send-keys -t "$SESSION_NAME" 'claude' Enter
+
+# Wait a moment for Claude to start
+sleep 2
+
+echo ""
+echo -e "${GREEN}✅ Project '$PROJECT_NAME' created successfully!${NC}"
+echo ""
+echo -e "${BLUE}Next steps:${NC}"
+echo -e "  1. Connect: ${YELLOW}tmux attach -t $SESSION_NAME${NC}"
+echo -e "  2. Or use Telegram: ${YELLOW}/sessions${NC} to switch to this project"
+echo -e "  3. Initialize: ${YELLOW}claude code init${NC} (if needed)"
+echo ""
+echo -e "${GREEN}🎉 Happy coding!${NC}"
