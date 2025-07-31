@@ -34,7 +34,7 @@ uv sync
 # 4. 홈 디렉토리 설정
 echo "CLAUDE_WORKING_DIR=$HOME" >> .env
 
-# 5. CLI 도구 PATH 추가 (편의성)
+# 5. CLI 도구 PATH 추가
 ./scripts/claude-ops.sh install
 source ~/.bashrc
 
