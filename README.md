@@ -21,8 +21,8 @@
 ```bash
 # 1. 홈 폴더에 Claude-Ops 설치
 cd ~
-git clone https://github.com/kyuwon-shim-ARL/claude-ops.git .claude-ops
-cd .claude-ops
+git clone https://github.com/kyuwon-shim-ARL/claude-ops.git claude-ops
+cd claude-ops
 
 # 2. 환경 설정 복사 (기존 설정 재사용 가능)
 cp .env.example .env
@@ -34,11 +34,12 @@ uv sync
 # 4. 홈 디렉토리 설정
 echo "CLAUDE_WORKING_DIR=$HOME" >> .env
 
-# 5. 홈 Claude 세션 시작
-claude  # → claude_claude-ops 세션 생성
+# 5. CLI 도구 PATH 추가 (편의성)
+./scripts/claude-ops.sh install
+source ~/.bashrc
 
 # 6. 멀티 프로젝트 모니터링 시작
-./scripts/start_multi_monitoring.sh
+claude-ops start-monitoring
 ```
 
 
@@ -46,15 +47,19 @@ claude  # → claude_claude-ops 세션 생성
 
 ### 🚀 새 프로젝트 생성
 
-**방법 1: 스크립트 사용 (데스크톱)**
+**방법 1: CLI 명령어 (권장)**
 ```bash
-# 어디서든 실행 가능
-~/.claude-ops/scripts/new-project.sh my-ai-app
-~/.claude-ops/scripts/new-project.sh web-scraper ~/work/client
+# 새 프로젝트 생성
+claude-ops new-project my-ai-app                    # ~/projects/my-ai-app
+claude-ops new-project web-scraper ~/work/client   # ~/work/client
 
-# 예시 결과
-# → ~/projects/my-ai-app에서 claude_my-ai-app 세션 생성
-# → ~/work/client에서 claude_web-scraper 세션 생성
+# 기존 프로젝트에 Claude 추가
+claude-ops new-project existing-app ~/work/existing-project
+
+# 시스템 관리
+claude-ops status          # 상태 확인
+claude-ops sessions        # 활성 세션 목록
+claude-ops stop-monitoring # 모니터링 종료
 ```
 
 **방법 2: 텔레그램 원격 제어**
@@ -99,7 +104,11 @@ tmux send-keys -t claude_my-project 'claude' Enter
 
 **멀티 프로젝트 모니터링 시작**
 ```bash
-cd ~/.claude-ops
+# CLI 명령어 (권장)
+claude-ops start-monitoring
+
+# 또는 직접 실행
+cd ~/claude-ops
 ./scripts/start_multi_monitoring.sh
 ```
 
@@ -113,13 +122,13 @@ cd ~/.claude-ops
 
 **모니터링 완전 종료**
 ```bash
-# 모든 모니터링 프로세스 종료
-tmux kill-session -t claude-multi-monitor 2>/dev/null  # 멀티 모니터
-tmux kill-session -t claude-monitor 2>/dev/null        # 기존 단일 모니터 (혹시나)
-pkill -f "multi_monitor"                               # 백그라운드 프로세스
+# CLI 명령어 (권장)
+claude-ops stop-monitoring
 
-# 확인
-tmux list-sessions | grep monitor  # 아무것도 안 나오면 성공
+# 또는 수동으로
+tmux kill-session -t claude-multi-monitor 2>/dev/null
+tmux kill-session -t claude-monitor 2>/dev/null
+pkill -f "multi_monitor"
 ```
 
 **개별 프로젝트 세션 종료**
@@ -130,7 +139,13 @@ tmux kill-session -t claude_*           # 모든 Claude 세션 (주의!)
 
 ### 📊 상태 확인
 
-**실행 중인 세션 확인**
+**CLI 명령어로 확인**
+```bash
+claude-ops status      # 전체 시스템 상태
+claude-ops sessions    # 활성 세션 목록
+```
+
+**수동 확인**
 ```bash
 tmux list-sessions | grep claude        # 모든 Claude 세션
 tmux attach -t claude-multi-monitor     # 모니터링 로그 보기
