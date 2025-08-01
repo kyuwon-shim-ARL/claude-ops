@@ -84,7 +84,61 @@ new_project() {
 # Start monitoring
 start_monitoring() {
     cd "$CLAUDE_OPS_DIR"
-    ./scripts/start_multi_monitoring.sh
+    
+    # Check if already running
+    if tmux has-session -t claude-multi-monitor 2>/dev/null; then
+        printf "${YELLOW}Multi-session monitor is already running${NC}\n"
+        return 0
+    fi
+    
+    # Kill single-session monitor if running
+    tmux kill-session -t claude-monitor 2>/dev/null || true
+    
+    # Kill any orphaned monitoring processes
+    printf "${YELLOW}Checking for orphaned monitoring processes...${NC}\n"
+    if pgrep -f "multi_monitor" > /dev/null 2>&1; then
+        printf "${YELLOW}Found orphaned multi_monitor processes, cleaning up...${NC}\n"
+        pkill -f "multi_monitor" || true
+        sleep 2
+    fi
+    
+    # Load environment and check required variables
+    if [ ! -f .env ]; then
+        printf "${RED}Error: .env file not found${NC}\n"
+        return 1
+    fi
+    
+    set -a
+    source .env
+    set +a
+    
+    if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+        printf "${RED}Error: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set in .env${NC}\n"
+        return 1
+    fi
+    
+    # Start the multi-session monitor in tmux
+    printf "${GREEN}Starting Multi-Session Claude Code Monitor...${NC}\n"
+    tmux new-session -d -s claude-multi-monitor \
+        "cd $(pwd) && uv run python -m claude_ops.telegram.multi_monitor"
+    
+    # Give tmux a moment to start
+    sleep 3
+    
+    # Check if started successfully
+    if tmux has-session -t claude-multi-monitor 2>/dev/null; then
+        printf "${GREEN}✅ Multi-Session Monitor started successfully${NC}\n"
+        printf "\n🎯 Now monitoring ALL Claude sessions simultaneously!\n\n"
+        printf "Commands:\n"
+        printf "  - View logs: tmux attach -t claude-multi-monitor\n"
+        printf "  - Stop monitor: tmux kill-session -t claude-multi-monitor\n\n"
+        printf "🚀 The monitor will automatically detect new sessions and send\n"
+        printf "   notifications when ANY Claude Code task completes!\n"
+        return 0
+    else
+        printf "${RED}❌ Failed to start Multi-Session Monitor${NC}\n"
+        return 1
+    fi
 }
 
 # Stop monitoring

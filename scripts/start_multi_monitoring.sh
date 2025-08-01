@@ -26,15 +26,17 @@ fi
 
 # Kill any orphaned monitoring processes
 echo -e "${YELLOW}Checking for orphaned monitoring processes...${NC}"
-if pgrep -f "multi_monitor" > /dev/null; then
+if pgrep -f "multi_monitor" > /dev/null 2>&1; then
     echo -e "${YELLOW}Found orphaned multi_monitor processes, cleaning up...${NC}"
-    pkill -f "multi_monitor" 2>/dev/null || true
+    pkill -f "multi_monitor" || true
     sleep 2
 fi
 
 # Load environment variables
 if [ -f .env ]; then
-    export $(cat .env | grep -v '^#' | xargs)
+    set -a
+    source .env
+    set +a
 else
     echo -e "${RED}Error: .env file not found${NC}"
     echo "Please copy .env.example to .env and configure it"
@@ -52,9 +54,10 @@ echo -e "${GREEN}Starting Multi-Session Claude Code Monitor...${NC}"
 tmux new-session -d -s claude-multi-monitor \
     "cd $(pwd) && uv run python -m claude_ops.telegram.multi_monitor"
 
+# Give tmux a moment to start
 sleep 2
 
-# Check if started successfully
+# Check if started successfully and exit immediately
 if tmux has-session -t claude-multi-monitor 2>/dev/null; then
     echo -e "${GREEN}✓ Multi-Session Monitor started successfully${NC}"
     echo ""
@@ -66,6 +69,7 @@ if tmux has-session -t claude-multi-monitor 2>/dev/null; then
     echo ""
     echo "🚀 The monitor will automatically detect new sessions and send"
     echo "   notifications when ANY Claude Code task completes!"
+    exit 0
 else
     echo -e "${RED}Failed to start Multi-Session Monitor${NC}"
     exit 1
