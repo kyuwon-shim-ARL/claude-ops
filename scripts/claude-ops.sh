@@ -25,6 +25,7 @@ show_help() {
     printf "\n"
     printf "${YELLOW}Commands:${NC}\n"
     printf "  ${GREEN}new-project${NC} <name> [path]     Create new Claude project session\n"
+    printf "  ${GREEN}kill-session${NC} <name>          Kill specific Claude session\n"
     printf "  ${GREEN}start-monitoring${NC}             Start multi-session monitoring\n"
     printf "  ${GREEN}stop-monitoring${NC}              Stop all monitoring processes\n"
     printf "  ${GREEN}status${NC}                       Show system status\n"
@@ -34,6 +35,7 @@ show_help() {
     printf "${YELLOW}Examples:${NC}\n"
     printf "  claude-ops new-project my-ai-app\n"
     printf "  claude-ops new-project web-scraper ~/work/client\n"
+    printf "  claude-ops kill-session claude_my-ai-app\n"
     printf "  claude-ops start-monitoring\n"
     printf "  claude-ops status\n"
     printf "\n"
@@ -79,6 +81,60 @@ new_project() {
     fi
     
     "$SCRIPT_DIR/new-project.sh" "$@"
+}
+
+# Kill specific session
+kill_session() {
+    if [ $# -eq 0 ]; then
+        printf "${RED}Error: Session name required${NC}\n"
+        printf "Usage: claude-ops kill-session <session-name>\n"
+        printf "\n"
+        printf "Available sessions:\n"
+        CLAUDE_SESSIONS=$(tmux list-sessions 2>/dev/null | grep '^claude' | cut -d: -f1 || true)
+        if [ -n "$CLAUDE_SESSIONS" ]; then
+            echo "$CLAUDE_SESSIONS" | while read session; do
+                printf "  🎯 $session\n"
+            done
+        else
+            printf "  ${YELLOW}No Claude sessions found${NC}\n"
+        fi
+        exit 1
+    fi
+    
+    SESSION_NAME="$1"
+    
+    # Add claude_ prefix if not present
+    if [[ "$SESSION_NAME" != claude_* ]] && [[ "$SESSION_NAME" != claude-* ]]; then
+        SESSION_NAME="claude_${SESSION_NAME}"
+    fi
+    
+    # Check if session exists
+    if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+        printf "${RED}❌ Session '$SESSION_NAME' not found${NC}\n"
+        printf "\n"
+        printf "Available sessions:\n"
+        CLAUDE_SESSIONS=$(tmux list-sessions 2>/dev/null | grep '^claude' | cut -d: -f1 || true)
+        if [ -n "$CLAUDE_SESSIONS" ]; then
+            echo "$CLAUDE_SESSIONS" | while read session; do
+                printf "  🎯 $session\n"
+            done
+        else
+            printf "  ${YELLOW}No Claude sessions found${NC}\n"
+        fi
+        exit 1
+    fi
+    
+    # Confirm before killing
+    printf "${YELLOW}⚠️  Are you sure you want to kill session '${SESSION_NAME}'? [y/N] ${NC}"
+    read -r confirm
+    
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        tmux kill-session -t "$SESSION_NAME" 2>/dev/null && \
+            printf "${GREEN}✅ Session '$SESSION_NAME' killed successfully${NC}\n" || \
+            printf "${RED}❌ Failed to kill session '$SESSION_NAME'${NC}\n"
+    else
+        printf "${YELLOW}❌ Operation cancelled${NC}\n"
+    fi
 }
 
 # Start monitoring
@@ -128,12 +184,32 @@ start_monitoring() {
     # Check if started successfully
     if tmux has-session -t claude-multi-monitor 2>/dev/null; then
         printf "${GREEN}✅ Multi-Session Monitor started successfully${NC}\n"
+        
+        # Also start telegram bot if not already running
+        if ! tmux has-session -t telegram-bot 2>/dev/null; then
+            printf "${GREEN}Starting Telegram Bot...${NC}\n"
+            tmux new-session -d -s telegram-bot \
+                "cd $(pwd) && uv run python -m claude_ops.telegram.bot"
+            sleep 2
+            
+            if tmux has-session -t telegram-bot 2>/dev/null; then
+                printf "${GREEN}✅ Telegram Bot started successfully${NC}\n"
+            else
+                printf "${YELLOW}⚠️  Telegram Bot failed to start${NC}\n"
+            fi
+        else
+            printf "${GREEN}✅ Telegram Bot already running${NC}\n"
+        fi
+        
         printf "\n🎯 Now monitoring ALL Claude sessions simultaneously!\n\n"
         printf "Commands:\n"
-        printf "  - View logs: tmux attach -t claude-multi-monitor\n"
-        printf "  - Stop monitor: tmux kill-session -t claude-multi-monitor\n\n"
+        printf "  - View monitor logs: tmux attach -t claude-multi-monitor\n"
+        printf "  - View bot logs: tmux attach -t telegram-bot\n"
+        printf "  - Stop monitor: tmux kill-session -t claude-multi-monitor\n"
+        printf "  - Stop bot: tmux kill-session -t telegram-bot\n\n"
         printf "🚀 The monitor will automatically detect new sessions and send\n"
         printf "   notifications when ANY Claude Code task completes!\n"
+        printf "📱 You can now send messages via Telegram bot!\n"
         return 0
     else
         printf "${RED}❌ Failed to start Multi-Session Monitor${NC}\n"
@@ -153,6 +229,11 @@ stop_monitoring() {
     tmux kill-session -t claude-monitor 2>/dev/null && \
         printf "${GREEN}✅ Stopped single monitor${NC}\n" || \
         printf "${YELLOW}ℹ️  Single monitor not running${NC}\n"
+    
+    # Kill telegram bot session
+    tmux kill-session -t telegram-bot 2>/dev/null && \
+        printf "${GREEN}✅ Stopped telegram bot${NC}\n" || \
+        printf "${YELLOW}ℹ️  Telegram bot not running${NC}\n"
     
     # Kill background processes
     pkill -f "multi_monitor" 2>/dev/null && \
@@ -177,6 +258,12 @@ show_status() {
     
     if tmux has-session -t claude-monitor 2>/dev/null; then
         printf "  ⚠️  Single-session monitoring: ${YELLOW}Running (should stop)${NC}\n"
+    fi
+    
+    if tmux has-session -t telegram-bot 2>/dev/null; then
+        printf "  📱 Telegram bot: ${GREEN}Running${NC}\n"
+    else
+        printf "  📱 Telegram bot: ${RED}Stopped${NC}\n"
     fi
     
     # Check Claude sessions
@@ -228,6 +315,10 @@ case "${1:-help}" in
     "new-project")
         shift
         new_project "$@"
+        ;;
+    "kill-session")
+        shift
+        kill_session "$@"
         ;;
     "start-monitoring")
         start_monitoring

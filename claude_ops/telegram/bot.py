@@ -100,18 +100,24 @@ class TelegramBridge:
         # Look for session patterns in the message
         patterns = [
             r'\*\*🎯 세션 이름\*\*: `([^`]+)`',  # From start command
-            r'세션: `([^`]+)`',                    # From notification
+            r'🎯 \*\*세션\*\*: `([^`]+)`',       # From notification (with markdown bold)
+            r'세션: `([^`]+)`',                    # From notification (simple)
             r'\[([^]]+)\]',                        # From completion notification [session_name]
-            r'claude_(\w+)',                       # Any claude_xxx pattern
+            r'(claude_[\w-]+)',                    # Any claude_xxx pattern (full match)
+            r'claude_(\w+)',                       # Any claude_xxx pattern (name only)
         ]
         
         for pattern in patterns:
             match = re.search(pattern, message_text)
             if match:
                 session_name = match.group(1)
-                # Ensure it starts with 'claude' prefix
-                if not session_name.startswith('claude'):
+                # If it already starts with 'claude_', return as-is
+                if session_name.startswith('claude_'):
+                    return session_name
+                # Otherwise, add 'claude_' prefix
+                elif not session_name.startswith('claude'):
                     session_name = f'claude_{session_name}'
+                    return session_name
                 return session_name
         
         return None
@@ -129,6 +135,26 @@ class TelegramBridge:
             await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
             return
         
+        # Handle slash commands that should be sent to Claude
+        if user_input.startswith('/') and not user_input.startswith('//'):
+            # Check if it's a Claude slash command (not a Telegram bot command)
+            claude_commands = ['/export', '/task-start', '/task-finish', '/task-archive', '/project-plan', '/task-publish']
+            if any(user_input.startswith(cmd) for cmd in claude_commands):
+                await update.message.reply_text(
+                    f"🎯 **Claude 슬래시 명령어 감지**: `{user_input}`\n\n"
+                    f"이 명령어를 Claude에게 전달하시겠습니까?\n\n"
+                    f"**옵션:**\n"
+                    f"• **예** - 이 메시지에 Reply로 `yes` 응답\n"
+                    f"• **아니오** - 무시하거나 다른 메시지 전송\n\n"
+                    f"💡 **팁**: 슬래시 명령어 앞에 `//`을 붙이면 바로 전송됩니다.\n"
+                    f"예: `//{user_input[1:]}`"
+                )
+                return
+            # If it starts with //, remove one slash and send to Claude
+            elif user_input.startswith('//'):
+                user_input = user_input[1:]  # Remove one slash, keep the other
+                logger.info(f"🔄 Double slash detected, sending to Claude: {user_input}")
+        
         is_valid, message = self.validate_input(user_input)
         if not is_valid:
             logger.warning(f"유효하지 않은 입력: {message}")
@@ -138,21 +164,36 @@ class TelegramBridge:
         # Check if this is a reply to a bot message
         if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
             original_text = update.message.reply_to_message.text
-            target_session = self.extract_session_from_message(original_text)
             
-            if target_session:
-                logger.info(f"📍 Reply 기반 세션 타겟팅: {target_session}")
-                
-                # Check if target session exists
-                session_exists = os.system(f"tmux has-session -t {target_session}") == 0
-                if not session_exists:
-                    await update.message.reply_text(
-                        f"❌ 대상 세션 `{target_session}`이 존재하지 않습니다.\n"
-                        f"먼저 해당 세션을 시작해주세요."
-                    )
+            # Check if replying to a slash command confirmation
+            if "Claude 슬래시 명령어 감지" in original_text and user_input.lower() in ['yes', 'y', '예', 'ㅇ']:
+                # Extract the command from the original message
+                import re
+                cmd_match = re.search(r'`([^`]+)`', original_text)
+                if cmd_match:
+                    claude_command = cmd_match.group(1)
+                    logger.info(f"✅ 사용자가 슬래시 명령어 전송 확인: {claude_command}")
+                    user_input = claude_command  # Use the original command
+                else:
+                    await update.message.reply_text("❌ 명령어를 찾을 수 없습니다.")
                     return
             else:
-                logger.debug("Reply 대상 메시지에서 세션 정보를 찾을 수 없음")
+                # Regular session targeting
+                target_session = self.extract_session_from_message(original_text)
+                
+                if target_session:
+                    logger.info(f"📍 Reply 기반 세션 타겟팅: {target_session}")
+                    
+                    # Check if target session exists
+                    session_exists = os.system(f"tmux has-session -t {target_session}") == 0
+                    if not session_exists:
+                        await update.message.reply_text(
+                            f"❌ 대상 세션 `{target_session}`이 존재하지 않습니다.\n"
+                            f"먼저 해당 세션을 시작해주세요."
+                        )
+                        return
+                else:
+                    logger.debug("Reply 대상 메시지에서 세션 정보를 찾을 수 없음")
         
         # Use target session if found, otherwise use current active session
         if not target_session:
@@ -304,7 +345,7 @@ class TelegramBridge:
 
 Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 
-**명령어:**
+**텔레그램 봇 명령어:**
 • `/start` - 현재 세션 시작/재시작
 • `/start project_name` - ~/projects/project_name에서 claude_project_name 세션 시작
 • `/start project_name /custom/path` - 지정 경로에서 claude_project_name 세션 시작
@@ -314,9 +355,15 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 • `/sessions` - 활성 세션 목록 보기 및 전환
 • `/help` - 이 도움말 보기
 
+**Claude 슬래시 명령어 전달:**
+• `//export` - Claude에게 /export 명령어 바로 전달
+• `//task-start TID-xxx` - Claude에게 /task-start 명령어 바로 전달
+• `/export` → 확인 메시지 → Reply로 `yes` - 단계별 안전 전송
+
 **사용법:**
 • 일반 텍스트 메시지를 보내면 Claude Code에 전달됩니다
-• Claude 작업 완료 시 hook을 통해 자동 알림을 받습니다
+• 알림 메시지에 Reply하면 해당 세션으로 정확히 전송됩니다
+• Claude 작업 완료 시 자동 알림을 받습니다
 • 위험한 명령어는 자동으로 차단됩니다
 • 최대 500자까지 입력 가능합니다
 
