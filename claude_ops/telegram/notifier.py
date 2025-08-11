@@ -211,6 +211,54 @@ class SmartNotifier:
             
         return success
     
+    def send_waiting_input_notification(self) -> bool:
+        """Send notification when Claude is waiting for user input"""
+        # Get session information
+        session_name = self.config.session_name
+        session_display = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
+        working_dir = self.config.working_directory
+        
+        # Get current screen to show what Claude is waiting for
+        try:
+            import subprocess
+            result = subprocess.run(
+                f"tmux capture-pane -t {session_name} -p -S -3", 
+                shell=True, 
+                capture_output=True, 
+                text=True
+            )
+            
+            if result.returncode == 0:
+                screen_lines = result.stdout.strip().split('\n')[-3:]  # Get last 3 lines
+                context_text = '\n'.join(screen_lines).strip()
+            else:
+                context_text = "Claude가 입력을 기다리고 있습니다"
+                
+        except Exception as e:
+            logger.debug(f"Failed to get screen context: {e}")
+            context_text = "Claude가 입력을 기다리고 있습니다"
+        
+        # Enhanced message with session information for reply targeting
+        message = f"""⏸️ **입력 대기** [`{session_name}`]
+
+📁 **프로젝트**: `{working_dir}`
+🎯 **세션**: `{session_name}`
+⏰ **대기 시작**: {self._get_current_time()}
+
+**현재 상태:**
+{context_text}
+
+💡 **답장하려면** 이 메시지에 Reply로 응답하세요!"""
+        
+        success = self._send_telegram_notification(message)
+        
+        if success:
+            logger.info(f"✅ Sent waiting input notification for session: {session_name}")
+        else:
+            logger.warning(f"❌ Failed to send waiting input notification for session: {session_name}")
+        
+        return success
+    
     async def send_notification(self, message: str, force: bool = False) -> bool:
         """
         Send smart notification (async version)

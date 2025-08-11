@@ -78,9 +78,31 @@ class MultiSessionMonitor:
             # Check if Claude is working (esc to interrupt)
             if "esc to interrupt" in tmux_output:
                 return "working"
+            
+            # Check for special waiting states that indicate completion
+            bottom_lines = '\n'.join(tmux_output.split('\n')[-5:]).lower()
+            waiting_patterns = [
+                "ready to code",           # Basic ready state
+                "bash command",            # Bash tool waiting
+                "select option",           # Option selection
+                "choose an option",        # Option selection variant
+                "enter your choice",       # Choice prompt
+                "press enter to continue", # Continuation prompt
+                "waiting for input",       # Input waiting
+                "type your response",      # Response waiting
+                "what would you like",     # Question prompt
+                "how can i help",          # Help prompt
+                "continue?",               # Continuation question
+                "proceed?",                # Proceed question
+                "confirm?",                # Confirmation question
+            ]
+            
+            for pattern in waiting_patterns:
+                if pattern in bottom_lines:
+                    logger.debug(f"Detected waiting state '{pattern}' in {session_name}")
+                    return "waiting_input"
                 
             # Check if Claude is responding (bullet points in recent lines)
-            bottom_lines = '\n'.join(tmux_output.split('\n')[-10:])
             if "●" in bottom_lines or "•" in bottom_lines:
                 return "responding"
                 
@@ -95,7 +117,7 @@ class MultiSessionMonitor:
         result = os.system(f"tmux has-session -t {session_name} 2>/dev/null")
         return result == 0
     
-    def send_completion_notification(self, session_name: str):
+    def send_completion_notification(self, session_name: str, state_type: str = "completion"):
         """Send work completion notification for a specific session"""
         try:
             # Temporarily switch to this session for notification context
@@ -104,18 +126,23 @@ class MultiSessionMonitor:
             
             # Create a notifier for this session
             session_notifier = SmartNotifier(self.config)
-            success = session_notifier.send_work_completion_notification()
+            
+            # Send different notifications based on state
+            if state_type == "waiting_input":
+                success = session_notifier.send_waiting_input_notification()
+            else:
+                success = session_notifier.send_work_completion_notification()
             
             # Switch back to original session
             session_manager.switch_session(original_session)
             
             if success:
-                logger.info(f"✅ Sent completion notification for session: {session_name}")
+                logger.info(f"✅ Sent {state_type} notification for session: {session_name}")
             else:
-                logger.debug(f"⏭️ Skipped notification for session: {session_name} (work still in progress or failed)")
+                logger.debug(f"⏭️ Skipped notification for session: {session_name} ({state_type} - work still in progress or failed)")
                 
         except Exception as e:
-            logger.error(f"Error sending notification for {session_name}: {e}")
+            logger.error(f"Error sending {state_type} notification for {session_name}: {e}")
     
     def monitor_session(self, session_name: str, status_file: str):
         """Monitor a single session for state changes"""
@@ -152,10 +179,15 @@ class MultiSessionMonitor:
                     if current_state != previous_state:
                         logger.info(f"🔄 State change in {session_name}: {previous_state} -> {current_state}")
                     
-                    # Check for work completion (working -> idle)
-                    if previous_state == "working" and current_state == "idle":
+                    # Check for work completion (working -> idle/waiting_input)
+                    if previous_state == "working" and current_state in ["idle", "waiting_input"]:
                         logger.info(f"🎯 Work completion detected in session: {session_name}")
                         self.send_completion_notification(session_name)
+                    
+                    # Check for special waiting states that need attention
+                    elif previous_state in ["working", "responding"] and current_state == "waiting_input":
+                        logger.info(f"⏸️ Claude waiting for input in session: {session_name}")
+                        self.send_completion_notification(session_name, "waiting_input")
                     
                     # Update previous state and session_states (thread-safe)
                     previous_state = current_state

@@ -350,7 +350,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 • `/start project_name` - ~/projects/project_name에서 claude_project_name 세션 시작
 • `/start project_name /custom/path` - 지정 경로에서 claude_project_name 세션 시작
 • `/status` - 봇 및 tmux 세션 상태 확인
-• `/log` - 현재 Claude 화면 실시간 확인
+• `/log [lines]` - 현재 Claude 화면 확인 (기본 50줄, 최대 2000줄)
 • `/stop` - Claude 작업 중단 (ESC 키 전송)
 • `/sessions` - 활성 세션 목록 보기 및 전환
 • `/help` - 이 도움말 보기
@@ -377,17 +377,29 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
     
     
     async def log_command(self, update, context):
-        """Show current Claude screen command"""
+        """Show current Claude screen command with optional line count"""
         user_id = update.effective_user.id
         
         if not self.check_user_authorization(user_id):
             await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
             return
         
+        # Parse line count parameter (default: 50)
+        line_count = 50
+        if context.args:
+            try:
+                line_count = int(context.args[0])
+                line_count = max(10, min(line_count, 2000))  # Limit between 10-2000 lines
+            except (ValueError, IndexError):
+                await update.message.reply_text("❌ 올바른 숫자를 입력하세요. 예: `/log 100`")
+                return
+        
         try:
             import subprocess
+            
+            # Use tmux capture-pane with -S to specify start line (negative for history)
             result = subprocess.run(
-                f"tmux capture-pane -t {self.config.session_name} -p", 
+                f"tmux capture-pane -t {self.config.session_name} -p -S -{line_count}", 
                 shell=True, 
                 capture_output=True, 
                 text=True
@@ -398,17 +410,46 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                 
                 if current_screen:
                     lines = current_screen.split('\n')
-                    if len(lines) > 30:
-                        display_lines = lines[-50:]
-                        screen_text = '\n'.join(display_lines)
-                        message = f"📺 **Claude 현재 화면** (마지막 50줄):\n\n```\n{screen_text}\n```"
+                    
+                    # Always show the requested number of lines
+                    if len(lines) > line_count:
+                        display_lines = lines[-line_count:]
                     else:
-                        message = f"📺 **Claude 현재 화면**:\n\n```\n{current_screen}\n```"
+                        display_lines = lines
+                        
+                    screen_text = '\n'.join(display_lines)
                     
-                    if len(message) > 4000:
-                        message = message[:3500] + "\n...\n(내용이 길어서 일부만 표시됨)\n```"
-                    
-                    await update.message.reply_text(message, parse_mode='Markdown')
+                    # Check if we need to split the message due to Telegram limits
+                    max_length = 3500
+                    if len(screen_text) > max_length:
+                        # Split into multiple messages
+                        parts = []
+                        current_part = ""
+                        
+                        for line in display_lines:
+                            if len(current_part + line + "\n") > max_length:
+                                if current_part:
+                                    parts.append(current_part)
+                                current_part = line + "\n"
+                            else:
+                                current_part += line + "\n"
+                        
+                        if current_part:
+                            parts.append(current_part)
+                        
+                        # Send each part as a separate message
+                        for i, part in enumerate(parts):
+                            if i == 0:
+                                header = f"📺 **Claude 화면** ({len(display_lines)}줄) - Part {i+1}/{len(parts)}:\n\n"
+                            else:
+                                header = f"📺 **Part {i+1}/{len(parts)}**:\n\n"
+                            # Send without markdown to avoid parsing errors
+                            message = f"{header}{part.strip()}"
+                            await update.message.reply_text(message, parse_mode=None)
+                    else:
+                        # Send without markdown to avoid parsing errors
+                        message = f"📺 Claude 현재 화면 ({len(display_lines)}줄):\n\n{screen_text}"
+                        await update.message.reply_text(message, parse_mode=None)
                 else:
                     await update.message.reply_text("📺 Claude 화면이 비어있습니다.")
             else:
@@ -608,21 +649,26 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 
 Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 
-**명령어:**
+**봇 명령어:**
 • `/start` - 현재 세션 시작/재시작
 • `/start project_name` - ~/projects/project_name에서 claude_project_name 세션 시작
 • `/start project_name /custom/path` - 지정 경로에서 claude_project_name 세션 시작
 • `/status` - 봇 및 tmux 세션 상태 확인
-• `/log` - 현재 Claude 화면 실시간 확인
+• `/log [lines]` - 현재 Claude 화면 확인 (기본 50줄, 최대 2000줄)
 • `/stop` - Claude 작업 중단 (ESC 키 전송)
 • `/sessions` - 활성 세션 목록 보기 및 전환
 • `/help` - 이 도움말 보기
 
+**Claude 명령어:**
+• 일반 텍스트 메시지 → Claude Code에 직접 전달
+• **슬래시 명령어** (`/project-plan`, `/task-start` 등) → Claude Code에 직접 전달
+• 알려지지 않은 `/command` → Claude Code에 자동 전달
+
 **사용법:**
-• 일반 텍스트 메시지를 보내면 Claude Code에 전달됩니다
-• Claude 작업 완료 시 hook을 통해 자동 알림을 받습니다
+• 텔레그램 알림에 Reply로 답장 → 해당 세션에 정확히 전달
+• Claude 작업 완료 시 hook을 통해 자동 알림 수신
 • 위험한 명령어는 자동으로 차단됩니다
-• 최대 500자까지 입력 가능합니다
+• 최대 500자까지 입력 가능
 
 **보안:**
 • 인증된 사용자만 사용 가능
@@ -632,28 +678,43 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         
         await query.edit_message_text(help_text, parse_mode='Markdown')
     
+    async def unknown_command_handler(self, update, context):
+        """Handle unknown commands by forwarding to Claude"""
+        user_id = update.effective_user.id
+        command_text = update.message.text
+        
+        logger.info(f"Unknown command received: {command_text}")
+        
+        # Forward unknown commands to Claude with a prefix explanation
+        await self.forward_to_claude(update, context)
+    
     def setup_handlers(self):
         """Setup all command and callback handlers"""
         if not self.app:
             raise ValueError("Application not initialized")
             
-        # Command handlers
+        # Command handlers (known bot commands)
         self.app.add_handler(CommandHandler("status", self.status_command))
         self.app.add_handler(CommandHandler("start", self.start_claude_command))
         self.app.add_handler(CommandHandler("help", self.help_command))
         self.app.add_handler(CommandHandler("log", self.log_command))
         self.app.add_handler(CommandHandler("stop", self.stop_command))
-        # clear command removed - not needed
-        # menu command removed - use inline keyboard buttons instead
         self.app.add_handler(CommandHandler("sessions", self.sessions_command))
         
         # Callback query handler for inline buttons
         self.app.add_handler(CallbackQueryHandler(self.button_callback))
         
-        # Message handler for forwarding to Claude
+        # Message handler for forwarding regular text to Claude
         self.app.add_handler(MessageHandler(
             filters.TEXT & ~filters.COMMAND, 
             self.forward_to_claude
+        ))
+        
+        # Handler for unknown commands - forward to Claude
+        # This must be added AFTER known commands to catch unhandled ones
+        self.app.add_handler(MessageHandler(
+            filters.COMMAND,
+            self.unknown_command_handler
         ))
     
     async def setup_bot_commands(self):
