@@ -101,8 +101,10 @@ class TelegramBridge:
         patterns = [
             r'\*\*🎯 세션 이름\*\*: `([^`]+)`',  # From start command
             r'🎯 \*\*세션\*\*: `([^`]+)`',       # From notification (with markdown bold)
+            r'🎯 \*\*세션\*\*: `([^`]+)`',       # From log messages (with markdown bold)
             r'세션: `([^`]+)`',                    # From notification (simple)
-            r'\[([^]]+)\]',                        # From completion notification [session_name]
+            r'\[([^]]+)\]',                        # From completion notification [session_name] or log headers
+            r'\*\*Claude 화면 로그\*\* \[([^\]]+)\]',  # From new log format
             r'(claude_[\w-]+)',                    # Any claude_xxx pattern (full match)
             r'claude_(\w+)',                       # Any claude_xxx pattern (name only)
         ]
@@ -378,8 +380,16 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 • `/status` - 봇 및 tmux 세션 상태 확인
 • `/log [lines]` - 현재 Claude 화면 확인 (기본 50줄, 최대 2000줄)
 • `/stop` - Claude 작업 중단 (ESC 키 전송)
+• `/erase` - 현재 입력 지우기 (Ctrl+C 전송) 🆕
+• `/clear` - 화면 정리 (Ctrl+L 전송) 🆕
 • `/sessions` - 활성 세션 목록 보기 및 전환
 • `/help` - 이 도움말 보기
+
+**Reply 기반 세션 제어:** 🆕
+• 알림에 Reply + `/log` → 해당 세션의 로그 표시
+• 알림에 Reply + `/session` → 해당 세션으로 바로 전환
+• 알림에 Reply + `/erase` → 해당 세션의 입력 지우기
+• 알림에 Reply + `/clear` → 해당 세션의 화면 정리
 
 **Claude 슬래시 명령어 전달:**
 • `//export` - Claude에게 /export 명령어 바로 전달
@@ -482,18 +492,29 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                         if current_part:
                             parts.append(current_part)
                         
-                        # Send each part as a separate message
+                        # Send each part as a separate message with session info
+                        session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
                         for i, part in enumerate(parts):
                             if i == 0:
-                                header = f"📺 **Claude 화면** ({len(display_lines)}줄) - Part {i+1}/{len(parts)}:\n\n"
+                                header = f"📺 **Claude 화면 로그** [{target_session}]\n\n"
+                                header += f"📁 **프로젝트**: `{session_display}`\n"
+                                header += f"🎯 **세션**: `{target_session}`\n"
+                                header += f"📏 **라인 수**: {len(display_lines)}줄 - Part {i+1}/{len(parts)}\n\n"
+                                header += "**로그 내용:**\n"
                             else:
-                                header = f"📺 **Part {i+1}/{len(parts)}**:\n\n"
+                                header = f"📺 **Part {i+1}/{len(parts)}** [{target_session}]\n\n"
                             # Send without markdown to avoid parsing errors
                             message = f"{header}{part.strip()}"
                             await update.message.reply_text(message, parse_mode=None)
                     else:
-                        # Send without markdown to avoid parsing errors
-                        message = f"📺 Claude 현재 화면 ({len(display_lines)}줄):\n\n{screen_text}"
+                        # Send without markdown to avoid parsing errors with session info
+                        session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+                        header = f"📺 **Claude 화면 로그** [{target_session}]\n\n"
+                        header += f"📁 **프로젝트**: `{session_display}`\n"
+                        header += f"🎯 **세션**: `{target_session}`\n"
+                        header += f"📏 **라인 수**: {len(display_lines)}줄\n\n"
+                        header += "**로그 내용:**\n"
+                        message = f"{header}{screen_text}"
                         await update.message.reply_text(message, parse_mode=None)
                 else:
                     await update.message.reply_text("📺 Claude 화면이 비어있습니다.")
@@ -523,6 +544,74 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                 await update.message.reply_text("❌ 작업 중단 명령 전송에 실패했습니다.")
         except Exception as e:
             logger.error(f"작업 중단 중 오류: {str(e)}")
+            await update.message.reply_text("❌ 내부 오류가 발생했습니다.")
+    
+    async def erase_command(self, update, context):
+        """Clear current input line (send Ctrl+C)"""
+        user_id = update.effective_user.id
+        
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+        
+        # Check for reply-based session targeting
+        target_session = self.config.session_name
+        if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
+            original_text = update.message.reply_to_message.text
+            reply_session = self.extract_session_from_message(original_text)
+            if reply_session:
+                session_exists = os.system(f"tmux has-session -t {reply_session}") == 0
+                if session_exists:
+                    target_session = reply_session
+                    logger.info(f"📍 Reply 기반 erase: {target_session}")
+        
+        try:
+            # Send Ctrl+C to clear current input
+            result = os.system(f"tmux send-keys -t {target_session} C-c")
+            
+            if result == 0:
+                logger.info(f"Ctrl+C 키 전송 완료: {target_session}")
+                session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+                await update.message.reply_text(f"🧹 `{session_display}` 세션의 현재 입력을 지웠습니다 (Ctrl+C)")
+            else:
+                logger.error(f"Ctrl+C 키 전송 실패: exit code {result}")
+                await update.message.reply_text("❌ 입력 지우기 명령 전송에 실패했습니다.")
+        except Exception as e:
+            logger.error(f"입력 지우기 중 오류: {str(e)}")
+            await update.message.reply_text("❌ 내부 오류가 발생했습니다.")
+    
+    async def clear_command(self, update, context):
+        """Clear terminal screen (send Ctrl+L)"""
+        user_id = update.effective_user.id
+        
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+        
+        # Check for reply-based session targeting
+        target_session = self.config.session_name
+        if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
+            original_text = update.message.reply_to_message.text
+            reply_session = self.extract_session_from_message(original_text)
+            if reply_session:
+                session_exists = os.system(f"tmux has-session -t {reply_session}") == 0
+                if session_exists:
+                    target_session = reply_session
+                    logger.info(f"📍 Reply 기반 clear: {target_session}")
+        
+        try:
+            # Send Ctrl+L to clear screen
+            result = os.system(f"tmux send-keys -t {target_session} C-l")
+            
+            if result == 0:
+                logger.info(f"Ctrl+L 키 전송 완료: {target_session}")
+                session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+                await update.message.reply_text(f"🖥️ `{session_display}` 세션의 화면을 정리했습니다 (Ctrl+L)")
+            else:
+                logger.error(f"Ctrl+L 키 전송 실패: exit code {result}")
+                await update.message.reply_text("❌ 화면 정리 명령 전송에 실패했습니다.")
+        except Exception as e:
+            logger.error(f"화면 정리 중 오류: {str(e)}")
             await update.message.reply_text("❌ 내부 오류가 발생했습니다.")
     
     async def sessions_command(self, update, context):
@@ -690,8 +779,15 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                 current_screen = result.stdout  # Don't strip - keep all original spacing
                 
                 if current_screen:
-                    # Just show raw output - no processing
-                    message = f"📺 Claude 현재 화면:\n\n{current_screen}"
+                    # Show with session info for proper reply targeting
+                    session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+                    lines = current_screen.split('\n')
+                    header = f"📺 **Claude 화면 로그** [{target_session}]\n\n"
+                    header += f"📁 **프로젝트**: `{session_display}`\n"
+                    header += f"🎯 **세션**: `{target_session}`\n"
+                    header += f"📏 **라인 수**: {len(lines)}줄\n\n"
+                    header += "**로그 내용:**\n"
+                    message = f"{header}{current_screen}"
                     await query.edit_message_text(message, parse_mode=None)
                 else:
                     await query.edit_message_text("📺 Claude 화면이 비어있습니다.")
@@ -731,8 +827,16 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 • `/status` - 봇 및 tmux 세션 상태 확인
 • `/log [lines]` - 현재 Claude 화면 확인 (기본 50줄, 최대 2000줄)
 • `/stop` - Claude 작업 중단 (ESC 키 전송)
+• `/erase` - 현재 입력 지우기 (Ctrl+C 전송) 🆕
+• `/clear` - 화면 정리 (Ctrl+L 전송) 🆕
 • `/sessions` - 활성 세션 목록 보기 및 전환
 • `/help` - 이 도움말 보기
+
+**Reply 기반 세션 제어:** 🆕
+• 알림에 Reply + `/log` → 해당 세션의 로그 표시
+• 알림에 Reply + `/session` → 해당 세션으로 바로 전환
+• 알림에 Reply + `/erase` → 해당 세션의 입력 지우기
+• 알림에 Reply + `/clear` → 해당 세션의 화면 정리
 
 **Claude 명령어:**
 • 일반 텍스트 메시지 → Claude Code에 직접 전달
@@ -774,6 +878,8 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         self.app.add_handler(CommandHandler("help", self.help_command))
         self.app.add_handler(CommandHandler("log", self.log_command))
         self.app.add_handler(CommandHandler("stop", self.stop_command))
+        self.app.add_handler(CommandHandler("erase", self.erase_command))
+        self.app.add_handler(CommandHandler("clear", self.clear_command))
         self.app.add_handler(CommandHandler("sessions", self.sessions_command))
         
         # Callback query handler for inline buttons
@@ -799,6 +905,8 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             BotCommand("status", "📊 봇 및 tmux 세션 상태 확인"),
             BotCommand("log", "📺 현재 Claude 화면 실시간 확인"),
             BotCommand("stop", "⛔ Claude 작업 중단 (ESC 키 전송)"),
+            BotCommand("erase", "🧹 현재 입력 지우기 (Ctrl+C 전송)"),
+            BotCommand("clear", "🖥️ 화면 정리 (Ctrl+L 전송)"),
             BotCommand("sessions", "🔄 활성 세션 목록 보기"),
             BotCommand("help", "❓ 도움말 보기")
         ]
