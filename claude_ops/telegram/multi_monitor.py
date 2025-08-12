@@ -125,12 +125,9 @@ class MultiSessionMonitor:
         if self.notification_sent.get(session_name, False):
             return False
         
-        # 4. Check if enough time has passed since last activity
-        last_activity = self.last_activity_time.get(session_name, 0)
-        time_since_activity = time.time() - last_activity
-        
-        # If we just stopped working or enough time has passed without activity
-        if was_working or time_since_activity >= self.timeout_seconds:
+        # 4. Only send notification if we just stopped working
+        # Don't send timeout-based notifications for idle sessions
+        if was_working:
             self.notification_sent[session_name] = True  # Mark as notified
             return True
             
