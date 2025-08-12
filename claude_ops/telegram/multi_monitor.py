@@ -48,7 +48,7 @@ class MultiSessionMonitor:
     # They are no longer needed with simplified detection
     
     def is_working(self, session_name: str) -> bool:
-        """Check if Claude is currently working (simplified detection)"""
+        """Check if Claude is currently working (enhanced detection)"""
         try:
             result = subprocess.run(
                 f"tmux capture-pane -t {session_name} -p",
@@ -63,8 +63,25 @@ class MultiSessionMonitor:
                 
             tmux_output = result.stdout
             
-            # Only check for the most reliable working indicator
-            return "esc to interrupt" in tmux_output
+            # Check for esc to interrupt pattern
+            if "esc to interrupt" not in tmux_output:
+                return False
+            
+            # Additional check: exclude finished states that still show "esc to interrupt"
+            # These patterns indicate work is actually complete despite "esc to interrupt"
+            finished_patterns = [
+                "accept edits",       # Edit completion state
+                "Spelunking…",        # File exploration complete  
+                "Forging…",           # Tool execution complete
+                "Envisioning…",       # Planning complete
+                "⏵⏵ accept",         # General completion prompt
+            ]
+            
+            for pattern in finished_patterns:
+                if pattern in tmux_output:
+                    return False  # Work is actually complete
+                    
+            return True  # Actually working
             
         except Exception as e:
             logger.debug(f"Failed to check if {session_name} is working: {e}")
