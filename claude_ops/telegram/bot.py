@@ -122,6 +122,31 @@ class TelegramBridge:
         
         return None
     
+    def get_target_session_from_reply(self, update) -> tuple[Optional[str], bool]:
+        """
+        Extract target session from reply message and determine if we should switch active session
+        
+        Returns:
+            (target_session, should_switch_active): tuple of session name and whether to switch
+        """
+        if not (update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot):
+            return None, False
+            
+        original_text = update.message.reply_to_message.text
+        target_session = self.extract_session_from_message(original_text)
+        
+        if target_session:
+            logger.info(f"📍 Reply 기반 세션 감지: {target_session}")
+            # Check if target session exists
+            session_exists = os.system(f"tmux has-session -t {target_session}") == 0
+            if session_exists:
+                return target_session, True
+            else:
+                logger.warning(f"❌ 대상 세션 {target_session}이 존재하지 않음")
+                return None, False
+        
+        return None, False
+    
     async def forward_to_claude(self, update, context):
         """Forward user input to Claude tmux session with reply-based targeting"""
         user_id = update.effective_user.id
@@ -161,7 +186,8 @@ class TelegramBridge:
             await update.message.reply_text(f"❌ {message}")
             return
         
-        # Check if this is a reply to a bot message
+        # Check if this is a reply to a bot message (RESTORED ORIGINAL LOGIC)
+        target_session = None
         if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
             original_text = update.message.reply_to_message.text
             
@@ -384,29 +410,48 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
             return
         
+        # Check if replying to a message - if so, use that session for log
+        target_session = self.config.session_name
+        if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
+            original_text = update.message.reply_to_message.text
+            reply_session = self.extract_session_from_message(original_text)
+            if reply_session:
+                # Check if target session exists
+                session_exists = os.system(f"tmux has-session -t {reply_session}") == 0
+                if session_exists:
+                    target_session = reply_session
+                    logger.info(f"📍 Reply 기반 로그 조회: {target_session}")
+                else:
+                    await update.message.reply_text(f"❌ 세션 `{reply_session}`이 존재하지 않습니다.")
+                    return
+        
         # Parse line count parameter (default: 50)
         line_count = 50
+        logger.info(f"🔍 Log command - context.args: {context.args}")
         if context.args:
             try:
                 line_count = int(context.args[0])
                 line_count = max(10, min(line_count, 2000))  # Limit between 10-2000 lines
+                logger.info(f"📏 Parsed line_count: {line_count}")
             except (ValueError, IndexError):
                 await update.message.reply_text("❌ 올바른 숫자를 입력하세요. 예: `/log 100`")
                 return
+        else:
+            logger.info("📏 No args provided, using default line_count: 50")
         
         try:
             import subprocess
             
             # Use tmux capture-pane with -S to specify start line (negative for history)
             result = subprocess.run(
-                f"tmux capture-pane -t {self.config.session_name} -p -S -{line_count}", 
+                f"tmux capture-pane -t {target_session} -p -S -{line_count}", 
                 shell=True, 
                 capture_output=True, 
                 text=True
             )
             
             if result.returncode == 0:
-                current_screen = result.stdout.strip()
+                current_screen = result.stdout  # Don't strip - keep all original spacing
                 
                 if current_screen:
                     lines = current_screen.split('\n')
@@ -481,13 +526,45 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             await update.message.reply_text("❌ 내부 오류가 발생했습니다.")
     
     async def sessions_command(self, update, context):
-        """Show active sessions command"""
+        """Show active sessions command or switch to reply session directly"""
         user_id = update.effective_user.id
         
         if not self.check_user_authorization(user_id):
             await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
             return
         
+        # Check if replying to a message - if so, switch to that session directly
+        if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
+            original_text = update.message.reply_to_message.text
+            reply_session = self.extract_session_from_message(original_text)
+            if reply_session:
+                # Check if target session exists
+                session_exists = os.system(f"tmux has-session -t {reply_session}") == 0
+                if session_exists:
+                    # Switch active session using session_manager
+                    from ..session_manager import session_manager
+                    
+                    old_session = self.config.session_name
+                    success = session_manager.switch_session(reply_session)
+                    
+                    if success:
+                        logger.info(f"🔄 Reply 기반 세션 전환: {old_session} → {reply_session}")
+                        
+                        session_display = reply_session.replace('claude_', '') if reply_session.startswith('claude_') else reply_session
+                        await update.message.reply_text(
+                            f"🔄 **활성 세션 전환 완료**\n\n"
+                            f"이전: `{old_session}`\n"
+                            f"현재: `{reply_session}`\n\n"
+                            f"이제 `{session_display}` 세션이 활성화되었습니다."
+                        )
+                    else:
+                        await update.message.reply_text(f"❌ 세션 전환에 실패했습니다: {reply_session}")
+                    return
+                else:
+                    await update.message.reply_text(f"❌ 세션 `{reply_session}`이 존재하지 않습니다.")
+                    return
+        
+        # Normal session list display (when not replying)
         try:
             from ..session_manager import session_manager
             
@@ -592,32 +669,30 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         await query.edit_message_text(status_message, parse_mode='Markdown')
     
     async def _log_callback(self, query, context):
-        """Log check callback"""
+        """Log check callback - Simple raw tmux output"""
         try:
             import subprocess
+            
+            # Check if this is a reply to determine target session
+            # Note: For callback queries, we use the current active session
+            # Reply-based targeting is handled by the command version
+            target_session = self.config.session_name
+            
+            # Simple tmux capture - just current screen
             result = subprocess.run(
-                f"tmux capture-pane -t {self.config.session_name} -p", 
+                f"tmux capture-pane -t {target_session} -p", 
                 shell=True, 
                 capture_output=True, 
                 text=True
             )
             
             if result.returncode == 0:
-                current_screen = result.stdout.strip()
+                current_screen = result.stdout  # Don't strip - keep all original spacing
                 
                 if current_screen:
-                    lines = current_screen.split('\n')
-                    if len(lines) > 30:
-                        display_lines = lines[-50:]
-                        screen_text = '\n'.join(display_lines)
-                        message = f"📺 **Claude 현재 화면** (마지막 50줄):\n\n```\n{screen_text}\n```"
-                    else:
-                        message = f"📺 **Claude 현재 화면**:\n\n```\n{current_screen}\n```"
-                    
-                    if len(message) > 4000:
-                        message = message[:3500] + "\n...\n(내용이 길어서 일부만 표시됨)\n```"
-                    
-                    await query.edit_message_text(message, parse_mode='Markdown')
+                    # Just show raw output - no processing
+                    message = f"📺 Claude 현재 화면:\n\n{current_screen}"
+                    await query.edit_message_text(message, parse_mode=None)
                 else:
                     await query.edit_message_text("📺 Claude 화면이 비어있습니다.")
             else:
