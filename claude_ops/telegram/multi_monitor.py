@@ -125,6 +125,50 @@ class MultiSessionMonitor:
             
         return False
     
+    def is_waiting_for_input(self, session_name: str) -> bool:
+        """Detect if Claude is waiting for user input"""
+        try:
+            result = subprocess.run(
+                f"tmux capture-pane -t {session_name} -p",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            if result.returncode != 0:
+                return False
+                
+            tmux_output = result.stdout.strip()
+            
+            # Check for empty or minimal content (not waiting)
+            if not tmux_output or len(tmux_output) < 50:
+                return False
+            
+            # Check for user input waiting patterns
+            waiting_indicators = [
+                "Do you want to proceed?",
+                "❯ 1.",                    # Selection options
+                "❯ 2.",                    # Selection options  
+                "Choose an option:",
+                "Select:",
+                "Enter your choice:",
+                "What would you like to do?",
+                "How would you like to proceed?",
+                "Please choose:",
+                "Continue?",
+            ]
+            
+            for indicator in waiting_indicators:
+                if indicator in tmux_output:
+                    return True
+                    
+            return False
+            
+        except Exception as e:
+            logger.debug(f"Failed to check waiting state for {session_name}: {e}")
+            return False
+
     def should_send_completion_notification(self, session_name: str) -> bool:
         """Determine if completion notification should be sent"""
         # 1. If currently working, reset notification flag and don't send
@@ -138,13 +182,17 @@ class MultiSessionMonitor:
         was_working = self.currently_working.get(session_name, False)
         self.currently_working[session_name] = False
         
-        # 3. If notification already sent for this completion, don't send again
+        # 3. Check if waiting for user input (NEW LOGIC)
+        is_waiting = self.is_waiting_for_input(session_name)
+        
+        # 4. If notification already sent for this completion, don't send again
         if self.notification_sent.get(session_name, False):
             return False
         
-        # 4. Only send notification if we just stopped working
-        # Don't send timeout-based notifications for idle sessions
-        if was_working:
+        # 5. Send notification if:
+        #    - We just stopped working, OR  
+        #    - Claude is waiting for user input
+        if was_working or is_waiting:
             self.notification_sent[session_name] = True  # Mark as notified
             return True
             
