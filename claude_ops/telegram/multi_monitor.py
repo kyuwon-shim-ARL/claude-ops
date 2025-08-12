@@ -10,6 +10,7 @@ import time
 import logging
 import threading
 import subprocess
+import hashlib
 from typing import Dict, Set
 from pathlib import Path
 from ..config import ClaudeOpsConfig
@@ -25,11 +26,15 @@ class MultiSessionMonitor:
     def __init__(self, config: ClaudeOpsConfig = None):
         self.config = config or ClaudeOpsConfig()
         self.notifier = SmartNotifier(self.config)
-        self.session_states: Dict[str, str] = {}  # session_name -> last_state
-        self.status_files: Dict[str, str] = {}    # session_name -> status_file_path
+        # Simplified state tracking
+        self.last_screen_hash: Dict[str, str] = {}      # session -> screen_content_hash
+        self.last_activity_time: Dict[str, float] = {}  # session -> timestamp
+        self.notification_sent: Dict[str, bool] = {}    # session -> notification_sent_flag
+        self.currently_working: Dict[str, bool] = {}    # session -> is_working_flag
         self.active_threads: Dict[str, threading.Thread] = {}  # session_name -> thread
         self.thread_lock = threading.Lock()  # Thread-safe operations
         self.running = False
+        self.timeout_seconds = 45  # 45-second timeout for work completion
         
     def discover_sessions(self) -> Set[str]:
         """Discover all active Claude sessions"""
@@ -39,28 +44,11 @@ class MultiSessionMonitor:
         """Get status file path for a session"""
         return session_manager.get_status_file_for_session(session_name)
     
-    def read_session_state(self, status_file: str) -> str:
-        """Read current state from status file"""
-        try:
-            if os.path.exists(status_file):
-                with open(status_file, 'r') as f:
-                    return f.read().strip()
-            return "idle"
-        except Exception as e:
-            logger.debug(f"Could not read status file {status_file}: {e}")
-            return "idle"
+    # Removed read_session_state and save_session_state methods
+    # They are no longer needed with simplified detection
     
-    def save_session_state(self, status_file: str, state: str) -> None:
-        """Save current state to status file"""
-        try:
-            with open(status_file, 'w') as f:
-                f.write(state)
-            logger.debug(f"Saved state '{state}' to {status_file}")
-        except Exception as e:
-            logger.warning(f"Could not write status file {status_file}: {e}")
-    
-    def detect_session_state(self, session_name: str) -> str:
-        """Detect current state by analyzing tmux output"""
+    def is_working(self, session_name: str) -> bool:
+        """Check if Claude is currently working (simplified detection)"""
         try:
             result = subprocess.run(
                 f"tmux capture-pane -t {session_name} -p",
@@ -71,46 +59,82 @@ class MultiSessionMonitor:
             )
             
             if result.returncode != 0:
-                return "idle"
+                return False
                 
             tmux_output = result.stdout
             
-            # Check if Claude is working (esc to interrupt)
-            if "esc to interrupt" in tmux_output:
-                return "working"
-            
-            # Check for special waiting states that indicate completion
-            bottom_lines = '\n'.join(tmux_output.split('\n')[-5:]).lower()
-            waiting_patterns = [
-                "ready to code",           # Basic ready state
-                "bash command",            # Bash tool waiting
-                "select option",           # Option selection
-                "choose an option",        # Option selection variant
-                "enter your choice",       # Choice prompt
-                "press enter to continue", # Continuation prompt
-                "waiting for input",       # Input waiting
-                "type your response",      # Response waiting
-                "what would you like",     # Question prompt
-                "how can i help",          # Help prompt
-                "continue?",               # Continuation question
-                "proceed?",                # Proceed question
-                "confirm?",                # Confirmation question
-            ]
-            
-            for pattern in waiting_patterns:
-                if pattern in bottom_lines:
-                    logger.debug(f"Detected waiting state '{pattern}' in {session_name}")
-                    return "waiting_input"
-                
-            # Check if Claude is responding (bullet points in recent lines)
-            if "●" in bottom_lines or "•" in bottom_lines:
-                return "responding"
-                
-            return "idle"
+            # Only check for the most reliable working indicator
+            return "esc to interrupt" in tmux_output
             
         except Exception as e:
-            logger.debug(f"Failed to detect state for {session_name}: {e}")
-            return "idle"
+            logger.debug(f"Failed to check if {session_name} is working: {e}")
+            return False
+    
+    def get_screen_content_hash(self, session_name: str) -> str:
+        """Get hash of current screen content for change detection"""
+        try:
+            result = subprocess.run(
+                f"tmux capture-pane -t {session_name} -p",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            if result.returncode != 0:
+                return ""
+                
+            # Create hash of screen content
+            content = result.stdout.strip()
+            return hashlib.md5(content.encode()).hexdigest()
+            
+        except Exception as e:
+            logger.debug(f"Failed to get screen content hash for {session_name}: {e}")
+            return ""
+    
+    def has_screen_changed(self, session_name: str) -> bool:
+        """Check if screen content has changed since last check"""
+        current_hash = self.get_screen_content_hash(session_name)
+        
+        if not current_hash:
+            return False
+            
+        last_hash = self.last_screen_hash.get(session_name, "")
+        
+        if current_hash != last_hash:
+            self.last_screen_hash[session_name] = current_hash
+            self.last_activity_time[session_name] = time.time()
+            return True
+            
+        return False
+    
+    def should_send_completion_notification(self, session_name: str) -> bool:
+        """Determine if completion notification should be sent"""
+        # 1. If currently working, reset notification flag and don't send
+        if self.is_working(session_name):
+            self.notification_sent[session_name] = False  # Reset for next completion
+            self.currently_working[session_name] = True
+            self.last_activity_time[session_name] = time.time()  # Update activity time
+            return False
+        
+        # 2. If we just stopped working, mark it
+        was_working = self.currently_working.get(session_name, False)
+        self.currently_working[session_name] = False
+        
+        # 3. If notification already sent for this completion, don't send again
+        if self.notification_sent.get(session_name, False):
+            return False
+        
+        # 4. Check if enough time has passed since last activity
+        last_activity = self.last_activity_time.get(session_name, 0)
+        time_since_activity = time.time() - last_activity
+        
+        # If we just stopped working or enough time has passed without activity
+        if was_working or time_since_activity >= self.timeout_seconds:
+            self.notification_sent[session_name] = True  # Mark as notified
+            return True
+            
+        return False
     
     def session_exists(self, session_name: str) -> bool:
         """Check if tmux session exists"""
@@ -127,33 +151,32 @@ class MultiSessionMonitor:
             # Create a notifier for this session
             session_notifier = SmartNotifier(self.config)
             
-            # Send different notifications based on state
-            if state_type == "waiting_input":
-                success = session_notifier.send_waiting_input_notification()
-            else:
-                success = session_notifier.send_work_completion_notification()
+            # With simplified detection, we primarily send work completion notifications
+            # The smart notifier will handle the specific context
+            success = session_notifier.send_work_completion_notification()
             
             # Switch back to original session
             session_manager.switch_session(original_session)
             
             if success:
-                logger.info(f"✅ Sent {state_type} notification for session: {session_name}")
+                logger.info(f"✅ Sent completion notification for session: {session_name}")
             else:
-                logger.debug(f"⏭️ Skipped notification for session: {session_name} ({state_type} - work still in progress or failed)")
+                logger.debug(f"⏭️ Skipped notification for session: {session_name} (duplicate or failed)")
                 
         except Exception as e:
-            logger.error(f"Error sending {state_type} notification for {session_name}: {e}")
+            logger.error(f"Error sending completion notification for {session_name}: {e}")
     
     def monitor_session(self, session_name: str, status_file: str):
-        """Monitor a single session for state changes"""
+        """Monitor a single session using simplified detection logic"""
         try:
-            previous_state = self.read_session_state(status_file)
-            
-            # Add to session_states to track this session (thread-safe)
+            # Initialize session tracking
             with self.thread_lock:
-                self.session_states[session_name] = previous_state
+                self.last_screen_hash[session_name] = ""
+                self.last_activity_time[session_name] = time.time()
+                self.notification_sent[session_name] = False
+                self.currently_working[session_name] = False
             
-            logger.info(f"📊 Started monitoring {session_name}, initial state: {previous_state}")
+            logger.info(f"📊 Started simplified monitoring for {session_name}")
             
             while self.running:
                 try:
@@ -162,37 +185,26 @@ class MultiSessionMonitor:
                         logger.info(f"📤 Session {session_name} no longer exists, stopping monitor")
                         break
                     
-                    # Detect current state from tmux output (real-time analysis)
-                    detected_state = self.detect_session_state(session_name)
+                    # Check for screen changes (updates activity time)
+                    screen_changed = self.has_screen_changed(session_name)
                     
-                    # Read saved state from file
-                    saved_state = self.read_session_state(status_file)
+                    # Check if currently working
+                    is_working = self.is_working(session_name)
                     
-                    # Update state file if detected state differs from saved state
-                    if detected_state != saved_state:
-                        logger.debug(f"🔄 State mismatch in {session_name}: saved='{saved_state}' detected='{detected_state}' - updating file")
-                        self.save_session_state(status_file, detected_state)
+                    # Log activity changes for debugging
+                    if screen_changed:
+                        logger.debug(f"📺 Screen changed in {session_name}")
                     
-                    current_state = detected_state
+                    # Check if we should send completion notification
+                    if self.should_send_completion_notification(session_name):
+                        logger.info(f"🎯 Sending completion notification for {session_name}")
+                        self.send_completion_notification(session_name, "completion")
                     
-                    # Log state changes for debugging
-                    if current_state != previous_state:
-                        logger.info(f"🔄 State change in {session_name}: {previous_state} -> {current_state}")
-                    
-                    # Check for work completion (working -> idle/waiting_input)
-                    if previous_state == "working" and current_state in ["idle", "waiting_input"]:
-                        logger.info(f"🎯 Work completion detected in session: {session_name}")
-                        self.send_completion_notification(session_name)
-                    
-                    # Check for special waiting states that need attention
-                    elif previous_state in ["working", "responding"] and current_state == "waiting_input":
-                        logger.info(f"⏸️ Claude waiting for input in session: {session_name}")
-                        self.send_completion_notification(session_name, "waiting_input")
-                    
-                    # Update previous state and session_states (thread-safe)
-                    previous_state = current_state
-                    with self.thread_lock:
-                        self.session_states[session_name] = current_state
+                    # Update working status for logging
+                    current_working = self.currently_working.get(session_name, False)
+                    if is_working != current_working:
+                        status = "started working" if is_working else "stopped working"
+                        logger.info(f"🔄 {session_name}: {status}")
                     
                     # Wait before next check
                     time.sleep(self.config.check_interval)
@@ -205,8 +217,11 @@ class MultiSessionMonitor:
             # Clean up when thread exits
             logger.info(f"🧹 Monitor thread for {session_name} is exiting")
             with self.thread_lock:
-                if session_name in self.session_states:
-                    del self.session_states[session_name]
+                # Clean up all session data
+                for data_dict in [self.last_screen_hash, self.last_activity_time, 
+                                self.notification_sent, self.currently_working]:
+                    if session_name in data_dict:
+                        del data_dict[session_name]
                 if session_name in self.active_threads:
                     del self.active_threads[session_name]
     
@@ -238,7 +253,7 @@ class MultiSessionMonitor:
             return True
     
     def cleanup_dead_threads(self):
-        """Clean up finished threads"""
+        """Clean up finished threads and their associated data"""
         with self.thread_lock:
             dead_sessions = []
             for session_name, thread in self.active_threads.items():
@@ -248,8 +263,11 @@ class MultiSessionMonitor:
             for session_name in dead_sessions:
                 logger.debug(f"🧹 Cleaning up dead thread for {session_name}")
                 del self.active_threads[session_name]
-                if session_name in self.session_states:
-                    del self.session_states[session_name]
+                # Clean up all associated data
+                for data_dict in [self.last_screen_hash, self.last_activity_time,
+                                self.notification_sent, self.currently_working]:
+                    if session_name in data_dict:
+                        del data_dict[session_name]
     
     def start_monitoring(self):
         """Start monitoring all Claude sessions"""
@@ -300,7 +318,7 @@ class MultiSessionMonitor:
         logger.info("🏁 Multi-session monitoring stopped")
     
     def stop_monitoring(self):
-        """Stop monitoring and clean up all threads"""
+        """Stop monitoring and clean up all threads and data"""
         logger.info("🛑 Stopping multi-session monitoring...")
         self.running = False
         
@@ -314,10 +332,13 @@ class MultiSessionMonitor:
                 logger.debug(f"⏳ Waiting for {session_name} monitor thread to stop...")
                 thread.join(timeout=5)  # Wait max 5 seconds per thread
         
-        # Force cleanup any remaining threads
+        # Force cleanup any remaining threads and all data
         with self.thread_lock:
             self.active_threads.clear()
-            self.session_states.clear()
+            self.last_screen_hash.clear()
+            self.last_activity_time.clear()
+            self.notification_sent.clear()
+            self.currently_working.clear()
         
         logger.info("✅ All monitoring threads stopped and cleaned up")
 

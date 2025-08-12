@@ -120,6 +120,34 @@ nextflow run src/main.nf -profile cluster
 nextflow run src/main.nf --output_dir /path/to/results
 ```
 
+## Claude Code Optimization Strategies
+
+### 🚀 Tool Usage Optimization
+- **Use Task tool for**: Complex analysis, multi-file searches, architectural reviews
+- **Use MultiEdit for**: Batch refactoring, consistent style changes, pattern replacements  
+- **Use Glob + batch Read**: When analyzing multiple files with similar patterns
+- **Combine tools strategically**: Glob → Task analysis → MultiEdit implementation
+
+### 📊 Context Management Best Practices
+- **Batch similar operations**: Read multiple files in one go when possible
+- **Use Task tool for heavy lifting**: Delegate complex analysis to reduce main context usage
+- **Prioritize MultiEdit**: Single tool call vs multiple Edit calls saves significant tokens
+- **Strategic file reading**: Read only necessary sections using offset/limit parameters
+
+### ⚡ Performance Optimization Patterns
+```python
+# Efficient pattern: Batch processing
+files = Glob("**/*.py")
+for batch in chunk_files(files, 5):
+    batch_analysis = Task(f"Analyze these {len(batch)} files for issues")
+    apply_fixes_with_multiedit(batch, batch_analysis.fixes)
+
+# Efficient pattern: Targeted operations  
+critical_files = Glob("**/telegram/*.py") 
+performance_issues = Task("Find performance bottlenecks in telegram modules")
+MultiEdit(critical_files, performance_issues.suggested_changes)
+```
+
 ## Architecture and Structure
 
 ### Directory Structure
