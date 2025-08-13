@@ -33,9 +33,47 @@ class SmartNotifier:
         from datetime import datetime
         return datetime.now().strftime("%H:%M:%S")
     
+    def _get_current_screen_content(self) -> str:
+        """Get current screen content from tmux session"""
+        try:
+            result = subprocess.run(
+                f"tmux capture-pane -t {self.config.session_name} -p -S -200",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode == 0:
+                return result.stdout
+            return ""
+            
+        except Exception as e:
+            logger.warning(f"Failed to get screen content: {str(e)}")
+            return ""
+
     def _is_work_currently_running(self) -> bool:
         """Check if work is currently running (uses shared utility)"""
         return is_session_working(self.config.session_name)
+        
+    def _is_work_running_from_content(self, screen_content: str) -> bool:
+        """Check if work is running from given screen content"""
+        if not screen_content:
+            return False
+            
+        # Check for working patterns in the content
+        working_patterns = [
+            "esc to interrupt",
+            "Running…", 
+            "ctrl+b to run in background",
+            "tokens · esc to interrupt)"
+        ]
+        
+        for pattern in working_patterns:
+            if pattern in screen_content:
+                return True
+                
+        return False
         
     def _send_telegram_notification(self, message: str) -> bool:
         """Send notification via Telegram"""
@@ -228,18 +266,24 @@ class SmartNotifier:
     
     def send_work_completion_notification(self) -> bool:
         """Send work completion notification with enhanced context and session info"""
-        # First check if work is really completed by checking current screen
-        if self._is_work_currently_running():
-            logger.info("Work still in progress, skipping notification")
-            return False  # Return False to indicate notification was not sent
-            
         # Get session information
         session_name = self.config.session_name
         session_display = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
         working_dir = self.config.working_directory
         
-        # Get rich context from current session
-        context = self.extract_work_context()
+        # Get screen capture once and use it for both checks (atomic operation)
+        screen_content = self._get_current_screen_content()
+        if not screen_content:
+            logger.info("No screen content available, skipping notification")
+            return False
+            
+        # Check if work is really completed using the same screen capture
+        if self._is_work_running_from_content(screen_content):
+            logger.info("Work still in progress, skipping notification")
+            return False  # Return False to indicate notification was not sent
+        
+        # Get rich context from the same screen capture (consistent timing)
+        context = self.extract_work_context_from_content(screen_content)
         
         if context:
             # Enhanced message with session information for reply targeting
@@ -285,20 +329,16 @@ Claude가 작업을 완료했습니다. 결과를 확인해보세요.
     
     def extract_work_context(self) -> str:
         """Extract rich context from tmux session for work completion notification"""
+        screen_content = self._get_current_screen_content()
+        return self.extract_work_context_from_content(screen_content)
+        
+    def extract_work_context_from_content(self, screen_content: str) -> str:
+        """Extract rich context from given screen content"""
         try:
-            # Get more tmux history to find bullet points (like /log command with more lines)
-            result = subprocess.run(
-                f"tmux capture-pane -t {self.config.session_name} -p -S -200",
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            
-            if result.returncode != 0:
+            if not screen_content:
                 return ""
             
-            tmux_output = result.stdout.strip()
+            tmux_output = screen_content.strip()
             if not tmux_output:
                 return ""
             
