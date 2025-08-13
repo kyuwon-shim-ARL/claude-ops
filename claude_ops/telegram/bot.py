@@ -344,6 +344,9 @@ class TelegramBridge:
             os.system(f"cd {target_directory} && tmux new-session -d -s {target_session}")
             os.system(f"tmux send-keys -t {target_session} -l 'claude'")
             os.system(f"tmux send-keys -t {target_session} Enter")
+            
+            # Initialize new session for compatibility
+            await self._initialize_new_session(target_session, update)
             status_msg = f"🚀 {target_session} 세션을 시작했습니다!"
         else:
             status_msg = f"✅ {target_session} 세션이 이미 실행 중입니다."
@@ -1132,6 +1135,9 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                 os.system(f"cd {self.config.working_directory} && tmux new-session -d -s {self.config.session_name}")
                 os.system(f"tmux send-keys -t {self.config.session_name} -l 'claude'")
                 os.system(f"tmux send-keys -t {self.config.session_name} Enter")
+                
+                # Initialize session for compatibility  
+                await self._initialize_new_session_callback(self.config.session_name, query)
                 status_msg = "🚀 Claude 세션을 시작했습니다!"
             else:
                 status_msg = "✅ Claude 세션이 이미 실행 중입니다."
@@ -1204,6 +1210,139 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
     async def _back_to_menu_callback(self, query, context):
         """Back to one-click session menu (no longer needed - redirect to session grid)"""
         await self._show_session_action_grid(query.edit_message_text, query)
+    
+    async def _initialize_new_session(self, session_name: str, update) -> bool:
+        """Initialize new Claude session with smart detection and setup"""
+        try:
+            # Wait a moment for Claude to fully start
+            import time
+            time.sleep(2)
+            
+            # Capture current screen to analyze state
+            result = subprocess.run(
+                f"tmux capture-pane -t {session_name} -p",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            if result.returncode != 0:
+                logger.warning(f"Failed to capture screen for {session_name}")
+                return False
+            
+            screen_content = result.stdout.strip()
+            logger.info(f"Screen content length: {len(screen_content)}")
+            
+            # Check if screen has example text or prompts
+            has_example_text = self._detect_example_text(screen_content)
+            
+            if has_example_text:
+                logger.info(f"Detected example text in {session_name}, clearing with Ctrl+C")
+                # Clear example text with Ctrl+C
+                os.system(f"tmux send-keys -t {session_name} C-c")
+                time.sleep(1)
+            
+            # Send /init to establish proper message cycle
+            logger.info(f"Sending /init to {session_name} for proper initialization")
+            os.system(f"tmux send-keys -t {session_name} '/init'")
+            os.system(f"tmux send-keys -t {session_name} Enter")
+            
+            # Send initialization notification
+            init_msg = f"🎆 **세션 초기화 완료**\n\n"
+            if has_example_text:
+                init_msg += f"✨ 예시 텍스트 제거 후 `/init` 실행\n"
+            else:
+                init_msg += f"✨ 빈 세션에 `/init` 실행\n"
+            init_msg += f"🎯 세션: `{session_name}`\n\n🚀 이제 정상적으로 사용 가능합니다!"
+            
+            await update.message.reply_text(
+                init_msg,
+                parse_mode='Markdown'
+            )
+            
+        except Exception as e:
+            logger.error(f"Session initialization failed: {str(e)}")
+            return False
+    
+    async def _initialize_new_session_callback(self, session_name: str, query) -> bool:
+        """Initialize new Claude session (callback version)"""
+        try:
+            # Wait a moment for Claude to fully start
+            import time
+            time.sleep(2)
+            
+            # Capture current screen to analyze state
+            result = subprocess.run(
+                f"tmux capture-pane -t {session_name} -p",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            if result.returncode != 0:
+                logger.warning(f"Failed to capture screen for {session_name}")
+                return False
+            
+            screen_content = result.stdout.strip()
+            logger.info(f"Screen content length: {len(screen_content)}")
+            
+            # Check if screen has example text or prompts
+            has_example_text = self._detect_example_text(screen_content)
+            
+            if has_example_text:
+                logger.info(f"Detected example text in {session_name}, clearing with Ctrl+C")
+                # Clear example text with Ctrl+C
+                os.system(f"tmux send-keys -t {session_name} C-c")
+                time.sleep(1)
+            
+            # Send /init to establish proper message cycle
+            logger.info(f"Sending /init to {session_name} for proper initialization")
+            os.system(f"tmux send-keys -t {session_name} '/init'")
+            os.system(f"tmux send-keys -t {session_name} Enter")
+            
+            return True
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Session initialization failed: {str(e)}")
+            return False
+    
+    def _detect_example_text(self, screen_content: str) -> bool:
+        """Detect if screen contains example text or prompts that should be cleared"""
+        # Common Claude Code example patterns
+        example_patterns = [
+            "write a python script",
+            "create a simple",
+            "help me with",
+            "example usage",
+            "sample code", 
+            "Try asking",
+            "For example",
+            "You can ask",
+            "Here are some things you can try:",
+            "I'm Claude, an AI assistant",
+        ]
+        
+        screen_lower = screen_content.lower()
+        
+        # Check if any example patterns exist
+        for pattern in example_patterns:
+            if pattern.lower() in screen_lower:
+                logger.info(f"Found example pattern: {pattern}")
+                return True
+        
+        # Check if there's substantial text (more than just prompt)
+        lines = [line.strip() for line in screen_content.split('\n') if line.strip()]
+        non_empty_lines = [line for line in lines if line and line != '>' and not line.startswith('claude')]
+        
+        if len(non_empty_lines) > 2:  # More than basic prompt suggests example content
+            logger.info(f"Detected substantial content ({len(non_empty_lines)} lines), treating as example")
+            return True
+        
+        return False
     
     async def _install_claude_dev_kit(self, target_directory: str, project_name: str, update) -> bool:
         """Install claude-dev-kit in new project directory"""
