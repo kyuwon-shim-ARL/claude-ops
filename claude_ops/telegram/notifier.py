@@ -11,6 +11,8 @@ import subprocess
 from typing import Optional
 from ..config import ClaudeOpsConfig
 from ..utils.session_state import SessionStateAnalyzer, SessionState
+from ..utils.prompt_recall import get_context_for_notification
+from ..utils.log_length_manager import get_current_log_length
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +39,11 @@ class SmartNotifier:
     def _get_current_screen_content(self) -> str:
         """Get current screen content from tmux session"""
         try:
+            # 동적 로그 길이 적용
+            log_lines = get_current_log_length()
+            
             result = subprocess.run(
-                f"tmux capture-pane -t {self.config.session_name} -p -S -200",
+                f"tmux capture-pane -t {self.config.session_name} -p -S -{log_lines}",
                 shell=True,
                 capture_output=True,
                 text=True,
@@ -214,11 +219,14 @@ class SmartNotifier:
             logger.debug(f"Failed to get screen context: {e}")
             context_text = "Claude가 입력을 기다리고 있습니다"
         
+        # 동적 로그 길이 정보 추가
+        log_length = get_current_log_length()
+        
         # Enhanced message with session information for reply targeting
         message = f"""⏸️ **입력 대기** [`{session_name}`]
 
 📁 **프로젝트**: `{working_dir}`
-🎯 **세션**: `{session_name}`
+🎯 **세션**: `{session_name}` (로그: {log_length}줄)
 ⏰ **대기 시작**: {self._get_current_time()}
 
 **현재 상태:**
@@ -265,15 +273,21 @@ class SmartNotifier:
         session_display = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
         working_dir = self.config.working_directory
         
+        # Get last user prompt for context recall
+        prompt_context = get_context_for_notification(session_name)
+        
         # Get rich context for notification
         context = self.extract_work_context()
         
+        # 동적 로그 길이 정보 추가
+        log_length = get_current_log_length()
+        
         if context:
-            # Enhanced message with session information for reply targeting
+            # Enhanced message with session information and prompt recall
             message = f"""✅ **작업 완료** [`{session_name}`]
 
-📁 **프로젝트**: `{working_dir}`
-🎯 **세션**: `{session_name}`
+{prompt_context}📁 **프로젝트**: `{working_dir}`
+🎯 **세션**: `{session_name}` (로그: {log_length}줄)
 ⏰ **완료 시간**: {self._get_current_time()}
 
 {context}
@@ -294,7 +308,7 @@ class SmartNotifier:
             message = f"""✅ **작업 완료** [`{session_name}`]
 
 📁 **프로젝트**: `{working_dir}`
-🎯 **세션**: `{session_name}`
+🎯 **세션**: `{session_name}` (로그: {log_length}줄)
 ⏰ **완료 시간**: {self._get_current_time()}
 
 Claude가 작업을 완료했습니다. 결과를 확인해보세요.

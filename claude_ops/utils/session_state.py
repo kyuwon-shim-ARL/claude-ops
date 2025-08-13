@@ -41,6 +41,7 @@ import logging
 from enum import Enum
 from typing import Optional, Dict, Any, List
 from datetime import datetime
+from .log_length_manager import get_current_log_length
 
 logger = logging.getLogger(__name__)
 
@@ -137,8 +138,11 @@ class SessionStateAnalyzer:
                 return content
         
         try:
+            # 동적 로그 길이 적용
+            log_lines = get_current_log_length()
+            
             result = subprocess.run(
-                f"tmux capture-pane -t {session_name} -p -S -200",
+                f"tmux capture-pane -t {session_name} -p -S -{log_lines}",
                 shell=True,
                 capture_output=True,
                 text=True,

@@ -625,10 +625,6 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         # Show session board grid
         await self._show_session_action_grid(update.message.reply_text, None)
     
-    async def menu_command(self, update, context):
-        """Legacy menu command - redirect to board"""
-        await self.board_command(update, context)
-    
     async def sessions_command(self, update, context):
         """Show active sessions command or switch to reply session directly"""
         user_id = update.effective_user.id
@@ -958,7 +954,6 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         self.app.add_handler(CommandHandler("clear", self.clear_command))
         self.app.add_handler(CommandHandler("sessions", self.sessions_command))
         self.app.add_handler(CommandHandler("board", self.board_command))
-        self.app.add_handler(CommandHandler("menu", self.menu_command))  # Legacy support
         
         # Callback query handler for inline buttons
         self.app.add_handler(CallbackQueryHandler(self.button_callback))
@@ -981,7 +976,6 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         commands = [
             BotCommand("start", "🚀 Claude 세션 시작 (옵션: project_name [path])"),
             BotCommand("board", "🎯 세션 보드"),
-            BotCommand("menu", "🎛️ 원클릭 세션 메뉴"),
             BotCommand("status", "📊 봇 및 tmux 세션 상태 확인"),
             BotCommand("log", "📺 현재 Claude 화면 실시간 확인"),
             BotCommand("stop", "⛔ Claude 작업 중단 (ESC 키 전송)"),
