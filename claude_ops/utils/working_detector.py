@@ -1,162 +1,85 @@
 """
-Unified Working State Detection Utility
+DEPRECATED: Legacy Working State Detection Utility
 
-This module provides a single source of truth for detecting Claude Code working states
-across all components (monitor, notifier, etc.) to prevent logic duplication and 
-inconsistencies.
+This module has been replaced by session_state.py for better consistency
+and unified state management. Please use the new module instead.
 
-## Design Principles:
-- Single Responsibility: Only working state detection
-- DRY: One implementation used everywhere  
-- Extensible: Easy to add new patterns
-- Testable: Clear interface for unit testing
+This file is kept for backward compatibility only.
 """
 
-import subprocess
+import warnings
 import logging
-from typing import Optional
+
+# Issue deprecation warning
+warnings.warn(
+    "working_detector.py is deprecated. Use claude_ops.utils.session_state instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 logger = logging.getLogger(__name__)
 
+# Import everything from the new unified module
+from .session_state import (
+    session_state_analyzer,
+    is_session_working,
+    get_session_working_info
+)
 
+# Legacy compatibility - redirect to new implementation
+working_detector = session_state_analyzer
+
+# Keep the old interface for backward compatibility
 class WorkingStateDetector:
-    """Unified working state detection for Claude Code sessions"""
+    """
+    DEPRECATED: Legacy wrapper around SessionStateAnalyzer
+    
+    This class is deprecated. Use SessionStateAnalyzer from session_state module instead.
+    """
     
     def __init__(self):
-        """Initialize the working state detector with pattern definitions"""
-        # Patterns that indicate active work in progress
-        self.working_patterns = [
-            "esc to interrupt",           # Standard working indicator
-            "Running…",                   # Background task execution
-            "ctrl+b to run in background", # Background task hint
-            "tokens · esc to interrupt)", # Token counting with interrupt
-        ]
+        warnings.warn(
+            "WorkingStateDetector is deprecated. Use SessionStateAnalyzer instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        self._analyzer = session_state_analyzer
         
-        # No finished patterns - work completion is simply absence of working patterns
-        # The previous finished_patterns were causing false positives as they appear
-        # as regular text content rather than actual UI state indicators
+        # Expose old interface for compatibility
+        self.working_patterns = self._analyzer.working_patterns
     
     def is_working(self, session_name: str) -> bool:
-        """
-        Determine if Claude is currently working in the given session
-        
-        Args:
-            session_name: Name of the tmux session to check
-            
-        Returns:
-            True if work is in progress, False if idle or complete
-        """
-        try:
-            screen_content = self._get_screen_content(session_name)
-            if not screen_content:
-                return False
-                
-            return self._analyze_working_state(screen_content)
-            
-        except Exception as e:
-            logger.debug(f"Failed to detect working state for {session_name}: {e}")
-            return False
+        """Legacy method - redirects to SessionStateAnalyzer.is_working()"""
+        return self._analyzer.is_working(session_name)
     
-    def _get_screen_content(self, session_name: str) -> Optional[str]:
-        """Get current screen content from tmux session"""
-        try:
-            result = subprocess.run(
-                f"tmux capture-pane -t {session_name} -p",
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            
-            if result.returncode == 0:
-                return result.stdout
-            return None
-            
-        except subprocess.TimeoutExpired:
-            logger.warning(f"Timeout getting screen content for {session_name}")
-            return None
-        except Exception as e:
-            logger.warning(f"Error getting screen content for {session_name}: {e}")
-            return None
+    def _get_screen_content(self, session_name: str):
+        """Legacy method - redirects to SessionStateAnalyzer.get_screen_content()"""
+        return self._analyzer.get_screen_content(session_name)
     
     def _analyze_working_state(self, screen_content: str) -> bool:
-        """Analyze screen content to determine working state"""
-        lines = screen_content.split('\n')
+        """Legacy method - redirects to SessionStateAnalyzer internal logic"""
+        # Create a temporary analyzer to use the private method
+        from .session_state import SessionState
+        state = self._analyzer.get_state_from_content(screen_content) if hasattr(self._analyzer, 'get_state_from_content') else None
         
-        # Check for selection prompts that indicate user input waiting (completed state)
-        selection_indicators = [
-            "❯ 1.",  # Option selection
-            "❯ 2.",  # Option selection
-            "Do you want to proceed?",
-            "Choose an option:",
-            "Select:",
-        ]
-        
-        # If there are selection prompts in last 10 lines, work is complete
-        last_lines = lines[-10:]
-        for line in last_lines:
-            for indicator in selection_indicators:
-                if indicator in line:
-                    return False  # User input waiting = work complete
-        
-        # Check for working patterns only in the LAST 20 lines (recent activity)
-        recent_content = '\n'.join(lines[-20:])
-        has_working_pattern = any(
-            pattern in recent_content for pattern in self.working_patterns
-        )
-        
-        return has_working_pattern
+        # Fallback to working state check for compatibility
+        return self._analyzer._detect_working_state(screen_content) if not self._analyzer._detect_input_waiting(screen_content) else False
     
     def get_working_indicators(self, session_name: str) -> dict:
-        """
-        Get detailed information about working indicators (for debugging)
+        """Legacy method - converts new format to old format"""
+        details = self._analyzer.get_state_details(session_name)
         
-        Returns:
-            Dict with detected patterns and analysis results
-        """
-        try:
-            screen_content = self._get_screen_content(session_name)
-            if not screen_content:
-                return {"error": "No screen content available"}
-            
-            found_working = [p for p in self.working_patterns if p in screen_content]
-            
-            return {
-                "screen_length": len(screen_content),
-                "working_patterns_found": found_working,
-                "final_decision": self._analyze_working_state(screen_content),
-                "logic": f"working={bool(found_working)}, result={bool(found_working)}"
-            }
-            
-        except Exception as e:
-            return {"error": str(e)}
+        # Convert to old format for backward compatibility
+        return {
+            "screen_length": details.get("screen_length", 0),
+            "working_patterns_found": details.get("working_patterns_found", []),
+            "final_decision": details.get("state") and details["state"].value == "working",
+            "logic": details.get("analysis", {}).get("decision_logic", "")
+        }
 
 
-# Global singleton instance for easy import
+# Create legacy instance (will trigger deprecation warning)
 working_detector = WorkingStateDetector()
 
-
-def is_session_working(session_name: str) -> bool:
-    """
-    Convenience function for checking if a session is working
-    
-    Args:
-        session_name: Name of the tmux session
-        
-    Returns:
-        True if session is working, False otherwise
-    """
-    return working_detector.is_working(session_name)
-
-
-def get_session_working_info(session_name: str) -> dict:
-    """
-    Convenience function for getting detailed working state info
-    
-    Args:
-        session_name: Name of the tmux session
-        
-    Returns:
-        Dict with detailed working state analysis
-    """
-    return working_detector.get_working_indicators(session_name)
+# The actual working detector is now the session_state_analyzer
+# But we keep this for any code that directly imports working_detector

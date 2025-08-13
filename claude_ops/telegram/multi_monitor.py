@@ -15,7 +15,7 @@ from typing import Dict, Set
 from pathlib import Path
 from ..config import ClaudeOpsConfig
 from ..session_manager import session_manager
-from ..utils import is_session_working
+from ..utils.session_state import SessionStateAnalyzer, SessionState
 from .notifier import SmartNotifier
 
 logger = logging.getLogger(__name__)
@@ -27,11 +27,13 @@ class MultiSessionMonitor:
     def __init__(self, config: ClaudeOpsConfig = None):
         self.config = config or ClaudeOpsConfig()
         self.notifier = SmartNotifier(self.config)
+        self.state_analyzer = SessionStateAnalyzer()  # Unified state detection
+        
         # Simplified state tracking
         self.last_screen_hash: Dict[str, str] = {}      # session -> screen_content_hash
         self.last_activity_time: Dict[str, float] = {}  # session -> timestamp
         self.notification_sent: Dict[str, bool] = {}    # session -> notification_sent_flag
-        self.currently_working: Dict[str, bool] = {}    # session -> is_working_flag
+        self.last_state: Dict[str, SessionState] = {}   # session -> last_known_state
         self.active_threads: Dict[str, threading.Thread] = {}  # session_name -> thread
         self.thread_lock = threading.Lock()  # Thread-safe operations
         self.running = False
@@ -48,9 +50,9 @@ class MultiSessionMonitor:
     # Removed read_session_state and save_session_state methods
     # They are no longer needed with simplified detection
     
-    def is_working(self, session_name: str) -> bool:
-        """Check if Claude is currently working (uses shared utility)"""
-        return is_session_working(session_name)
+    def get_session_state(self, session_name: str) -> SessionState:
+        """Get current session state using unified analyzer"""
+        return self.state_analyzer.get_state(session_name)
     
     def get_screen_content_hash(self, session_name: str) -> str:
         """Get hash of current screen content for change detection"""
@@ -91,74 +93,42 @@ class MultiSessionMonitor:
         return False
     
     def is_waiting_for_input(self, session_name: str) -> bool:
-        """Detect if Claude is waiting for user input"""
-        try:
-            result = subprocess.run(
-                f"tmux capture-pane -t {session_name} -p",
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            
-            if result.returncode != 0:
-                return False
-                
-            tmux_output = result.stdout.strip()
-            
-            # Check for empty or minimal content (not waiting)
-            if not tmux_output or len(tmux_output) < 50:
-                return False
-            
-            # Check for user input waiting patterns
-            waiting_indicators = [
-                "Do you want to proceed?",
-                "❯ 1.",                    # Selection options
-                "❯ 2.",                    # Selection options  
-                "Choose an option:",
-                "Select:",
-                "Enter your choice:",
-                "What would you like to do?",
-                "How would you like to proceed?",
-                "Please choose:",
-                "Continue?",
-            ]
-            
-            for indicator in waiting_indicators:
-                if indicator in tmux_output:
-                    return True
-                    
-            return False
-            
-        except Exception as e:
-            logger.debug(f"Failed to check waiting state for {session_name}: {e}")
-            return False
+        """Check if session is waiting for user input (using unified analyzer)"""
+        return self.state_analyzer.is_waiting_for_input(session_name)
+    
+    def is_working(self, session_name: str) -> bool:
+        """Check if session is working (using unified analyzer)"""
+        return self.state_analyzer.is_working(session_name)
 
     def should_send_completion_notification(self, session_name: str) -> bool:
-        """Determine if completion notification should be sent"""
-        # 1. If currently working, reset notification flag and don't send
-        if self.is_working(session_name):
-            self.notification_sent[session_name] = False  # Reset for next completion
-            self.currently_working[session_name] = True
-            self.last_activity_time[session_name] = time.time()  # Update activity time
+        """Determine if completion notification should be sent based on state transitions"""
+        current_state = self.get_session_state(session_name)
+        previous_state = self.last_state.get(session_name, SessionState.UNKNOWN)
+        
+        # Update last known state
+        self.last_state[session_name] = current_state
+        
+        # Reset notification flag if currently working
+        if current_state == SessionState.WORKING:
+            self.notification_sent[session_name] = False
+            self.last_activity_time[session_name] = time.time()
             return False
         
-        # 2. If we just stopped working, mark it
-        was_working = self.currently_working.get(session_name, False)
-        self.currently_working[session_name] = False
-        
-        # 3. Check if waiting for user input (NEW LOGIC)
-        is_waiting = self.is_waiting_for_input(session_name)
-        
-        # 4. If notification already sent for this completion, don't send again
+        # Check if notification already sent for this state
         if self.notification_sent.get(session_name, False):
             return False
         
-        # 5. Send notification if:
-        #    - We just stopped working, OR  
-        #    - Claude is waiting for user input
-        if was_working or is_waiting:
-            self.notification_sent[session_name] = True  # Mark as notified
+        # Send notification on these state transitions:
+        # 1. WORKING -> any non-working state (work completed)
+        # 2. Any state -> WAITING_INPUT (user input needed)
+        should_notify = (
+            (previous_state == SessionState.WORKING and current_state != SessionState.WORKING) or
+            (current_state == SessionState.WAITING_INPUT and previous_state != SessionState.WAITING_INPUT)
+        )
+        
+        if should_notify:
+            self.notification_sent[session_name] = True
+            logger.info(f"State transition: {session_name} {previous_state} → {current_state}")
             return True
             
         return False

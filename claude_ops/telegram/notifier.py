@@ -10,7 +10,7 @@ import logging
 import subprocess
 from typing import Optional
 from ..config import ClaudeOpsConfig
-from ..utils import is_session_working
+from ..utils.session_state import SessionStateAnalyzer, SessionState
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,7 @@ class SmartNotifier:
             config: Bridge configuration
         """
         self.config = config or ClaudeOpsConfig()
+        self.state_analyzer = SessionStateAnalyzer()  # Unified state detection
         self._last_notification_hash = None
     
     def _get_current_time(self) -> str:
@@ -53,17 +54,12 @@ class SmartNotifier:
             return ""
 
     def _is_work_currently_running(self) -> bool:
-        """Check if work is currently running (uses shared utility)"""
-        return is_session_working(self.config.session_name)
+        """Check if work is currently running (uses unified state analyzer)"""
+        return self.state_analyzer.is_working(self.config.session_name)
         
-    def _is_work_running_from_content(self, screen_content: str) -> bool:
-        """Check if work is running from given screen content"""
-        if not screen_content:
-            return False
-        
-        # Use the same logic as working_detector for consistency
-        from ..utils.working_detector import working_detector
-        return working_detector._analyze_working_state(screen_content)
+    def _get_session_state(self) -> SessionState:
+        """Get current session state"""
+        return self.state_analyzer.get_state(self.config.session_name)
         
     def _send_telegram_notification(self, message: str) -> bool:
         """Send notification via Telegram"""
@@ -256,24 +252,21 @@ class SmartNotifier:
     
     def send_work_completion_notification(self) -> bool:
         """Send work completion notification with enhanced context and session info"""
+        # Check current state using unified analyzer
+        current_state = self._get_session_state()
+        
+        # Don't send notification if still working
+        if current_state == SessionState.WORKING:
+            logger.info("Work still in progress, skipping notification")
+            return False
+            
         # Get session information
         session_name = self.config.session_name
         session_display = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
         working_dir = self.config.working_directory
         
-        # Get screen capture once and use it for both checks (atomic operation)
-        screen_content = self._get_current_screen_content()
-        if not screen_content:
-            logger.info("No screen content available, skipping notification")
-            return False
-            
-        # Check if work is really completed using the same screen capture
-        if self._is_work_running_from_content(screen_content):
-            logger.info("Work still in progress, skipping notification")
-            return False  # Return False to indicate notification was not sent
-        
-        # Get rich context from the same screen capture (consistent timing)
-        context = self.extract_work_context_from_content(screen_content)
+        # Get rich context for notification
+        context = self.extract_work_context()
         
         if context:
             # Enhanced message with session information for reply targeting
@@ -319,12 +312,9 @@ Claude가 작업을 완료했습니다. 결과를 확인해보세요.
     
     def extract_work_context(self) -> str:
         """Extract rich context from tmux session for work completion notification"""
-        screen_content = self._get_current_screen_content()
-        return self.extract_work_context_from_content(screen_content)
-        
-    def extract_work_context_from_content(self, screen_content: str) -> str:
-        """Extract rich context from given screen content"""
         try:
+            # Use the same screen content source as state analyzer for consistency
+            screen_content = self.state_analyzer.get_screen_content(self.config.session_name)
             if not screen_content:
                 return ""
             
