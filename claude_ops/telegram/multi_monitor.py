@@ -34,6 +34,7 @@ class MultiSessionMonitor:
         self.last_activity_time: Dict[str, float] = {}  # session -> timestamp
         self.notification_sent: Dict[str, bool] = {}    # session -> notification_sent_flag
         self.last_state: Dict[str, SessionState] = {}   # session -> last_known_state
+        self.last_notification_time: Dict[str, float] = {}  # session -> last_notification_timestamp
         self.active_threads: Dict[str, threading.Thread] = {}  # session_name -> thread
         self.thread_lock = threading.Lock()  # Thread-safe operations
         self.running = False
@@ -114,13 +115,19 @@ class MultiSessionMonitor:
             self.last_activity_time[session_name] = time.time()
             return False
         
-        # Check if notification already sent for this state
+        # Enhanced duplicate prevention
         if self.notification_sent.get(session_name, False):
             return False
         
-        # Send notification on these state transitions:
-        # 1. WORKING -> any non-working state (work completed)
-        # 2. Any state -> WAITING_INPUT (user input needed)
+        # Prevent rapid successive notifications (30-second cooldown)
+        current_time = time.time()
+        last_notification_time = self.last_notification_time.get(session_name, 0)
+        
+        if current_time - last_notification_time < 30:  # 30-second cooldown
+            logger.debug(f"Notification cooldown active for {session_name}")
+            return False
+        
+        # Notification triggers: WORKING->completed or any->WAITING_INPUT
         should_notify = (
             (previous_state == SessionState.WORKING and current_state != SessionState.WORKING) or
             (current_state == SessionState.WAITING_INPUT and previous_state != SessionState.WAITING_INPUT)
@@ -128,6 +135,7 @@ class MultiSessionMonitor:
         
         if should_notify:
             self.notification_sent[session_name] = True
+            self.last_notification_time[session_name] = current_time
             logger.info(f"State transition: {session_name} {previous_state} → {current_state}")
             return True
             
@@ -171,7 +179,8 @@ class MultiSessionMonitor:
                 self.last_screen_hash[session_name] = ""
                 self.last_activity_time[session_name] = time.time()
                 self.notification_sent[session_name] = False
-                self.currently_working[session_name] = False
+                self.last_state[session_name] = SessionState.UNKNOWN
+                self.last_notification_time[session_name] = 0
             
             logger.info(f"📊 Started simplified monitoring for {session_name}")
             
@@ -197,11 +206,12 @@ class MultiSessionMonitor:
                         logger.info(f"🎯 Sending completion notification for {session_name}")
                         self.send_completion_notification(session_name, "completion")
                     
-                    # Update working status for logging
-                    current_working = self.currently_working.get(session_name, False)
-                    if is_working != current_working:
-                        status = "started working" if is_working else "stopped working"
-                        logger.info(f"🔄 {session_name}: {status}")
+                    # Log state changes for debugging
+                    if session_name in self.last_state:
+                        prev_state = self.last_state[session_name]
+                        curr_state = self.get_session_state(session_name)
+                        if prev_state != curr_state:
+                            logger.info(f"🔄 {session_name}: {prev_state} → {curr_state}")
                     
                     # Wait before next check
                     time.sleep(self.config.check_interval)
@@ -216,11 +226,14 @@ class MultiSessionMonitor:
             with self.thread_lock:
                 # Clean up all session data
                 for data_dict in [self.last_screen_hash, self.last_activity_time, 
-                                self.notification_sent, self.currently_working]:
+                                self.notification_sent, self.last_state, self.last_notification_time]:
                     if session_name in data_dict:
                         del data_dict[session_name]
                 if session_name in self.active_threads:
                     del self.active_threads[session_name]
+                
+                # Clear state analyzer cache for this session
+                self.state_analyzer.clear_cache(session_name)
     
     def start_session_thread(self, session_name: str) -> bool:
         """Start monitoring thread for a session (thread-safe)"""
@@ -262,7 +275,7 @@ class MultiSessionMonitor:
                 del self.active_threads[session_name]
                 # Clean up all associated data
                 for data_dict in [self.last_screen_hash, self.last_activity_time,
-                                self.notification_sent, self.currently_working]:
+                                self.notification_sent, self.last_state, self.last_notification_time]:
                     if session_name in data_dict:
                         del data_dict[session_name]
     
@@ -292,6 +305,10 @@ class MultiSessionMonitor:
                 
                 # Clean up dead threads first
                 self.cleanup_dead_threads()
+                
+                # Periodic cache cleanup (every 5 minutes)
+                if time.time() % 300 < 30:  # Check if we're within 30 seconds of a 5-minute mark
+                    self.state_analyzer.cleanup_expired_cache()
                 
                 # Discover current sessions
                 current_sessions = self.discover_sessions()
@@ -335,7 +352,8 @@ class MultiSessionMonitor:
             self.last_screen_hash.clear()
             self.last_activity_time.clear()
             self.notification_sent.clear()
-            self.currently_working.clear()
+            self.last_state.clear()
+            self.last_notification_time.clear()
         
         logger.info("✅ All monitoring threads stopped and cleaned up")
 

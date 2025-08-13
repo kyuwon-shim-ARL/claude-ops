@@ -6,6 +6,7 @@ state detection across all components.
 """
 
 import pytest
+import subprocess
 from unittest.mock import patch, MagicMock
 from datetime import datetime
 
@@ -327,6 +328,167 @@ Do you want to proceed with deployment?
         
         assert working is False  # No active work
         assert waiting is True   # User input required
+
+    def test_real_world_scenario_telegram_message_too_long(self):
+        """Test handling of very long screen content that would exceed Telegram limits"""
+        # Create content that would exceed 4096 chars
+        long_content = "● Processing large dataset\n"
+        long_content += "Data analysis output:\n"
+        long_content += "x" * 5000  # Very long content
+        
+        analyzer = SessionStateAnalyzer()
+        
+        # Should still detect state correctly despite length
+        state = analyzer._detect_working_state(long_content)
+        assert state is False  # Should be idle since no working patterns
+    
+    def test_edge_case_empty_screen(self):
+        """Test handling of empty screen content"""
+        analyzer = SessionStateAnalyzer()
+        
+        # Empty content should not crash and should return unknown state
+        with patch('claude_ops.utils.session_state.SessionStateAnalyzer.get_screen_content') as mock_get_content:
+            mock_get_content.return_value = ""
+            state = analyzer.get_state("test_session")
+            assert state == SessionState.IDLE
+    
+    def test_edge_case_null_screen(self):
+        """Test handling of null screen content"""
+        analyzer = SessionStateAnalyzer()
+        
+        # Null content should return unknown state
+        with patch('claude_ops.utils.session_state.SessionStateAnalyzer.get_screen_content') as mock_get_content:
+            mock_get_content.return_value = None
+            state = analyzer.get_state("test_session")
+            assert state == SessionState.UNKNOWN
+    
+    def test_edge_case_session_not_found(self):
+        """Test handling of non-existent tmux session"""
+        analyzer = SessionStateAnalyzer()
+        
+        # Should handle gracefully when session doesn't exist
+        with patch('claude_ops.utils.session_state.subprocess.run') as mock_run:
+            mock_result = MagicMock()
+            mock_result.returncode = 1  # Session not found
+            mock_result.stderr = "session not found"
+            mock_run.return_value = mock_result
+            
+            state = analyzer.get_state("nonexistent_session")
+            assert state == SessionState.UNKNOWN
+    
+    def test_performance_large_screen_content(self):
+        """Test performance with very large screen content"""
+        import time
+        
+        # Create large content (simulating long-running session)
+        large_content = ""
+        for i in range(1000):
+            large_content += f"Line {i}: Some output from long running process\n"
+        
+        # Add working pattern at the end
+        large_content += "● Current task\n  ⎿  Running…\n"
+        
+        analyzer = SessionStateAnalyzer()
+        
+        start_time = time.time()
+        result = analyzer._detect_working_state(large_content)
+        end_time = time.time()
+        
+        # Should detect working state correctly
+        assert result is True
+        # Should complete within reasonable time (< 100ms)
+        assert (end_time - start_time) < 0.1
+    
+    def test_concurrent_state_detection(self):
+        """Test concurrent access to state analyzer"""
+        import threading
+        import time
+        
+        analyzer = SessionStateAnalyzer()
+        results = []
+        
+        def check_state(session_name):
+            with patch('claude_ops.utils.session_state.SessionStateAnalyzer.get_screen_content') as mock_get_content:
+                mock_get_content.return_value = "● Test\n  ⎿  Running…\n"
+                state = analyzer.get_state(session_name)
+                results.append((session_name, state))
+        
+        # Start multiple threads
+        threads = []
+        for i in range(5):
+            thread = threading.Thread(target=check_state, args=(f"session_{i}",))
+            threads.append(thread)
+            thread.start()
+        
+        # Wait for all to complete
+        for thread in threads:
+            thread.join()
+        
+        # All should return WORKING state
+        assert len(results) == 5
+        for session_name, state in results:
+            assert state == SessionState.WORKING
+    
+    def test_state_transition_sequence(self):
+        """Test realistic state transition sequence"""
+        analyzer = SessionStateAnalyzer()
+        
+        # Simulate a complete work cycle
+        states_sequence = [
+            ("● Starting task\n  ⎿  Running…\n", SessionState.WORKING),
+            ("● Task in progress\nesc to interrupt\n", SessionState.WORKING),
+            ("Task completed successfully.\nDo you want to proceed?\n❯ 1. Yes\n", SessionState.WAITING_INPUT),
+            ("● All done\nTask finished successfully\n", SessionState.IDLE),
+        ]
+        
+        for screen_content, expected_state in states_sequence:
+            with patch('claude_ops.utils.session_state.SessionStateAnalyzer.get_screen_content') as mock_get_content:
+                mock_get_content.return_value = screen_content
+                actual_state = analyzer.get_state("test_session", use_cache=False)
+                assert actual_state == expected_state, f"Expected {expected_state}, got {actual_state} for content: {screen_content}"
+
+
+class TestErrorHandling:
+    """Test error handling and edge cases"""
+    
+    def test_subprocess_timeout(self):
+        """Test handling of subprocess timeout"""
+        analyzer = SessionStateAnalyzer()
+        
+        with patch('claude_ops.utils.session_state.subprocess.run') as mock_run:
+            mock_run.side_effect = subprocess.TimeoutExpired("tmux", 5)
+            
+            state = analyzer.get_state("test_session")
+            assert state == SessionState.UNKNOWN
+    
+    def test_subprocess_exception(self):
+        """Test handling of subprocess exceptions"""
+        analyzer = SessionStateAnalyzer()
+        
+        with patch('claude_ops.utils.session_state.subprocess.run') as mock_run:
+            mock_run.side_effect = Exception("Unexpected error")
+            
+            state = analyzer.get_state("test_session")
+            assert state == SessionState.UNKNOWN
+    
+    def test_malformed_screen_content(self):
+        """Test handling of malformed screen content"""
+        analyzer = SessionStateAnalyzer()
+        
+        # Test with various malformed inputs
+        malformed_inputs = [
+            "\x00\x01\x02",  # Binary data
+            "ĉ̸̢̖͚̱̻͓͇̹̺̳̥̈́̾̃̀͒́̅̌̍̕",  # Unicode edge case
+            "\n" * 10000,  # Excessive newlines
+            "A" * 100000,  # Very long line
+        ]
+        
+        for malformed_input in malformed_inputs:
+            with patch('claude_ops.utils.session_state.SessionStateAnalyzer.get_screen_content') as mock_get_content:
+                mock_get_content.return_value = malformed_input
+                # Should not crash and should return a valid state
+                state = analyzer.get_state("test_session")
+                assert isinstance(state, SessionState)
 
 
 if __name__ == "__main__":

@@ -356,9 +356,9 @@ Claude가 작업을 완료했습니다. 결과를 확인해보세요.
                         last_bullet_index = i
                         break
             
-            # If no bullet point found, get last 100 lines (more generous for full context)
+            # If no bullet point found, get last 50 lines (reduced from 100)
             if last_bullet_index == -1:
-                start_index = max(0, len(lines) - 100)
+                start_index = max(0, len(lines) - 50)
             else:
                 start_index = last_bullet_index
             
@@ -382,6 +382,17 @@ Claude가 작업을 완료했습니다. 결과를 확인해보세요.
                     # Keep empty lines for formatting
                     cleaned_lines.append(cleaned_line)
             
+            # Combine content and apply length limit
+            content = '\n'.join(cleaned_lines)
+            
+            # Apply Telegram length limit (4096 chars total)
+            # Reserve space for headers and formatting (about 500 chars)
+            max_content_length = 3500
+            
+            if len(content) > max_content_length:
+                # Truncate and add indicator
+                content = content[:max_content_length] + "\n\n...(내용이 길어서 일부만 표시)"
+            
             # Format with project and session info
             try:
                 from ..session_manager import session_manager
@@ -389,11 +400,8 @@ Claude가 작업을 완료했습니다. 결과를 확인해보세요.
                 session_info = session_manager.get_session_info(active_session)
                 
                 header = f"📁 Project: {session_info['directory']}\n🎯 Session: {active_session}\n\n"
-                content = '\n'.join(cleaned_lines)
-                
                 return header + f"```\n{content}\n```"
             except:
-                content = '\n'.join(cleaned_lines)
                 return f"```\n{content}\n```"
             
         except Exception as e:
