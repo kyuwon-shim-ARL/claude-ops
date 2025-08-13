@@ -366,15 +366,32 @@ class MultiSessionMonitor:
 
 
 def main():
-    """Main entry point for multi-session monitoring"""
+    """Main entry point for multi-session monitoring with Telegram bot"""
+    import threading
+    from .bot import TelegramBridge
+    
     try:
         config = ClaudeOpsConfig()
+        
+        # Start monitoring in separate thread
         monitor = MultiSessionMonitor(config)
-        monitor.start_monitoring()
+        monitor_thread = threading.Thread(target=monitor.start_monitoring, daemon=True)
+        monitor_thread.start()
+        logger.info("📊 Started monitoring thread")
+        
+        # Start Telegram bot (main thread)
+        bot = TelegramBridge(config)
+        logger.info("🤖 Starting Telegram bot...")
+        bot.run()
+        
     except KeyboardInterrupt:
-        logger.info("Multi-session monitor stopped by user")
+        logger.info("Multi-session monitor and bot stopped by user")
+        if 'monitor' in locals():
+            monitor.stop_monitoring()
     except Exception as e:
         logger.error(f"Multi-session monitor error: {e}")
+        if 'monitor' in locals():
+            monitor.stop_monitoring()
 
 
 if __name__ == "__main__":
