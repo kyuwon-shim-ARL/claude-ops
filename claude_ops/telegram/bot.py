@@ -97,13 +97,15 @@ class TelegramBridge:
         """Extract session name from notification message"""
         import re
         
-        # Look for session patterns in the message (updated for new format)
+        # Look for session patterns in the message (updated for all formats)
         patterns = [
-            r'\[`([^`]+)`\]',                      # New format: [`session_name`] 
-            r'\*\*세션\*\*: `([^`]+)`',             # From notification: **세션**: `session_name`
+            r'🎛️ 세션: ([^\n]+)',                    # Log format: 🎛️ 세션: claude_claude-ops
+            r'\[`([^`]+)`\]',                      # Notification format: [`session_name`]
+            r'\*\*세션\*\*: `([^`]+)`',             # Bold with backticks: **세션**: `session_name`
             r'🎯 \*\*세션\*\*: `([^`]+)`',       # With emoji: 🎯 **세션**: `session_name`
             r'\*\*🎯 세션 이름\*\*: `([^`]+)`',  # From start command
-            r'세션: `([^`]+)`',                    # Simple format: 세션: `session_name`
+            r'세션: `([^`]+)`',                    # Simple with backticks: 세션: `session_name`
+            r'세션: ([^\n\s]+)',                  # Simple without backticks: 세션: claude_ops
             r'\[([^]]+)\]',                        # Fallback: [session_name]
             r'\*\*Claude 화면 로그\*\* \[([^\]]+)\]',  # From new log format
             r'(claude_[\w-]+)',                    # Any claude_xxx pattern (full match)
