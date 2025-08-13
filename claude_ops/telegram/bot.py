@@ -614,34 +614,20 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             logger.error(f"화면 정리 중 오류: {str(e)}")
             await update.message.reply_text("❌ 내부 오류가 발생했습니다.")
     
-    async def menu_command(self, update, context):
-        """Show main control menu with session actions"""
+    async def board_command(self, update, context):
+        """Session board - one-click access to all sessions and commands"""
         user_id = update.effective_user.id
         
         if not self.check_user_authorization(user_id):
             await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
             return
         
-        # Use standardized keyboard
-        reply_markup = self.get_main_keyboard()
-        
-        menu_msg = f"""🤖 *Claude-Ops 제어판*
-
-*현재 메인 세션*: `{self.config.session_name}`
-
-원하는 기능을 선택하세요:
-
-• 🎛️ *Session Actions* - 세션별 액션 수행
-• 📊 *Status* - 시스템 상태 확인  
-• 📺 *Quick Log* - 현재 세션 로그
-• 🚀 *Start New* - 새 세션/프로젝트 시작
-• ❓ *Help* - 도움말"""
-        
-        await update.message.reply_text(
-            menu_msg,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
+        # Show session board grid
+        await self._show_session_action_grid(update.message.reply_text, None)
+    
+    async def menu_command(self, update, context):
+        """Legacy menu command - redirect to board"""
+        await self.board_command(update, context)
     
     async def sessions_command(self, update, context):
         """Show active sessions command or switch to reply session directly"""
@@ -722,7 +708,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             await update.message.reply_text(f"❌ 오류 발생: {str(e)}")
     
     def get_main_keyboard(self):
-        """Get standardized keyboard layout with session-first approach"""
+        """Get traditional main keyboard layout (deprecated, use get_enhanced_main_keyboard)"""
         keyboard = [
             [
                 InlineKeyboardButton("🎛️ Session Actions", callback_data="session_actions"),
@@ -737,6 +723,44 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             ]
         ]
         return InlineKeyboardMarkup(keyboard)
+    
+    async def get_enhanced_main_keyboard(self):
+        """Get enhanced main keyboard with direct session actions"""
+        current_session = self.config.session_name
+        
+        keyboard = [
+            # Direct actions for current session (top priority)
+            [InlineKeyboardButton("📊 Status", callback_data=f"direct_status:{current_session}"),
+             InlineKeyboardButton("📺 Logs", callback_data=f"direct_logs:{current_session}")],
+            [InlineKeyboardButton("⏸️ Pause", callback_data=f"direct_pause:{current_session}"),
+             InlineKeyboardButton("🗑️ Erase", callback_data=f"direct_erase:{current_session}")],
+            
+            # Advanced features (secondary priority)
+            [InlineKeyboardButton("🎛️ All Sessions", callback_data="session_actions")],
+            [InlineKeyboardButton("🚀 Start New", callback_data="start"),
+             InlineKeyboardButton("❓ Help", callback_data="help")]
+        ]
+        return InlineKeyboardMarkup(keyboard)
+    
+    async def get_session_prompt_hint(self, session_name: str) -> str:
+        """Get last prompt hint for session"""
+        try:
+            from ..utils.prompt_recall import PromptRecallSystem
+            prompt_system = PromptRecallSystem()
+            last_prompt = prompt_system.extract_last_user_prompt(session_name)
+            
+            if last_prompt and len(last_prompt.strip()) > 5:
+                # Smart truncation for hint (max 60 chars)
+                if len(last_prompt) > 60:
+                    hint = last_prompt[:57] + "..."
+                else:
+                    hint = last_prompt
+                return f"\n*마지막 프롬프트*: `{hint}`\n"
+            else:
+                return ""
+        except Exception as e:
+            logger.debug(f"Failed to get prompt hint: {str(e)}")
+            return ""
     
     async def button_callback(self, update, context):
         """Handle inline keyboard button callbacks"""
@@ -770,6 +794,11 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         elif callback_data.startswith("session_menu:"):
             session_name = callback_data.split(":", 1)[1]
             await self._session_menu_callback(query, context, session_name)
+        elif callback_data.startswith("direct_"):
+            await self._direct_action_callback(query, context, callback_data)
+        elif callback_data.startswith("session_grid:"):
+            session_name = callback_data.split(":", 1)[1]
+            await self._session_grid_callback(query, context, session_name)
         elif callback_data.startswith("session_log:"):
             session_name = callback_data.split(":", 1)[1]
             await self._session_log_callback(query, context, session_name)
@@ -928,7 +957,8 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         self.app.add_handler(CommandHandler("erase", self.erase_command))
         self.app.add_handler(CommandHandler("clear", self.clear_command))
         self.app.add_handler(CommandHandler("sessions", self.sessions_command))
-        self.app.add_handler(CommandHandler("menu", self.menu_command))
+        self.app.add_handler(CommandHandler("board", self.board_command))
+        self.app.add_handler(CommandHandler("menu", self.menu_command))  # Legacy support
         
         # Callback query handler for inline buttons
         self.app.add_handler(CallbackQueryHandler(self.button_callback))
@@ -950,7 +980,8 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         """Setup bot command menu"""
         commands = [
             BotCommand("start", "🚀 Claude 세션 시작 (옵션: project_name [path])"),
-            BotCommand("menu", "🎛️ 세션 액션 제어판"),
+            BotCommand("board", "🎯 세션 보드"),
+            BotCommand("menu", "🎛️ 원클릭 세션 메뉴"),
             BotCommand("status", "📊 봇 및 tmux 세션 상태 확인"),
             BotCommand("log", "📺 현재 Claude 화면 실시간 확인"),
             BotCommand("stop", "⛔ Claude 작업 중단 (ESC 키 전송)"),
@@ -1122,15 +1153,8 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             await query.edit_message_text("❌ 내부 오류가 발생했습니다.")
     
     async def _back_to_menu_callback(self, query, context):
-        """Back to main menu callback"""
-        reply_markup = self.get_main_keyboard()
-        
-        await query.edit_message_text(
-            "🤖 **Telegram-Claude Bridge 제어판**\n\n"
-            "원하는 명령어를 버튼으로 선택하세요:",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
+        """Back to one-click session menu (no longer needed - redirect to session grid)"""
+        await self._show_session_action_grid(query.edit_message_text, query)
     
     async def _restart_monitoring(self):
         """Restart monitoring system for new session"""
@@ -1156,54 +1180,188 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             logger.error(f"모니터링 재시작 중 오류: {str(e)}")
     
     async def _session_actions_callback(self, query, context):
-        """Session actions main menu - list all sessions for action selection"""
+        """Show one-click session action grid (same as menu command now)"""
+        await self._show_session_action_grid(query.edit_message_text, query)
+    
+    async def _show_session_action_grid(self, reply_func, query=None):
+        """Show one-click session action grid with all sessions and direct actions"""
         try:
             sessions = self.get_all_claude_sessions()
             
             if not sessions:
-                await query.edit_message_text(
-                    "🎛️ **세션 액션**\n\n❌ 활성 Claude 세션이 없습니다.\n\n"
-                    "/start 명령으로 새 세션을 시작하세요.",
+                await reply_func(
+                    "❌ **세션 없음**\n\nClaude 세션을 찾을 수 없습니다.\n\n/start 명령으로 새 세션을 시작하세요.",
                     parse_mode='Markdown'
                 )
                 return
             
-            # Create session selection keyboard for actions
             keyboard = []
-            for session in sessions:
-                display_name = session.replace('claude_', '') if session.startswith('claude_') else session
-                
-                # Check if session exists and get status
-                session_exists = os.system(f"tmux has-session -t {session}") == 0
-                status_icon = "✅" if session_exists else "❌"
-                current_icon = "🎯 " if session == self.config.session_name else ""
-                
-                keyboard.append([
-                    InlineKeyboardButton(
-                        f"{current_icon}{status_icon} {display_name}",
-                        callback_data=f"session_menu:{session}"
-                    )
-                ])
             
-            # Add back button
-            keyboard.append([InlineKeyboardButton("🔙 메뉴로", callback_data="back_to_menu")])
+            # Session rows with direct actions (2 sessions per row max)
+            for i in range(0, len(sessions), 2):
+                row_sessions = sessions[i:i+2]
+                session_row = []
+                
+                for session in row_sessions:
+                    display_name = session.replace('claude_', '') if session.startswith('claude_') else session
+                    current_icon = "⭐" if session == self.config.session_name else ""
+                    
+                    # Get session status
+                    from ..utils.session_state import is_session_working
+                    is_working = is_session_working(session)
+                    status_icon = "🔄" if is_working else "💤"
+                    
+                    # Get very short prompt hint for button
+                    hint = await self._get_session_hint_short(session)
+                    button_text = f"{current_icon}{status_icon} {display_name}{hint}"
+                    
+                    session_row.append(
+                        InlineKeyboardButton(
+                            button_text,
+                            callback_data=f"session_grid:{session}"
+                        )
+                    )
+                
+                keyboard.append(session_row)
+            
+            # Add utility buttons
+            keyboard.append([
+                InlineKeyboardButton("🚀 새 세션", callback_data="start"),
+                InlineKeyboardButton("❓ 도움말", callback_data="help")
+            ])
             
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await query.edit_message_text(
-                f"🎛️ **세션 액션** ({len(sessions)}개)\n\n"
+            await reply_func(
+                f"🎯 **세션 보드** ({len(sessions)}개)\n\n"
                 f"🎯 현재 메인: `{self.config.session_name}`\n\n"
-                "액션을 수행할 세션을 선택하세요:",
+                "💆‍♂️ 세션 클릭 → 직접 액션 메뉴:",
                 reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
             
         except Exception as e:
-            logger.error(f"세션 액션 목록 조회 중 오류: {str(e)}")
-            await query.edit_message_text(
-                f"❌ **세션 목록 조회 실패**\n\n오류: {str(e)}",
+            logger.error(f"Session action grid error: {str(e)}")
+            await reply_func(
+                f"❌ **세션 조회 실패**\n\n오류: {str(e)}",
                 parse_mode='Markdown'
             )
+    
+    async def _get_session_hint_short(self, session_name: str) -> str:
+        """Get very short hint for session (max 15 chars for button)"""
+        try:
+            from ..utils.prompt_recall import PromptRecallSystem
+            prompt_system = PromptRecallSystem()
+            last_prompt = prompt_system.extract_last_user_prompt(session_name)
+            
+            if last_prompt and len(last_prompt.strip()) > 3:
+                if len(last_prompt) > 12:
+                    hint = last_prompt[:9] + "..."
+                else:
+                    hint = last_prompt
+                return f"\n📝{hint}"
+            return ""
+        except:
+            return ""
+    
+    async def _session_grid_callback(self, query, context, session_name):
+        """Show direct action menu for selected session from grid"""
+        try:
+            display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
+            is_current = session_name == self.config.session_name
+            
+            # Get session status and prompt hint
+            from ..utils.session_state import is_session_working, get_session_working_info
+            is_working = is_session_working(session_name)
+            info = get_session_working_info(session_name)
+            status_emoji = "🔄 작업중" if is_working else "💤 대기중"
+            
+            # Get full prompt hint for this view
+            prompt_hint = await self.get_session_prompt_hint(session_name)
+            
+            # Create direct action buttons (2x2 grid)
+            keyboard = [
+                [
+                    InlineKeyboardButton("🏠 메인 설정", callback_data=f"session_switch:{session_name}"),
+                    InlineKeyboardButton("📺 로그 보기", callback_data=f"session_log:{session_name}")
+                ],
+                [
+                    InlineKeyboardButton("⏸️ Pause (ESC)", callback_data=f"session_pause:{session_name}"),
+                    InlineKeyboardButton("🗑️ Erase (Ctrl+C)", callback_data=f"session_erase:{session_name}")
+                ],
+                [
+                    InlineKeyboardButton("◀️ 세션 메뉴로", callback_data="session_actions")
+                ]
+            ]
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                f"🎯 **{display_name}** 세션 액션\n\n"
+                f"📊 **상태**: {status_emoji}\n"
+                f"🎯 **메인 세션**: {'✅ 현재 메인' if is_current else '❌ 다른 세션'}\n"
+                f"{prompt_hint}\n"
+                "💆‍♂️ **원클릭 액션 선택**:",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+            
+        except Exception as e:
+            logger.error(f"Session grid callback error: {str(e)}")
+            await query.answer(f"❌ 세션 액션 로드 실패: {str(e)}")
+    
+    async def _direct_action_callback(self, query, context, callback_data):
+        """Handle direct action callbacks from enhanced main menu"""
+        try:
+            # Parse callback data: direct_{action}:{session_name}
+            parts = callback_data.split(":", 1)
+            if len(parts) != 2:
+                await query.answer("❌ 잘못된 액션 데이터입니다.")
+                return
+                
+            action_part = parts[0]  # direct_{action}
+            session_name = parts[1]
+            action = action_part.split("_", 1)[1]  # Extract action from direct_{action}
+            
+            # Route to appropriate action handler
+            if action == "status":
+                from ..utils.session_state import is_session_working, get_session_working_info
+                
+                is_working = is_session_working(session_name)
+                info = get_session_working_info(session_name)
+                
+                status_msg = f"""📊 **세션 상태**: `{session_name}`
+
+• **상태**: {'🔄 작업 중' if is_working else '💤 대기 중'}
+• **상태 세부**: {info.get('logic', 'unknown')}
+• **감지 패턴**: {len(info.get('working_patterns_found', []))}개
+
+*직접 액션으로 빠르게 접근!*"""
+                
+                await query.edit_message_text(
+                    status_msg,
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🔄 새로고침", callback_data=f"direct_status:{session_name}")],
+                        [InlineKeyboardButton("🔙 메뉴로", callback_data="back_to_menu")]
+                    ]),
+                    parse_mode='Markdown'
+                )
+                
+            elif action == "logs":
+                await self._session_log_callback(query, context, session_name)
+                
+            elif action == "pause":
+                await self._session_pause_callback(query, context, session_name)
+                
+            elif action == "erase":
+                await self._session_erase_callback(query, context, session_name)
+                
+            else:
+                await query.answer(f"❌ 알 수 없는 액션: {action}")
+                
+        except Exception as e:
+            logger.error(f"Direct action callback error: {str(e)}")
+            await query.answer("❌ 액션 처리 중 오류가 발생했습니다.")
     
     async def _session_menu_callback(self, query, context, session_name):
         """Show action menu for specific session"""
