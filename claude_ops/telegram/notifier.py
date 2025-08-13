@@ -60,20 +60,10 @@ class SmartNotifier:
         """Check if work is running from given screen content"""
         if not screen_content:
             return False
-            
-        # Check for working patterns in the content
-        working_patterns = [
-            "esc to interrupt",
-            "Running…", 
-            "ctrl+b to run in background",
-            "tokens · esc to interrupt)"
-        ]
         
-        for pattern in working_patterns:
-            if pattern in screen_content:
-                return True
-                
-        return False
+        # Use the same logic as working_detector for consistency
+        from ..utils.working_detector import working_detector
+        return working_detector._analyze_working_state(screen_content)
         
     def _send_telegram_notification(self, message: str) -> bool:
         """Send notification via Telegram"""

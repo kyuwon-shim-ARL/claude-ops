@@ -81,9 +81,28 @@ class WorkingStateDetector:
     
     def _analyze_working_state(self, screen_content: str) -> bool:
         """Analyze screen content to determine working state"""
-        # Simple and reliable: work is in progress if working patterns are present
+        lines = screen_content.split('\n')
+        
+        # Check for selection prompts that indicate user input waiting (completed state)
+        selection_indicators = [
+            "❯ 1.",  # Option selection
+            "❯ 2.",  # Option selection
+            "Do you want to proceed?",
+            "Choose an option:",
+            "Select:",
+        ]
+        
+        # If there are selection prompts in last 10 lines, work is complete
+        last_lines = lines[-10:]
+        for line in last_lines:
+            for indicator in selection_indicators:
+                if indicator in line:
+                    return False  # User input waiting = work complete
+        
+        # Check for working patterns only in the LAST 20 lines (recent activity)
+        recent_content = '\n'.join(lines[-20:])
         has_working_pattern = any(
-            pattern in screen_content for pattern in self.working_patterns
+            pattern in recent_content for pattern in self.working_patterns
         )
         
         return has_working_pattern
