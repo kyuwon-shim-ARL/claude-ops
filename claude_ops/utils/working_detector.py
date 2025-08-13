@@ -32,14 +32,9 @@ class WorkingStateDetector:
             "tokens · esc to interrupt)", # Token counting with interrupt
         ]
         
-        # Patterns that indicate work is complete despite working indicators
-        self.finished_patterns = [
-            "accept edits",       # Edit completion state
-            "Spelunking…",        # File exploration complete  
-            "Forging…",           # Tool execution complete
-            "Envisioning…",       # Planning complete
-            "⏵⏵ accept",         # General completion prompt
-        ]
+        # No finished patterns - work completion is simply absence of working patterns
+        # The previous finished_patterns were causing false positives as they appear
+        # as regular text content rather than actual UI state indicators
     
     def is_working(self, session_name: str) -> bool:
         """
@@ -86,25 +81,12 @@ class WorkingStateDetector:
     
     def _analyze_working_state(self, screen_content: str) -> bool:
         """Analyze screen content to determine working state"""
-        # Check for any working indicators
+        # Simple and reliable: work is in progress if working patterns are present
         has_working_pattern = any(
             pattern in screen_content for pattern in self.working_patterns
         )
         
-        if not has_working_pattern:
-            return False
-        
-        # Check for finished patterns that override working indicators
-        has_finished_pattern = any(
-            pattern in screen_content for pattern in self.finished_patterns
-        )
-        
-        # If finished patterns are present, work is complete
-        if has_finished_pattern:
-            return False
-            
-        # Work is in progress
-        return True
+        return has_working_pattern
     
     def get_working_indicators(self, session_name: str) -> dict:
         """
@@ -119,14 +101,12 @@ class WorkingStateDetector:
                 return {"error": "No screen content available"}
             
             found_working = [p for p in self.working_patterns if p in screen_content]
-            found_finished = [p for p in self.finished_patterns if p in screen_content]
             
             return {
                 "screen_length": len(screen_content),
                 "working_patterns_found": found_working,
-                "finished_patterns_found": found_finished,
                 "final_decision": self._analyze_working_state(screen_content),
-                "logic": f"working={bool(found_working)}, finished={bool(found_finished)}, result={not bool(found_finished) if found_working else False}"
+                "logic": f"working={bool(found_working)}, result={bool(found_working)}"
             }
             
         except Exception as e:
