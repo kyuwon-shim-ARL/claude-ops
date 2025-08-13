@@ -382,16 +382,8 @@ Claude가 작업을 완료했습니다. 결과를 확인해보세요.
                     # Keep empty lines for formatting
                     cleaned_lines.append(cleaned_line)
             
-            # Combine content and apply length limit
-            content = '\n'.join(cleaned_lines)
-            
-            # Apply Telegram length limit (4096 chars total)
-            # Reserve space for headers and formatting (about 500 chars)
-            max_content_length = 3500
-            
-            if len(content) > max_content_length:
-                # Truncate and add indicator
-                content = content[:max_content_length] + "\n\n...(내용이 길어서 일부만 표시)"
+            # Apply smart truncation strategy
+            content = self._smart_truncate_content(cleaned_lines)
             
             # Format with project and session info
             try:
@@ -407,6 +399,80 @@ Claude가 작업을 완료했습니다. 결과를 확인해보세요.
         except Exception as e:
             logger.warning(f"Failed to extract work context: {str(e)}")
             return ""
+    
+    def _smart_truncate_content(self, cleaned_lines: list) -> str:
+        """
+        Smart truncation that preserves important information
+        
+        Strategy:
+        1. Always preserve the last part (most recent activity)
+        2. If too long, use middle truncation with "...(중간 생략)..."
+        3. Preserve important lines (prompts, choices, errors)
+        
+        Args:
+            cleaned_lines: List of cleaned content lines
+            
+        Returns:
+            str: Appropriately truncated content
+        """
+        # Telegram limit (4096 chars total) - reserve space for headers (about 500 chars)
+        max_content_length = 3500
+        
+        # Join lines first to check length
+        full_content = '\n'.join(cleaned_lines)
+        
+        if len(full_content) <= max_content_length:
+            return full_content
+            
+        # Content is too long - apply smart truncation
+        important_patterns = [
+            "Do you want to",
+            "❯ 1.", "❯ 2.", "❯ 3.",
+            "Choose", "Select", "Enter your choice",
+            "Error:", "Failed:", "Exception:",
+            "Continue?"
+        ]
+        
+        # Find important lines to always preserve
+        important_lines = []
+        for i, line in enumerate(cleaned_lines):
+            if any(pattern in line for pattern in important_patterns):
+                important_lines.append((i, line))
+        
+        # Strategy: Preserve last N lines + important lines + truncation indicator
+        preserve_last = 15  # Last 15 lines are usually most important
+        
+        if len(cleaned_lines) <= preserve_last:
+            # If total lines are few, just truncate text length
+            truncated = full_content[:max_content_length - 50]  # Reserve space for indicator
+            return truncated + "\n\n...(내용이 길어서 일부만 표시)"
+        
+        # Get last lines
+        last_lines = cleaned_lines[-preserve_last:]
+        
+        # Check if last lines + important lines fit
+        last_content = '\n'.join(last_lines)
+        important_content = '\n'.join([line for _, line in important_lines[-5:]])  # Last 5 important lines
+        
+        middle_truncation_indicator = "\n...(중간 생략)...\n"
+        
+        # Try: first few lines + important + truncation + last lines
+        if len(cleaned_lines) > preserve_last + 10:
+            first_lines = cleaned_lines[:5]  # Show first 5 lines for context
+            first_content = '\n'.join(first_lines)
+            
+            combined = first_content + middle_truncation_indicator + important_content + middle_truncation_indicator + last_content
+            
+            if len(combined) <= max_content_length:
+                return combined
+        
+        # Fallback: Just show last lines with truncation indicator
+        if len(last_content) > max_content_length - 100:
+            # Even last lines are too long, truncate them
+            truncated_last = last_content[-(max_content_length - 100):]
+            return "...(앞부분 생략)...\n" + truncated_last
+        else:
+            return "...(앞부분 생략)...\n" + last_content
     
     def process_tmux_output_for_notification(self, tmux_output: str) -> str:
         """Process tmux output to create a meaningful notification"""
