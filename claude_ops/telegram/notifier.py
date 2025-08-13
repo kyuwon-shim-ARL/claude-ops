@@ -286,9 +286,9 @@ Claude가 작업을 완료했습니다. 결과를 확인해보세요.
     def extract_work_context(self) -> str:
         """Extract rich context from tmux session for work completion notification"""
         try:
-            # Get current tmux screen (same as /log command)
+            # Get more tmux history to find bullet points (like /log command with more lines)
             result = subprocess.run(
-                f"tmux capture-pane -t {self.config.session_name} -p",
+                f"tmux capture-pane -t {self.config.session_name} -p -S -200",
                 shell=True,
                 capture_output=True,
                 text=True,
@@ -325,36 +325,9 @@ Claude가 작업을 완료했습니다. 결과를 확인해보세요.
                         last_bullet_index = i
                         break
             
-            # Smart context extraction without AI/tokens
+            # If no bullet point found, get last 100 lines (more generous for full context)
             if last_bullet_index == -1:
-                # Look for other meaningful boundaries (in reverse order)
-                boundary_patterns = [
-                    '╭─',  # Top border of TUI box
-                    '> ',  # User input prompt  
-                    '## ', # Markdown headers
-                    '### ',
-                    '#### ',
-                    '**완료 기준**:', # Completion criteria
-                    '**결론**:', # Conclusions
-                    '**분석**:', # Analysis
-                    '🔧', '📝', '🎯', '✅', '❌', '⚠️'  # Emoji section markers
-                ]
-                
-                boundary_index = -1
-                for i in range(len(lines) - 1, max(0, len(lines) - 100), -1):
-                    line = lines[i].strip()
-                    for pattern in boundary_patterns:
-                        if pattern in line:
-                            boundary_index = i
-                            break
-                    if boundary_index != -1:
-                        break
-                
-                # Use boundary if found, otherwise last 50 lines
-                if boundary_index != -1:
-                    start_index = boundary_index
-                else:
-                    start_index = max(0, len(lines) - 50)
+                start_index = max(0, len(lines) - 100)
             else:
                 start_index = last_bullet_index
             
