@@ -10,6 +10,7 @@ import logging
 import subprocess
 from typing import Optional
 from ..config import ClaudeOpsConfig
+from ..utils import is_session_working
 
 logger = logging.getLogger(__name__)
 
@@ -33,57 +34,8 @@ class SmartNotifier:
         return datetime.now().strftime("%H:%M:%S")
     
     def _is_work_currently_running(self) -> bool:
-        """Check if work is currently running by examining current screen"""
-        try:
-            import subprocess
-            result = subprocess.run(
-                f"tmux capture-pane -t {self.config.session_name} -p",
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            
-            if result.returncode != 0:
-                return False
-                
-            screen_content = result.stdout
-            
-            # Get the same content range as work completion notification
-            # (from last bullet point to end of screen)
-            lines = screen_content.split('\n')
-            last_bullet_index = -1
-            
-            # Find the last bullet point (● or •)
-            for i in range(len(lines) - 1, -1, -1):
-                line = lines[i].strip()
-                if line.startswith('●') or line.startswith('•'):
-                    last_bullet_index = i
-                    break
-            
-            # If no bullet point found, check last 10 lines
-            if last_bullet_index == -1:
-                start_index = max(0, len(lines) - 10)
-            else:
-                start_index = last_bullet_index
-            
-            # Get lines from last bullet point to end
-            search_lines = lines[start_index:]
-            search_content = '\n'.join(search_lines)
-            
-            # Check for active running patterns at the end of lines
-            for line in search_lines:
-                stripped_line = line.strip()
-                # Look for "tokens · esc to interrupt)" pattern at the end of lines only
-                if stripped_line.endswith("tokens · esc to interrupt)"):
-                    logger.debug(f"Found active running indicator at line end: {stripped_line}")
-                    return True
-                    
-            return False
-            
-        except Exception as e:
-            logger.warning(f"Failed to check if work is running: {str(e)}")
-            return False  # If we can't check, assume it's not running
+        """Check if work is currently running (uses shared utility)"""
+        return is_session_working(self.config.session_name)
         
     def _send_telegram_notification(self, message: str) -> bool:
         """Send notification via Telegram"""

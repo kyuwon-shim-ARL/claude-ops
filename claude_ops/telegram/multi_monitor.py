@@ -15,6 +15,7 @@ from typing import Dict, Set
 from pathlib import Path
 from ..config import ClaudeOpsConfig
 from ..session_manager import session_manager
+from ..utils import is_session_working
 from .notifier import SmartNotifier
 
 logger = logging.getLogger(__name__)
@@ -48,44 +49,8 @@ class MultiSessionMonitor:
     # They are no longer needed with simplified detection
     
     def is_working(self, session_name: str) -> bool:
-        """Check if Claude is currently working (enhanced detection)"""
-        try:
-            result = subprocess.run(
-                f"tmux capture-pane -t {session_name} -p",
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            
-            if result.returncode != 0:
-                return False
-                
-            tmux_output = result.stdout
-            
-            # Check for esc to interrupt pattern
-            if "esc to interrupt" not in tmux_output:
-                return False
-            
-            # Additional check: exclude finished states that still show "esc to interrupt"
-            # These patterns indicate work is actually complete despite "esc to interrupt"
-            finished_patterns = [
-                "accept edits",       # Edit completion state
-                "Spelunking…",        # File exploration complete  
-                "Forging…",           # Tool execution complete
-                "Envisioning…",       # Planning complete
-                "⏵⏵ accept",         # General completion prompt
-            ]
-            
-            for pattern in finished_patterns:
-                if pattern in tmux_output:
-                    return False  # Work is actually complete
-                    
-            return True  # Actually working
-            
-        except Exception as e:
-            logger.debug(f"Failed to check if {session_name} is working: {e}")
-            return False
+        """Check if Claude is currently working (uses shared utility)"""
+        return is_session_working(session_name)
     
     def get_screen_content_hash(self, session_name: str) -> str:
         """Get hash of current screen content for change detection"""
