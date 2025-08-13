@@ -306,22 +306,33 @@ Claude가 작업을 완료했습니다. 결과를 확인해보세요.
             lines = tmux_output.split('\n')
             last_bullet_index = -1
             
-            # Find the last bullet point, but skip if it's currently running
+            # Find the last meaningful bullet point, but skip TUI screens and edit dialogs
             for i in range(len(lines) - 1, -1, -1):
                 line = lines[i].strip()  # Remove leading/trailing whitespace
                 # Check for bullet points at any indentation level
                 if line.startswith('●') or line.startswith('•'):
                     # Check if this bullet point is currently running
                     is_running = False
-                    for j in range(i + 1, min(i + 10, len(lines))):
+                    # Check if this is a TUI/edit dialog (look for UI elements)
+                    is_tui_dialog = False
+                    
+                    for j in range(i + 1, min(i + 20, len(lines))):
                         if j < len(lines):
                             check_line = lines[j]
+                            # Running indicators
                             if ("esc to interrupt" in check_line or 
                                 "Running…" in check_line):
                                 is_running = True
                                 break
+                            # TUI dialog indicators  
+                            if ("Do you want to make this edit" in check_line or
+                                "❯ 1. Yes" in check_line or
+                                "Edit file" in check_line or
+                                "╭─" in check_line and "╮" in check_line):
+                                is_tui_dialog = True
+                                break
                     
-                    if not is_running:
+                    if not is_running and not is_tui_dialog:
                         last_bullet_index = i
                         break
             
