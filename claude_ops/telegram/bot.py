@@ -788,6 +788,10 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             await self._session_actions_callback(query, context)
         elif callback_data == "start":
             await self._start_callback(query, context)
+        elif callback_data == "restart_session":
+            await self._restart_session_callback(query, context)
+        elif callback_data == "new_project_guide":
+            await self._new_project_guide_callback(query, context)
         elif callback_data == "help":
             await self._help_callback(query, context)
         elif callback_data.startswith("select_session:"):
@@ -1134,20 +1138,65 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             
             reply_markup = self.get_main_keyboard()
             
-            welcome_msg = f"""🤖 *Claude-Telegram Bridge*
+            welcome_msg = f"""🤖 **Claude-Telegram Bridge**
 
 {status_msg}
 
-*📁 작업 디렉토리*: `{self.config.working_directory}`
-*🎯 세션 이름*: `{self.config.session_name}`
+**📁 작업 디렉토리**: `{self.config.working_directory}`
+**🎯 세션 이름**: `{self.config.session_name}`
 
-*제어판을 사용하여 Claude를 제어하세요:*"""
+🎯 **세션 제어판** 사용 가능!"""
             
             await query.edit_message_text(
                 welcome_msg,
                 reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
+            
+        except Exception as e:
+            logger.error(f"Restart session callback error: {str(e)}")
+            await query.answer("❌ 세션 재시작 실패")
+    
+    async def _new_project_guide_callback(self, query, context):
+        """Show new project creation guide"""
+        try:
+            keyboard = [
+                [InlineKeyboardButton("🔙 뒤로", callback_data="start")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            guide_msg = f"""🎆 **새 프로젝트 생성 가이드**
+
+🚀 **Claude Dev Kit으로 새 프로젝트 생성**:
+
+📝 **명령어 사용법**:
+```
+/start 프로젝트명
+```
+
+📁 **예시**:
+• `/start my_web_app` → `~/projects/my_web_app`
+• `/start ai_chatbot` → `~/projects/ai_chatbot`
+• `/start data_analysis` → `~/projects/data_analysis`
+
+🎯 **자동 설치 내용**:
+• 📝 **CLAUDE.md** - 프로젝트 가이드
+• 🚀 **main_app.py** - 에플리케이션 시작점
+• 📁 **src/, docs/, tests/** - 완전한 프로젝트 구조
+• 🔧 **개발 워크플로우 템플릿**
+
+💬 **지금 바로 시작하세요!**
+`/start 원하는프로젝트명` 입력하면 끝!"""
+            
+            await query.edit_message_text(
+                guide_msg,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+            
+        except Exception as e:
+            logger.error(f"New project guide callback error: {str(e)}")
+            await query.answer("❌ 가이드 로드 실패")
         except Exception as e:
             logger.error(f"Claude 세션 시작 중 오류: {str(e)}")
             await query.edit_message_text("❌ 내부 오류가 발생했습니다.")
