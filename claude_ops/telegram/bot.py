@@ -328,6 +328,9 @@ class TelegramBridge:
                 if not os.path.exists(target_directory):
                     os.makedirs(target_directory, exist_ok=True)
                     logger.info(f"Created project directory: {target_directory}")
+                    
+                    # Install claude-dev-kit for new projects
+                    await self._install_claude_dev_kit(target_directory, project_name, update)
             
             # Create session name with claude_ prefix
             target_session = f"claude_{project_name}"
@@ -1152,6 +1155,78 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
     async def _back_to_menu_callback(self, query, context):
         """Back to one-click session menu (no longer needed - redirect to session grid)"""
         await self._show_session_action_grid(query.edit_message_text, query)
+    
+    async def _install_claude_dev_kit(self, target_directory: str, project_name: str, update) -> bool:
+        """Install claude-dev-kit in new project directory"""
+        try:
+            install_msg = await update.message.reply_text(
+                f"🛠️ **Claude Dev Kit 설치 중...**\n\n"
+                f"📁 디렉토리: `{target_directory}`\n"
+                f"💭 프로젝트: `{project_name}`",
+                parse_mode='Markdown'
+            )
+            
+            # Execute claude-dev-kit installation script
+            import subprocess
+            
+            # Change to target directory and run installation
+            install_command = (
+                f"cd {target_directory} && "
+                f"curl -sSL https://raw.githubusercontent.com/kyuwon-shim-ARL/claude-dev-kit/main/install.sh | "
+                f"bash -s {project_name} 'Claude-managed project with dev-ops automation'"
+            )
+            
+            result = subprocess.run(
+                install_command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if result.returncode == 0:
+                await install_msg.edit_text(
+                    f"✅ **Claude Dev Kit 설치 완료!**\n\n"
+                    f"🎯 프로젝트: `{project_name}`\n"
+                    f"📁 경로: `{target_directory}`\n\n"
+                    f"📝 **생성된 파일들:**\n"
+                    f"• CLAUDE.md - 프로젝트 가이드\n"
+                    f"• main_app.py - 에플리케이션 엔트리포인트\n"
+                    f"• src/, docs/, tests/ - 프로젝트 구조\n\n"
+                    f"🚀 Claude 세션을 시작합니다...",
+                    parse_mode='Markdown'
+                )
+                logger.info(f"Successfully installed claude-dev-kit in {target_directory}")
+                return True
+            else:
+                error_output = result.stderr[:200] if result.stderr else "Unknown error"
+                await install_msg.edit_text(
+                    f"⚠️ **Claude Dev Kit 설치 실패**\n\n"
+                    f"❌ 오류: {error_output}\n\n"
+                    f"💭 기본 프로젝트로 계속합니다...",
+                    parse_mode='Markdown'
+                )
+                logger.warning(f"Failed to install claude-dev-kit: {result.stderr}")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            await install_msg.edit_text(
+                f"⏱️ **설치 시간초과**\n\n"
+                f"⚠️ Claude Dev Kit 설치가 30초를 초과했습니다.\n"
+                f"💭 기본 프로젝트로 계속합니다...",
+                parse_mode='Markdown'
+            )
+            logger.warning("Claude dev-kit installation timed out")
+            return False
+        except Exception as e:
+            await install_msg.edit_text(
+                f"❌ **예상치 못한 오류**\n\n"
+                f"🚫 오류: {str(e)[:100]}\n"
+                f"💭 기본 프로젝트로 계속합니다...",
+                parse_mode='Markdown'
+            )
+            logger.error(f"Unexpected error during claude-dev-kit installation: {str(e)}")
+            return False
     
     async def _restart_monitoring(self):
         """Restart monitoring system for new session"""
