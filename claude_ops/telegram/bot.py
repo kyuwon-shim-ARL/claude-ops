@@ -345,14 +345,14 @@ class TelegramBridge:
         # Use standardized keyboard
         reply_markup = self.get_main_keyboard()
         
-        welcome_msg = f"""🤖 **Claude-Telegram Bridge**
+        welcome_msg = f"""🤖 *Claude-Telegram Bridge*
 
 {status_msg}
 
-**📁 작업 디렉토리**: `{target_directory}`
-**🎯 세션 이름**: `{target_session}`
+*📁 작업 디렉토리*: `{target_directory}`
+*🎯 세션 이름*: `{target_session}`
 
-**제어판을 사용하여 Claude를 제어하세요:**"""
+*제어판을 사용하여 Claude를 제어하세요:*"""
         
         await update.message.reply_text(
             welcome_msg,
@@ -614,6 +614,35 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             logger.error(f"화면 정리 중 오류: {str(e)}")
             await update.message.reply_text("❌ 내부 오류가 발생했습니다.")
     
+    async def menu_command(self, update, context):
+        """Show main control menu with session actions"""
+        user_id = update.effective_user.id
+        
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+        
+        # Use standardized keyboard
+        reply_markup = self.get_main_keyboard()
+        
+        menu_msg = f"""🤖 *Claude-Ops 제어판*
+
+*현재 메인 세션*: `{self.config.session_name}`
+
+원하는 기능을 선택하세요:
+
+• 🎛️ *Session Actions* - 세션별 액션 수행
+• 📊 *Status* - 시스템 상태 확인  
+• 📺 *Quick Log* - 현재 세션 로그
+• 🚀 *Start New* - 새 세션/프로젝트 시작
+• ❓ *Help* - 도움말"""
+        
+        await update.message.reply_text(
+            menu_msg,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    
     async def sessions_command(self, update, context):
         """Show active sessions command or switch to reply session directly"""
         user_id = update.effective_user.id
@@ -693,18 +722,17 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             await update.message.reply_text(f"❌ 오류 발생: {str(e)}")
     
     def get_main_keyboard(self):
-        """Get standardized keyboard layout"""
+        """Get standardized keyboard layout with session-first approach"""
         keyboard = [
             [
-                InlineKeyboardButton("📺 Log", callback_data="log"),
-                InlineKeyboardButton("⛔ Stop", callback_data="stop")
-            ],
-            [
-                InlineKeyboardButton("🔄 Sessions", callback_data="sessions"),
+                InlineKeyboardButton("🎛️ Session Actions", callback_data="session_actions"),
                 InlineKeyboardButton("📊 Status", callback_data="status")
             ],
             [
-                InlineKeyboardButton("🚀 Start", callback_data="start"),
+                InlineKeyboardButton("📺 Quick Log", callback_data="log"),
+                InlineKeyboardButton("🚀 Start New", callback_data="start")
+            ],
+            [
                 InlineKeyboardButton("❓ Help", callback_data="help")
             ]
         ]
@@ -730,6 +758,8 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             await self._stop_callback(query, context)
         elif callback_data == "sessions":
             await self._sessions_callback(query, context)
+        elif callback_data == "session_actions":
+            await self._session_actions_callback(query, context)
         elif callback_data == "start":
             await self._start_callback(query, context)
         elif callback_data == "help":
@@ -737,8 +767,25 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         elif callback_data.startswith("select_session:"):
             session_name = callback_data.split(":", 1)[1]
             await self._select_session_callback(query, context, session_name)
+        elif callback_data.startswith("session_menu:"):
+            session_name = callback_data.split(":", 1)[1]
+            await self._session_menu_callback(query, context, session_name)
+        elif callback_data.startswith("session_log:"):
+            session_name = callback_data.split(":", 1)[1]
+            await self._session_log_callback(query, context, session_name)
+        elif callback_data.startswith("session_switch:"):
+            session_name = callback_data.split(":", 1)[1]
+            await self._session_switch_callback(query, context, session_name)
+        elif callback_data.startswith("session_pause:"):
+            session_name = callback_data.split(":", 1)[1]
+            await self._session_pause_callback(query, context, session_name)
+        elif callback_data.startswith("session_erase:"):
+            session_name = callback_data.split(":", 1)[1]
+            await self._session_erase_callback(query, context, session_name)
         elif callback_data == "back_to_menu":
             await self._back_to_menu_callback(query, context)
+        elif callback_data == "back_to_sessions":
+            await self._session_actions_callback(query, context)
     
     async def _status_callback(self, query, context):
         """Status check callback"""
@@ -881,6 +928,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         self.app.add_handler(CommandHandler("erase", self.erase_command))
         self.app.add_handler(CommandHandler("clear", self.clear_command))
         self.app.add_handler(CommandHandler("sessions", self.sessions_command))
+        self.app.add_handler(CommandHandler("menu", self.menu_command))
         
         # Callback query handler for inline buttons
         self.app.add_handler(CallbackQueryHandler(self.button_callback))
@@ -902,6 +950,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         """Setup bot command menu"""
         commands = [
             BotCommand("start", "🚀 Claude 세션 시작 (옵션: project_name [path])"),
+            BotCommand("menu", "🎛️ 세션 액션 제어판"),
             BotCommand("status", "📊 봇 및 tmux 세션 상태 확인"),
             BotCommand("log", "📺 현재 Claude 화면 실시간 확인"),
             BotCommand("stop", "⛔ Claude 작업 중단 (ESC 키 전송)"),
@@ -1054,14 +1103,14 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             
             reply_markup = self.get_main_keyboard()
             
-            welcome_msg = f"""🤖 **Claude-Telegram Bridge**
+            welcome_msg = f"""🤖 *Claude-Telegram Bridge*
 
 {status_msg}
 
-**📁 작업 디렉토리**: `{self.config.working_directory}`
-**🎯 세션 이름**: `{self.config.session_name}`
+*📁 작업 디렉토리*: `{self.config.working_directory}`
+*🎯 세션 이름*: `{self.config.session_name}`
 
-**제어판을 사용하여 Claude를 제어하세요:**"""
+*제어판을 사용하여 Claude를 제어하세요:*"""
             
             await query.edit_message_text(
                 welcome_msg,
@@ -1105,6 +1154,313 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             
         except Exception as e:
             logger.error(f"모니터링 재시작 중 오류: {str(e)}")
+    
+    async def _session_actions_callback(self, query, context):
+        """Session actions main menu - list all sessions for action selection"""
+        try:
+            sessions = self.get_all_claude_sessions()
+            
+            if not sessions:
+                await query.edit_message_text(
+                    "🎛️ **세션 액션**\n\n❌ 활성 Claude 세션이 없습니다.\n\n"
+                    "/start 명령으로 새 세션을 시작하세요.",
+                    parse_mode='Markdown'
+                )
+                return
+            
+            # Create session selection keyboard for actions
+            keyboard = []
+            for session in sessions:
+                display_name = session.replace('claude_', '') if session.startswith('claude_') else session
+                
+                # Check if session exists and get status
+                session_exists = os.system(f"tmux has-session -t {session}") == 0
+                status_icon = "✅" if session_exists else "❌"
+                current_icon = "🎯 " if session == self.config.session_name else ""
+                
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"{current_icon}{status_icon} {display_name}",
+                        callback_data=f"session_menu:{session}"
+                    )
+                ])
+            
+            # Add back button
+            keyboard.append([InlineKeyboardButton("🔙 메뉴로", callback_data="back_to_menu")])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                f"🎛️ **세션 액션** ({len(sessions)}개)\n\n"
+                f"🎯 현재 메인: `{self.config.session_name}`\n\n"
+                "액션을 수행할 세션을 선택하세요:",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+            
+        except Exception as e:
+            logger.error(f"세션 액션 목록 조회 중 오류: {str(e)}")
+            await query.edit_message_text(
+                f"❌ **세션 목록 조회 실패**\n\n오류: {str(e)}",
+                parse_mode='Markdown'
+            )
+    
+    async def _session_menu_callback(self, query, context, session_name):
+        """Show action menu for specific session"""
+        try:
+            # Check if session exists
+            session_exists = os.system(f"tmux has-session -t {session_name}") == 0
+            if not session_exists:
+                await query.edit_message_text(
+                    f"❌ **세션 없음**\n\n"
+                    f"세션 `{session_name}`이 존재하지 않습니다.",
+                    parse_mode='Markdown'
+                )
+                return
+            
+            display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
+            is_current = session_name == self.config.session_name
+            
+            # Create action buttons
+            keyboard = [
+                [
+                    InlineKeyboardButton("🏠 메인세션 설정", callback_data=f"session_switch:{session_name}"),
+                    InlineKeyboardButton("📜 로그보기", callback_data=f"session_log:{session_name}")
+                ],
+                [
+                    InlineKeyboardButton("⏸️ Pause (ESC)", callback_data=f"session_pause:{session_name}"),
+                    InlineKeyboardButton("🗑️ Erase (Ctrl+C)", callback_data=f"session_erase:{session_name}")
+                ],
+                [
+                    InlineKeyboardButton("◀️ 세션 목록으로", callback_data="back_to_sessions"),
+                    InlineKeyboardButton("🔙 메뉴로", callback_data="back_to_menu")
+                ]
+            ]
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            status_text = "🎯 현재 메인" if is_current else "일반 세션"
+            
+            await query.edit_message_text(
+                f"🎛️ **{display_name} 세션 액션**\n\n"
+                f"📋 **세션명**: `{session_name}`\n"
+                f"📊 **상태**: {status_text}\n\n"
+                "원하는 액션을 선택하세요:",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+            
+        except Exception as e:
+            logger.error(f"세션 메뉴 표시 중 오류: {str(e)}")
+            await query.edit_message_text(
+                f"❌ **세션 메뉴 오류**\n\n오류: {str(e)}",
+                parse_mode='Markdown'
+            )
+    
+    async def _session_log_callback(self, query, context, session_name):
+        """Show logs for specific session"""
+        try:
+            import subprocess
+            
+            # Check if session exists
+            session_exists = os.system(f"tmux has-session -t {session_name}") == 0
+            if not session_exists:
+                await query.edit_message_text(
+                    f"❌ **세션 없음**\n\n"
+                    f"세션 `{session_name}`이 존재하지 않습니다.",
+                    parse_mode='Markdown'
+                )
+                return
+            
+            # Get screen content with moderate line count
+            result = subprocess.run(
+                f"tmux capture-pane -t {session_name} -p -S -100", 
+                shell=True, 
+                capture_output=True, 
+                text=True
+            )
+            
+            if result.returncode == 0:
+                current_screen = result.stdout
+                
+                if current_screen:
+                    display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
+                    lines = current_screen.split('\n')
+                    
+                    # Limit message length for Telegram
+                    max_length = 3000
+                    if len(current_screen) > max_length:
+                        # Show last part with truncation notice
+                        truncated_lines = []
+                        current_length = 0
+                        for line in reversed(lines):
+                            if current_length + len(line) > max_length:
+                                break
+                            truncated_lines.insert(0, line)
+                            current_length += len(line) + 1
+                        
+                        screen_text = "...(앞부분 생략)...\n" + '\n'.join(truncated_lines)
+                    else:
+                        screen_text = current_screen
+                    
+                    header = f"📜 **{display_name} 세션 로그**\n\n"
+                    header += f"🎛️ **세션**: `{session_name}`\n"
+                    header += f"📏 **라인 수**: ~{len(lines)}줄\n\n"
+                    
+                    await query.edit_message_text(
+                        f"{header}```\n{screen_text.strip()}\n```",
+                        parse_mode='Markdown'
+                    )
+                else:
+                    await query.edit_message_text(f"📜 **{session_name} 로그**\n\n📺 세션 화면이 비어있습니다.")
+            else:
+                await query.edit_message_text(f"❌ 세션 `{session_name}`의 로그를 가져올 수 없습니다.")
+                
+        except Exception as e:
+            logger.error(f"세션 로그 조회 중 오류: {str(e)}")
+            await query.edit_message_text(f"❌ **로그 조회 오류**\n\n오류: {str(e)}")
+    
+    async def _session_switch_callback(self, query, context, session_name):
+        """Switch main session"""
+        try:
+            # Check if session exists
+            session_exists = os.system(f"tmux has-session -t {session_name}") == 0
+            if not session_exists:
+                await query.edit_message_text(
+                    f"❌ **세션 없음**\n\n"
+                    f"세션 `{session_name}`이 존재하지 않습니다.",
+                    parse_mode='Markdown'
+                )
+                return
+            
+            current_session = self.config.session_name
+            
+            if session_name == current_session:
+                await query.edit_message_text(
+                    f"ℹ️ **이미 메인 세션**\n\n"
+                    f"'{session_name}'이 이미 메인 세션입니다.",
+                    parse_mode='Markdown'
+                )
+                return
+            
+            # Switch using session manager
+            from ..session_manager import session_manager
+            success = session_manager.switch_session(session_name)
+            
+            if success:
+                display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
+                
+                await query.edit_message_text(
+                    f"🏠 **메인 세션 변경 완료**\n\n"
+                    f"이전: `{current_session}`\n"
+                    f"새 메인: `{session_name}`\n\n"
+                    f"✅ 이제 `{display_name}` 세션이 메인 세션입니다.\n"
+                    f"모니터링 시스템이 자동으로 업데이트됩니다.",
+                    parse_mode='Markdown'
+                )
+                
+                # Restart monitoring for new session
+                await self._restart_monitoring()
+                
+            else:
+                await query.edit_message_text(
+                    f"❌ **세션 전환 실패**\n\n"
+                    f"세션 `{session_name}`으로 전환할 수 없습니다.",
+                    parse_mode='Markdown'
+                )
+                
+        except Exception as e:
+            logger.error(f"세션 전환 중 오류: {str(e)}")
+            await query.edit_message_text(
+                f"❌ **메인 세션 설정 오류**\n\n오류: {str(e)}",
+                parse_mode='Markdown'
+            )
+    
+    async def _session_pause_callback(self, query, context, session_name):
+        """Send pause (ESC) to specific session"""
+        try:
+            # Check if session exists
+            session_exists = os.system(f"tmux has-session -t {session_name}") == 0
+            if not session_exists:
+                await query.edit_message_text(
+                    f"❌ **세션 없음**\n\n"
+                    f"세션 `{session_name}`이 존재하지 않습니다.",
+                    parse_mode='Markdown'
+                )
+                return
+            
+            # Send ESC key
+            result = os.system(f"tmux send-keys -t {session_name} Escape")
+            
+            if result == 0:
+                display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
+                
+                await query.edit_message_text(
+                    f"⏸️ **Pause 명령 전송**\n\n"
+                    f"🎛️ **대상 세션**: {display_name}\n"
+                    f"⌨️ **전송된 키**: ESC\n\n"
+                    f"✅ `{session_name}` 세션에 ESC 키를 전송했습니다.\n"
+                    f"Claude 작업이 일시정지됩니다.",
+                    parse_mode='Markdown'
+                )
+                
+                logger.info(f"ESC 키 전송 완료: {session_name}")
+            else:
+                await query.edit_message_text(
+                    f"❌ **Pause 실패**\n\n"
+                    f"세션 `{session_name}`에 ESC 키를 전송할 수 없습니다.",
+                    parse_mode='Markdown'
+                )
+                
+        except Exception as e:
+            logger.error(f"세션 pause 중 오류: {str(e)}")
+            await query.edit_message_text(
+                f"❌ **Pause 오류**\n\n오류: {str(e)}",
+                parse_mode='Markdown'
+            )
+    
+    async def _session_erase_callback(self, query, context, session_name):
+        """Send erase (Ctrl+C) to specific session"""
+        try:
+            # Check if session exists
+            session_exists = os.system(f"tmux has-session -t {session_name}") == 0
+            if not session_exists:
+                await query.edit_message_text(
+                    f"❌ **세션 없음**\n\n"
+                    f"세션 `{session_name}`이 존재하지 않습니다.",
+                    parse_mode='Markdown'
+                )
+                return
+            
+            # Send Ctrl+C key
+            result = os.system(f"tmux send-keys -t {session_name} C-c")
+            
+            if result == 0:
+                display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
+                
+                await query.edit_message_text(
+                    f"🗑️ **Erase 명령 전송**\n\n"
+                    f"🎛️ **대상 세션**: {display_name}\n"
+                    f"⌨️ **전송된 키**: Ctrl+C\n\n"
+                    f"✅ `{session_name}` 세션에 Ctrl+C 키를 전송했습니다.\n"
+                    f"현재 작업이 중단됩니다.",
+                    parse_mode='Markdown'
+                )
+                
+                logger.info(f"Ctrl+C 키 전송 완료: {session_name}")
+            else:
+                await query.edit_message_text(
+                    f"❌ **Erase 실패**\n\n"
+                    f"세션 `{session_name}`에 Ctrl+C 키를 전송할 수 없습니다.",
+                    parse_mode='Markdown'
+                )
+                
+        except Exception as e:
+            logger.error(f"세션 erase 중 오류: {str(e)}")
+            await query.edit_message_text(
+                f"❌ **Erase 오류**\n\n오류: {str(e)}",
+                parse_mode='Markdown'
+            )
     
     def run(self):
         """Start the Telegram bot"""

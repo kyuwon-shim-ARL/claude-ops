@@ -17,6 +17,8 @@ from ..config import ClaudeOpsConfig
 from ..session_manager import session_manager
 from ..utils.session_state import SessionStateAnalyzer, SessionState
 from .notifier import SmartNotifier
+from .keyboard_handler import keyboard_handler
+from .message_queue import message_queue
 
 logger = logging.getLogger(__name__)
 
@@ -301,14 +303,19 @@ class MultiSessionMonitor:
         # Session discovery loop
         while self.running:
             try:
-                time.sleep(30)  # Check for new sessions every 30 seconds
+                time.sleep(5)  # 5 second sleep for monitoring cycle
+                
+                # Regular monitoring tasks
+                current_time = time.time()
                 
                 # Clean up dead threads first
-                self.cleanup_dead_threads()
+                if current_time % 30 < 5:  # Every 30 seconds
+                    self.cleanup_dead_threads()
                 
                 # Periodic cache cleanup (every 5 minutes)
-                if time.time() % 300 < 30:  # Check if we're within 30 seconds of a 5-minute mark
+                if current_time % 300 < 5:  # Every 5 minutes
                     self.state_analyzer.cleanup_expired_cache()
+                    message_queue.cleanup_old_messages()  # Clean old keyboard messages too
                 
                 # Discover current sessions
                 current_sessions = self.discover_sessions()
