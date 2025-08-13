@@ -55,7 +55,8 @@ class MultiSessionMonitor:
     
     def get_session_state(self, session_name: str) -> SessionState:
         """Get current session state using unified analyzer"""
-        return self.state_analyzer.get_state(session_name)
+        # 알림용이므로 현재 화면만 기반으로 상태 판단
+        return self.state_analyzer.get_state_for_notification(session_name)
     
     def get_screen_content_hash(self, session_name: str) -> str:
         """Get hash of current screen content for change detection"""

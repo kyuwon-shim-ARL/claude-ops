@@ -165,6 +165,43 @@ class SessionStateAnalyzer:
             logger.error(f"Error getting screen content for {session_name}: {e}")
             return None
     
+    def get_current_screen_only(self, session_name: str) -> Optional[str]:
+        """
+        Get only current visible screen content for real-time state detection
+        
+        This method is specifically for notification systems that need to detect
+        the current state without being influenced by scrollback history.
+        Unlike get_screen_content(), this does NOT use log_length_manager.
+        
+        Args:
+            session_name: Name of the tmux session
+            
+        Returns:
+            Current screen content as string, or None if failed
+        """
+        try:
+            # 현재 보이는 화면만 캡처 (스크롤백 없음)
+            result = subprocess.run(
+                f"tmux capture-pane -t {session_name} -p",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            if result.returncode == 0:
+                return result.stdout
+            else:
+                logger.warning(f"Failed to capture current screen for {session_name}: {result.stderr}")
+                return None
+                
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Timeout capturing current screen for {session_name}")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting current screen for {session_name}: {e}")
+            return None
+    
     def _detect_working_state(self, screen_content: str) -> bool:
         """
         Detect if session is actively working based on recent screen content
@@ -323,6 +360,47 @@ class SessionStateAnalyzer:
             self._state_cache[session_name] = (state, now)
         
         return state
+    
+    def get_state_for_notification(self, session_name: str) -> SessionState:
+        """
+        Get session state specifically for notification decisions
+        
+        This method uses only the current visible screen (no scrollback) to avoid
+        false positives from historical content. It's designed for real-time
+        notification systems that need accurate current state detection.
+        
+        Args:
+            session_name: Name of the tmux session
+            
+        Returns:
+            Current SessionState based on visible screen only
+        """
+        # 알림용은 항상 현재 화면만 사용 (캐시 없음)
+        screen_content = self.get_current_screen_only(session_name)
+        
+        if screen_content is None:
+            return SessionState.UNKNOWN
+        elif not screen_content.strip():
+            return SessionState.IDLE
+        else:
+            # Check states in priority order
+            detected_states = []
+            
+            if self._detect_error_state(screen_content):
+                detected_states.append(SessionState.ERROR)
+            
+            if self._detect_input_waiting(screen_content):
+                detected_states.append(SessionState.WAITING_INPUT)
+            
+            if self._detect_working_state(screen_content):
+                detected_states.append(SessionState.WORKING)
+            
+            # If no specific state detected, assume idle
+            if not detected_states:
+                detected_states.append(SessionState.IDLE)
+            
+            # Return highest priority state
+            return min(detected_states, key=lambda s: self.STATE_PRIORITY[s])
     
     def clear_cache(self, session_name: Optional[str] = None) -> None:
         """
