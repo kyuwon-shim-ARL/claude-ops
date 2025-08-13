@@ -1684,9 +1684,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             session_exists = os.system(f"tmux has-session -t {session_name}") == 0
             if not session_exists:
                 await query.edit_message_text(
-                    f"❌ **세션 없음**\n\n"
-                    f"세션 `{session_name}`이 존재하지 않습니다.",
-                    parse_mode='Markdown'
+                    f"❌ 세션 없음\n\n세션 '{session_name}'이 존재하지 않습니다."
                 )
                 return
             
@@ -1721,22 +1719,21 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                     else:
                         screen_text = current_screen
                     
-                    header = f"📜 **{display_name} 세션 로그**\n\n"
-                    header += f"🎛️ **세션**: `{session_name}`\n"
-                    header += f"📏 **라인 수**: ~{len(lines)}줄\n\n"
+                    header = f"📜 {display_name} 세션 로그\n\n"
+                    header += f"🎛️ 세션: {session_name}\n"
+                    header += f"📏 라인 수: ~{len(lines)}줄\n\n"
                     
-                    await query.edit_message_text(
-                        f"{header}```\n{screen_text.strip()}\n```",
-                        parse_mode='Markdown'
-                    )
+                    # Use same safe format as log_command (no markdown parsing)
+                    message = f"{header}{screen_text.strip()}"
+                    await query.edit_message_text(message)
                 else:
-                    await query.edit_message_text(f"📜 **{session_name} 로그**\n\n📺 세션 화면이 비어있습니다.")
+                    await query.edit_message_text(f"📜 {session_name} 로그\n\n📺 세션 화면이 비어있습니다.")
             else:
-                await query.edit_message_text(f"❌ 세션 `{session_name}`의 로그를 가져올 수 없습니다.")
+                await query.edit_message_text(f"❌ 세션 '{session_name}'의 로그를 가져올 수 없습니다.")
                 
         except Exception as e:
             logger.error(f"세션 로그 조회 중 오류: {str(e)}")
-            await query.edit_message_text(f"❌ **로그 조회 오류**\n\n오류: {str(e)}")
+            await query.edit_message_text(f"❌ 로그 조회 오류\n\n오류: {str(e)}")
     
     async def _session_switch_callback(self, query, context, session_name):
         """Switch main session"""
