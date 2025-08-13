@@ -308,7 +308,8 @@ Claude가 작업을 완료했습니다. 결과를 확인해보세요.
             
             # Find the last bullet point, but skip if it's currently running
             for i in range(len(lines) - 1, -1, -1):
-                line = lines[i].strip()
+                line = lines[i].strip()  # Remove leading/trailing whitespace
+                # Check for bullet points at any indentation level
                 if line.startswith('●') or line.startswith('•'):
                     # Check if this bullet point is currently running
                     is_running = False
@@ -324,9 +325,36 @@ Claude가 작업을 완료했습니다. 결과를 확인해보세요.
                         last_bullet_index = i
                         break
             
-            # If no bullet point found, get last 10 lines
+            # Smart context extraction without AI/tokens
             if last_bullet_index == -1:
-                start_index = max(0, len(lines) - 10)
+                # Look for other meaningful boundaries (in reverse order)
+                boundary_patterns = [
+                    '╭─',  # Top border of TUI box
+                    '> ',  # User input prompt  
+                    '## ', # Markdown headers
+                    '### ',
+                    '#### ',
+                    '**완료 기준**:', # Completion criteria
+                    '**결론**:', # Conclusions
+                    '**분석**:', # Analysis
+                    '🔧', '📝', '🎯', '✅', '❌', '⚠️'  # Emoji section markers
+                ]
+                
+                boundary_index = -1
+                for i in range(len(lines) - 1, max(0, len(lines) - 100), -1):
+                    line = lines[i].strip()
+                    for pattern in boundary_patterns:
+                        if pattern in line:
+                            boundary_index = i
+                            break
+                    if boundary_index != -1:
+                        break
+                
+                # Use boundary if found, otherwise last 50 lines
+                if boundary_index != -1:
+                    start_index = boundary_index
+                else:
+                    start_index = max(0, len(lines) - 50)
             else:
                 start_index = last_bullet_index
             
