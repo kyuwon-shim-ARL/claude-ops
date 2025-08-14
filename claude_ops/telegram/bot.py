@@ -899,19 +899,28 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         if not sessions:
             return None
         
-        # Build session buttons in rows of 3
+        # Build session buttons with optimized layout
         keyboard = []
         current_row = []
         
         for session in sessions:
             display_name = session.replace('claude_', '') if session.startswith('claude_') else session
-            # Limit to 8 chars for button readability
-            if len(display_name) > 8:
-                display_name = display_name[:8]
-                
+            
+            # Smart truncation: try to keep meaningful part
+            if len(display_name) > 12:
+                # Try to keep the meaningful part (e.g., "PaperFlow" instead of "share_snack")
+                if '_' in display_name:
+                    parts = display_name.split('_')
+                    # Use the longest meaningful part or first two parts
+                    if len(parts) > 1:
+                        display_name = parts[0][:6] + '_' + parts[1][:5] if len(parts[1]) > 5 else parts[0][:12]
+                else:
+                    display_name = display_name[:12]
+            
             current_row.append(KeyboardButton(display_name))
             
-            if len(current_row) == 3:
+            # Use 2 buttons per row for better readability with longer names
+            if len(current_row) == 2:
                 keyboard.append(current_row)
                 current_row = []
         
@@ -2196,18 +2205,53 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                     break
             
             if target_session:
-                # Switch to target session
-                from ..session_manager import session_manager
-                old_session = session_manager.get_active_session()
-                success = session_manager.switch_session(target_session)
-                
-                if success:
-                    logger.info(f"🔄 리모컨 세션 전환: {old_session} → {target_session}")
+                # Show session grid instead of just switching
+                try:
+                    display_name = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+                    is_current = target_session == self.config.session_name
+                    
+                    # Get session status and prompt hint
+                    from ..utils.session_state import is_session_working, get_session_working_info
+                    is_working = is_session_working(target_session)
+                    status_emoji = "🔄 작업중" if is_working else "💤 대기중"
+                    
+                    # Get full prompt hint for this view
+                    prompt_hint = await self.get_session_prompt_hint(target_session)
+                    
+                    # Create quick log buttons grid (useful actions)
+                    keyboard = [
+                        [
+                            InlineKeyboardButton("📺50", callback_data=f"quick_log_50:{target_session}"),
+                            InlineKeyboardButton("📺100", callback_data=f"quick_log_100:{target_session}"),
+                            InlineKeyboardButton("📺150", callback_data=f"quick_log_150:{target_session}")
+                        ],
+                        [
+                            InlineKeyboardButton("📺200", callback_data=f"quick_log_200:{target_session}"),
+                            InlineKeyboardButton("📺300", callback_data=f"quick_log_300:{target_session}"),
+                            InlineKeyboardButton("🏠 메인설정", callback_data=f"session_switch:{target_session}")
+                        ],
+                        [
+                            InlineKeyboardButton("⏸️ Pause", callback_data=f"session_pause:{target_session}"),
+                            InlineKeyboardButton("🗑️ Erase", callback_data=f"session_erase:{target_session}"),
+                            InlineKeyboardButton("◀️ 뒤로", callback_data="session_actions")
+                        ]
+                    ]
+                    
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    
                     await update.message.reply_text(
-                        f"🔄 세션 전환 완료\n\n📤 이전: {old_session}\n📥 현재: {target_session}"
+                        f"🎯 **세션 제어판**: {display_name}\n\n"
+                        f"📊 **상태**: {status_emoji}\n"
+                        f"🆔 **세션명**: `{target_session}`\n"
+                        f"⭐ **메인**: {'예' if is_current else '아니오'}\n\n"
+                        f"💡 **마지막 작업**:\n{prompt_hint}\n\n"
+                        f"🎛️ **액션을 선택하세요:**",
+                        reply_markup=reply_markup,
+                        parse_mode='Markdown'
                     )
-                else:
-                    await update.message.reply_text(f"❌ 세션 {target_session} 전환에 실패했습니다.")
+                except Exception as e:
+                    logger.error(f"세션 보드 표시 오류: {str(e)}")
+                    await update.message.reply_text(f"❌ 세션 {target_session} 정보를 불러올 수 없습니다.")
                     
                 return True
         
