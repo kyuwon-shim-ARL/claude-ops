@@ -119,115 +119,59 @@ nextflow run src/main.nf -profile cluster
 # Run with custom output directory
 nextflow run src/main.nf --output_dir /path/to/results
 ```
+# Claude Code 4단계 개발 워크플로우
 
-## Claude Code Optimization Strategies
+## 개발 워크플로우
 
-### 🚀 Tool Usage Optimization
-- **Use Task tool for**: Complex analysis, multi-file searches, architectural reviews
-- **Use MultiEdit for**: Batch refactoring, consistent style changes, pattern replacements  
-- **Use Glob + batch Read**: When analyzing multiple files with similar patterns
-- **Combine tools strategically**: Glob → Task analysis → MultiEdit implementation
+이 프로젝트는 4단계 키워드 기반 개발을 사용합니다:
+- **"기획"** → Structured Discovery & Planning Loop:
+  - 탐색: 전체 구조 파악, As-Is/To-Be/Gap 분석
+  - 계획: MECE 기반 작업분해, 우선순위 설정
+  - 수렴: 탐색↔계획 반복 until PRD 완성
+- **"구현"** → Implementation with DRY:
+  - 기존 코드 검색 → 재사용 → 없으면 생성
+  - TodoWrite 기반 체계적 진행
+  - 단위 테스트 & 기본 검증
+- **"안정화"** → **Structural Sustainability Protocol v2.0**:
+  - 구조 스캔: 전체 파일 분석, 중복/임시 파일 식별
+  - 구조 최적화: 디렉토리 정리, 파일 분류, 네이밍 표준화
+  - 의존성 해결: Import 수정, 참조 오류 해결
+  - 통합 테스트: 모듈 검증, API 테스트, 시스템 무결성
+  - 문서 동기화: CLAUDE.md 반영, README 업데이트
+  - 품질 검증: MECE 분석, 성능 벤치마크 (ZERO 이슈까지)
+- **"배포"** → Deployment: 최종검증 + 구조화커밋 + 푸시 + 태깅
 
-### 📊 Context Management Best Practices
-- **Batch similar operations**: Read multiple files in one go when possible
-- **Use Task tool for heavy lifting**: Delegate complex analysis to reduce main context usage
-- **Prioritize MultiEdit**: Single tool call vs multiple Edit calls saves significant tokens
-- **Strategic file reading**: Read only necessary sections using offset/limit parameters
+## 구현 체크리스트
 
-### ⚡ Performance Optimization Patterns
-```python
-# Efficient pattern: Batch processing
-files = Glob("**/*.py")
-for batch in chunk_files(files, 5):
-    batch_analysis = Task(f"Analyze these {len(batch)} files for issues")
-    apply_fixes_with_multiedit(batch, batch_analysis.fixes)
+### 구현 전 확인사항
+- ☐ **기존 코드 검색**: 비슷한 기능이 이미 있는가?
+- ☐ **재사용성 검토**: 이 기능을 다른 곳에서도 사용할 수 있는가?
+- ☐ **중앙화 고려**: 공통 모듈로 배치할가?
+- ☐ **인터페이스 설계**: 모듈 간 명확한 계약이 있는가?
+- ☐ **테스트 가능성**: 단위 테스트하기 쉬운 구조인가?
 
-# Efficient pattern: Targeted operations  
-critical_files = Glob("**/telegram/*.py") 
-performance_issues = Task("Find performance bottlenecks in telegram modules")
-MultiEdit(critical_files, performance_issues.suggested_changes)
-```
+### 코드 품질 체크
+- ☐ **DRY 원칙**: 코드 중복이 없는가?
+- ☐ **Single Source of Truth**: 동일 기능이 여러 곳에 있지 않는가?
+- ☐ **의존성 최소화**: 불필요한 결합이 없는가?
+- ☐ **명확한 네이밍**: 기능을 잘 나타내는 이름인가?
 
-## Architecture and Structure
+## 구조적 지속가능성 원칙
 
-### Directory Structure
-- `CLAUDE.md`: Central guidance file for Claude Code automation
-- `slash_commands/`: Claude Code slash command specifications
-  - `project-plan.md`: `/project-plan` command specification
-  - `task-start.md`: `/task-start` command specification  
-  - `task-archive.md`: `/task-archive` command specification
-- `src/`: Contains workflow management and optional domain-specific tools
-  - `workflow_manager.py`: Core Notion-Git integration system
-  - `workflows/`: Optional domain-specific pipeline implementations
-  - `modules/`: Optional modular processes for domain workflows
-  - `bin/`: Optional analysis scripts
-  - `configs/`: Environment-specific configurations
-- `data/`: Input data organized by domain type (optional)
-- `prompts/`: System prompt templates for AI workflow automation
-- `docs/`: Project documentation including PRDs and proposals
-- `pyproject.toml`: Python project configuration with dependencies
-- `.env`: Environment variables for API tokens and database IDs
-- `.env.example`: Template for environment configuration
+### 📁 Repository 구조 관리
+- **Root 정리**: 필수 진입점만 유지, 도구는 scripts/
+- **계층구조**: 기능별 적절한 디렉토리 배치
+- **임시 파일 관리**: *.tmp, *.bak 등 정기적 정리
 
-### Key Dependencies
-- `notion-client>=2.4.0`: For Notion API integration
-- `pygithub>=2.6.1`: For GitHub API operations
-- `python-dotenv>=1.0.0`: For environment variable management from .env files
-- Git-LFS: For managing large result files
-- Additional tools may include domain-specific workflow engines (e.g., Nextflow for computational pipelines)
+### 🔄 예방적 관리 시스템
+**자동 트리거 조건:**
+- 루트 디렉토리 파일 20개 이상
+- 임시 파일 5개 이상
+- Import 오류 3개 이상
+- 매 5번째 커밋마다
 
-## Output File Management Principles
-
-All outputs follow these management principles:
-
-### A. Git-LFS Management
-- **Definition**: Selected core final outputs for papers, reports, PRs
-- **Characteristics**: Code-coupled version control essential
-- **Examples**: Final result graphs (`final_plot.png`), key statistics (`summary_stats.csv`), final models (`final_model.h5`)
-- **Execution**: Use `task add-result` command for Git-LFS tracking with meaningful commit messages
-
-### B. Shared NAS Management  
-- **Definition**: Large-scale intermediate/full outputs too large or low-priority for Git
-- **Characteristics**: Accessibility and sharing prioritized over version control
-- **Examples**: Complete computation `results/` folders, large dataset files, processed outputs
-- **Execution**: Configure computation outputs to shared NAS paths initially; record NAS paths as text links in Notion Task anchor pages
-
-### C. Git Exclusions
-- **Definition**: Temporary, reproducible files not worth preserving
-- **Examples**: Computation work directories, local test logs, cache files
-- **Execution**: Specify in project `.gitignore` to completely exclude from Git tracking
-
-## Work Unit Definitions
-
-모든 작업 단위는 **Project → Epic → Task**의 명확한 위계를 따릅니다. `/project-plan` 명령어 실행 시, `prompts/2_create_project_plan.md`에 명시된 기준을 따라 세 단위를 구분하고 페이지 내용을 구성해야 합니다.
-
-- **Project:** **전략적 'Why'에 답하는 독립적인 가치 단위입니다.** (예: 논문 한 편, 제품 출시)
-- **Epic:** **Project를 구성하는 기능적 'What'의 묶음입니다.** (예: Figure 1 제작, 인증 시스템 구축)
-- **Task:** **Epic을 실행하는 구체적 'How'의 단위입니다.** (예: 특정 스크립트 작성, 데이터 검증)
-
-### Epic Criteria (2+ criteria required)
-- **Time**: 2+ weeks completion time?
-- **Collaboration**: Multiple assignees needed?
-- **Value**: Independent value delivery?
-- **Structure**: Clear subdivision into multiple tasks?
-- **Communication**: Separate reporting/sharing needed?
-
-### Task Criteria
-- **Definition**: Concrete execution units completable by one person within days
-- **Page Content**: Include 'Work Objectives', 'Reference Materials', and 'Exploration Journal & Outputs' sections
-
-## Knowledge Creation Workflow
-
-The system follows a 4-stage knowledge creation process detailed in `prompts/1_philosophy_knowledge_creation.md`:
-
-1. **Anchoring (Raw Archive)**: All raw exploration information in Notion Task pages - **`/export` command conversation logs must be preserved in toggle blocks**
-2. **AI Summary (1st Restructuring)**: Topic and logic-based information structuring  
-3. **Personal Digestion (Full-Stack CREATE)**: Individual insight development and knowledge connection
-4. **Team Publication (Core CREATE)**: Final knowledge sharing in Notion Knowledge Hub
-
-### Execution Environment Configuration
-When using computational workflow tools, typical execution profiles include:
-- `local`: For development and testing (limited resources)  
-- `cluster`: For production runs on distributed systems
-
-Always ensure terminal conversation logs are exported and archived in Notion Task toggle blocks using the `/task-archive` slash command.
+## important-instruction-reminders
+Do what has been asked; nothing more, nothing less.
+NEVER create files unless they're absolutely necessary for achieving your goal.
+ALWAYS prefer editing an existing file to creating a new one.
+NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.

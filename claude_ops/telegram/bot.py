@@ -407,6 +407,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 • `/start project_name /custom/path` - 지정 경로에서 claude_project_name 세션 시작
 • `/status` - 봇 및 tmux 세션 상태 확인
 • `/log [lines]` - 현재 Claude 화면 확인 (기본 50줄, 최대 2000줄)
+• `/log50`, `/log100`, `/log150`, `/log200`, `/log300` - 빠른 로그 조회
 • `/stop` - Claude 작업 중단 (ESC 키 전송)
 • `/erase` - 현재 입력 지우기 (Ctrl+C 전송) 🆕
 • `/clear` - 화면 정리 (Ctrl+L 전송) 🆕
@@ -552,6 +553,102 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         except Exception as e:
             logger.error(f"화면 캡처 중 오류: {str(e)}")
             await update.message.reply_text("❌ 내부 오류가 발생했습니다.")
+    
+    async def _log_with_lines(self, update, context, line_count: int):
+        """Common log function with specific line count"""
+        user_id = update.effective_user.id
+        
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+        
+        # Check if replying to a message - if so, use that session for log
+        target_session = self.config.session_name
+        if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
+            original_text = update.message.reply_to_message.text
+            reply_session = self.extract_session_from_message(original_text)
+            if reply_session:
+                # Check if target session exists
+                session_exists = os.system(f"tmux has-session -t {reply_session}") == 0
+                if session_exists:
+                    target_session = reply_session
+                    logger.info(f"📍 Reply 기반 로그 조회: {target_session}")
+                else:
+                    await update.message.reply_text(f"❌ 세션 `{reply_session}`이 존재하지 않습니다.")
+                    return
+        
+        try:
+            import subprocess
+            
+            # Use tmux capture-pane with -S to specify start line (negative for history)
+            result = subprocess.run(
+                f"tmux capture-pane -t {target_session} -p -S -{line_count}", 
+                shell=True, 
+                capture_output=True, 
+                text=True
+            )
+            
+            if result.returncode == 0:
+                current_screen = result.stdout  # Don't strip - keep all original spacing
+                
+                if current_screen:
+                    lines = current_screen.split('\n')
+                    
+                    # Always show the requested number of lines
+                    if len(lines) > line_count:
+                        display_lines = lines[-line_count:]
+                    else:
+                        display_lines = lines
+                        
+                    screen_text = '\n'.join(display_lines)
+                    
+                    # Send without markdown to avoid parsing errors with session info
+                    session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+                    header = f"📺 Claude 화면 로그 [{target_session}]\n\n"
+                    header += f"📁 프로젝트: {session_display}\n"
+                    header += f"🎯 세션: {target_session}\n"
+                    header += f"📏 라인 수: {len(display_lines)}줄\n\n"
+                    header += "로그 내용:\n"
+                    
+                    # Check if we need to split the message due to Telegram limits
+                    max_length = 3500
+                    if len(header + screen_text) > max_length:
+                        # Truncate the content
+                        available_space = max_length - len(header) - 50  # 50 chars for truncation message
+                        truncated_text = screen_text[:available_space] + "\n\n... (내용이 길어 일부 생략됨)"
+                        message = f"{header}{truncated_text}"
+                    else:
+                        message = f"{header}{screen_text}"
+                    
+                    await update.message.reply_text(message, parse_mode=None)
+                else:
+                    await update.message.reply_text("📺 Claude 화면이 비어있습니다.")
+            else:
+                await update.message.reply_text("❌ Claude 화면을 캡처할 수 없습니다. tmux 세션을 확인해주세요.")
+                
+        except Exception as e:
+            logger.error(f"화면 캡처 중 오류: {str(e)}")
+            await update.message.reply_text("❌ 내부 오류가 발생했습니다.")
+    
+    async def log50_command(self, update, context):
+        """Show 50 lines of Claude screen"""
+        await self._log_with_lines(update, context, 50)
+    
+    async def log100_command(self, update, context):
+        """Show 100 lines of Claude screen"""
+        await self._log_with_lines(update, context, 100)
+    
+    async def log150_command(self, update, context):
+        """Show 150 lines of Claude screen"""
+        await self._log_with_lines(update, context, 150)
+    
+    async def log200_command(self, update, context):
+        """Show 200 lines of Claude screen"""
+        await self._log_with_lines(update, context, 200)
+    
+    async def log300_command(self, update, context):
+        """Show 300 lines of Claude screen"""
+        await self._log_with_lines(update, context, 300)
     
     async def stop_command(self, update, context):
         """Stop Claude work command (send ESC key)"""
@@ -930,6 +1027,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 • `/start project_name /custom/path` - 지정 경로에서 claude_project_name 세션 시작
 • `/status` - 봇 및 tmux 세션 상태 확인
 • `/log [lines]` - 현재 Claude 화면 확인 (기본 50줄, 최대 2000줄)
+• `/log50`, `/log100`, `/log150`, `/log200`, `/log300` - 빠른 로그 조회
 • `/stop` - Claude 작업 중단 (ESC 키 전송)
 • `/erase` - 현재 입력 지우기 (Ctrl+C 전송) 🆕
 • `/clear` - 화면 정리 (Ctrl+L 전송) 🆕
@@ -981,6 +1079,11 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         self.app.add_handler(CommandHandler("start", self.start_claude_command))
         self.app.add_handler(CommandHandler("help", self.help_command))
         self.app.add_handler(CommandHandler("log", self.log_command))
+        self.app.add_handler(CommandHandler("log50", self.log50_command))
+        self.app.add_handler(CommandHandler("log100", self.log100_command))
+        self.app.add_handler(CommandHandler("log150", self.log150_command))
+        self.app.add_handler(CommandHandler("log200", self.log200_command))
+        self.app.add_handler(CommandHandler("log300", self.log300_command))
         self.app.add_handler(CommandHandler("stop", self.stop_command))
         self.app.add_handler(CommandHandler("erase", self.erase_command))
         self.app.add_handler(CommandHandler("clear", self.clear_command))

@@ -1,19 +1,4 @@
-# Nextflow
-work/
-results/
-.nextflow/
-.nextflow.log*
-trace.txt
-timeline.html
-report.html
-dag.dot
-.nextflow_trace
-
-# Python virtual environment
-venv/
-.venv/
-
-# Python cache
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -34,33 +19,58 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
 
-# Environment variables
+# Virtual environments
 .env
-.env.local
-.env.*.local
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
 
-# IDE settings
-.idea/
+# IDE
 .vscode/
+.idea/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
 # Logs
 *.log
-telegram_bot.log
-telegram_bridge.log
-claude_monitor.log
-monitor.log
+logs/
 
-# Telegram system temporary files
-/tmp/claude_last_output
+# Database
+*.db
+*.sqlite3
 
-# Test files (개발 중에만 생성)
-test_*.sh
-*_test.sh
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Documentation builds
+_build/
+.doctrees/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
