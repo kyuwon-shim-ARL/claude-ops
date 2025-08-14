@@ -1887,15 +1887,42 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             # Setup handlers
             self.setup_handlers()
             
-            # Setup post-init hook for bot commands
+            # Setup post-init hook for bot commands and webhook cleanup
             async def post_init(application):
+                try:
+                    # Clear any webhook that might cause conflicts with polling
+                    await application.bot.delete_webhook(drop_pending_updates=True)
+                    logger.info("Webhook cleared successfully")
+                except Exception as e:
+                    logger.info(f"Webhook clear attempt (may not have existed): {e}")
+                
                 await self.setup_bot_commands()
             
             self.app.post_init = post_init
             
-            # Start bot
+            # Start bot with conflict handling
             logger.info(f"텔레그램 봇이 시작되었습니다. 세션: {self.config.session_name}")
-            self.app.run_polling()
+            
+            # Add some retry logic for conflicts
+            import asyncio
+            import time
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    if attempt > 0:
+                        logger.info(f"재시도 중... ({attempt + 1}/{max_retries})")
+                        time.sleep(5 * attempt)  # Exponential backoff
+                    
+                    self.app.run_polling()
+                    break  # Success, exit retry loop
+                    
+                except Exception as e:
+                    if "terminated by other getUpdates request" in str(e) and attempt < max_retries - 1:
+                        logger.warning(f"getUpdates 충돌 감지 (시도 {attempt + 1}), 잠시 후 재시도...")
+                        continue
+                    else:
+                        logger.error(f"봇 실행 실패: {str(e)}")
+                        raise
             
         except Exception as e:
             logger.error(f"봇 실행 중 오류 발생: {str(e)}")
