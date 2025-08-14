@@ -359,8 +359,16 @@ class TelegramBridge:
             # Initialize new session for compatibility
             await self._initialize_new_session(target_session, update)
             status_msg = f"🚀 {target_session} 세션을 시작했습니다!"
+            
+            # Auto-switch to new session if it's different from current
+            if target_session != self.config.session_name:
+                await self._auto_switch_to_session(target_session, update)
         else:
             status_msg = f"✅ {target_session} 세션이 이미 실행 중입니다."
+            
+            # Auto-switch to existing session if it's different from current
+            if target_session != self.config.session_name:
+                await self._auto_switch_to_session(target_session, update)
         
         # Use standardized keyboard
         reply_markup = self.get_main_keyboard()
@@ -1439,6 +1447,33 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             
         except Exception as e:
             logger.error(f"모니터링 재시작 중 오류: {str(e)}")
+    
+    async def _auto_switch_to_session(self, session_name: str, update) -> bool:
+        """Automatically switch main session to the new session"""
+        try:
+            from ..session_manager import session_manager
+            
+            old_session = session_manager.get_active_session() 
+            success = session_manager.switch_session(session_name)
+            
+            if success:
+                logger.info(f"🔄 자동 세션 전환: {old_session} → {session_name}")
+                
+                # Send confirmation message
+                await update.message.reply_text(
+                    f"🔄 메인 세션 자동 전환 완료\n\n"
+                    f"📤 이전: {old_session}\n"
+                    f"📥 현재: {session_name}\n\n"
+                    f"✅ 이제 모든 메시지가 새 세션으로 전송됩니다!"
+                )
+                return True
+            else:
+                logger.warning(f"자동 세션 전환 실패: {session_name}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"자동 세션 전환 중 오류: {str(e)}")
+            return False
     
     async def _session_actions_callback(self, query, context):
         """Show one-click session action grid (same as menu command now)"""
