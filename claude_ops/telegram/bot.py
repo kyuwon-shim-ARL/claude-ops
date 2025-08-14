@@ -851,16 +851,8 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         
         keyboard = [
             # Direct actions for current session (top priority)
-            [InlineKeyboardButton("📊 Status", callback_data=f"direct_status:{current_session}")],
-            
-            # Quick log buttons (most used feature gets dedicated row)
-            [InlineKeyboardButton("📺50", callback_data=f"quick_log_50:{current_session}"),
-             InlineKeyboardButton("📺100", callback_data=f"quick_log_100:{current_session}"),
-             InlineKeyboardButton("📺150", callback_data=f"quick_log_150:{current_session}")],
-            [InlineKeyboardButton("📺200", callback_data=f"quick_log_200:{current_session}"),
-             InlineKeyboardButton("📺300", callback_data=f"quick_log_300:{current_session}"),
-             InlineKeyboardButton("📺Custom", callback_data=f"direct_logs:{current_session}")],
-             
+            [InlineKeyboardButton("📊 Status", callback_data=f"direct_status:{current_session}"),
+             InlineKeyboardButton("📺 Logs", callback_data=f"direct_logs:{current_session}")],
             [InlineKeyboardButton("⏸️ Pause", callback_data=f"direct_pause:{current_session}"),
              InlineKeyboardButton("🗑️ Erase", callback_data=f"direct_erase:{current_session}")],
             
@@ -1692,18 +1684,22 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             # Get full prompt hint for this view
             prompt_hint = await self.get_session_prompt_hint(session_name)
             
-            # Create direct action buttons (2x2 grid)
+            # Create quick log buttons grid (useful actions)
             keyboard = [
                 [
-                    InlineKeyboardButton("🏠 메인 설정", callback_data=f"session_switch:{session_name}"),
-                    InlineKeyboardButton("📺 로그 보기", callback_data=f"session_log:{session_name}")
+                    InlineKeyboardButton("📺50", callback_data=f"quick_log_50:{session_name}"),
+                    InlineKeyboardButton("📺100", callback_data=f"quick_log_100:{session_name}"),
+                    InlineKeyboardButton("📺150", callback_data=f"quick_log_150:{session_name}")
                 ],
                 [
-                    InlineKeyboardButton("⏸️ Pause (ESC)", callback_data=f"session_pause:{session_name}"),
-                    InlineKeyboardButton("🗑️ Erase (Ctrl+C)", callback_data=f"session_erase:{session_name}")
+                    InlineKeyboardButton("📺200", callback_data=f"quick_log_200:{session_name}"),
+                    InlineKeyboardButton("📺300", callback_data=f"quick_log_300:{session_name}"),
+                    InlineKeyboardButton("🏠 메인설정", callback_data=f"session_switch:{session_name}")
                 ],
                 [
-                    InlineKeyboardButton("◀️ 세션 메뉴로", callback_data="session_actions")
+                    InlineKeyboardButton("⏸️ Pause", callback_data=f"session_pause:{session_name}"),
+                    InlineKeyboardButton("🗑️ Erase", callback_data=f"session_erase:{session_name}"),
+                    InlineKeyboardButton("◀️ 뒤로", callback_data="session_actions")
                 ]
             ]
             
