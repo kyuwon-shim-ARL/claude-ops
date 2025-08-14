@@ -936,7 +936,6 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         return ReplyKeyboardMarkup(
             keyboard,
             resize_keyboard=True,
-            persistent=True,
             one_time_keyboard=False
         )
     
