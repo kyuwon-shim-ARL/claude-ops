@@ -334,13 +334,12 @@ class TelegramBridge:
                     await self._install_claude_dev_kit(target_directory, project_name, update)
                     project_status = "🆕 새 프로젝트 생성"
                 else:
-                    # 기존 프로젝트 감지 메시지
+                    # 기존 프로젝트 감지 메시지 (안전한 플레인 텍스트)
                     await update.message.reply_text(
-                        f"📂 **기존 프로젝트 감지**\n\n"
-                        f"📁 경로: `{target_directory}`\n"
-                        f"🎯 세션: `claude_{project_name}`\n\n"
-                        f"💡 기존 프로젝트에 연결합니다...",
-                        parse_mode='Markdown'
+                        f"📂 기존 프로젝트 감지\n\n"
+                        f"📁 경로: {target_directory}\n"
+                        f"🎯 세션: claude_{project_name}\n\n"
+                        f"💡 기존 프로젝트에 연결합니다..."
                     )
                     project_status = "📂 기존 프로젝트 연결"
             
