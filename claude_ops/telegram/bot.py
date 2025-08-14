@@ -1420,12 +1420,9 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             logger.warning("Claude dev-kit installation timed out")
             return False
         except Exception as e:
-            await install_msg.edit_text(
-                f"❌ **예상치 못한 오류**\n\n"
-                f"🚫 오류: {str(e)[:100]}\n"
-                f"💭 기본 프로젝트로 계속합니다...",
-                parse_mode='Markdown'
-            )
+            # 안전한 에러 메시지 전송 (마크다운 파싱 에러 방지)
+            error_text = f"❌ 예상치 못한 오류\n\n🚫 오류: {str(e)[:100]}\n💭 기본 프로젝트로 계속합니다..."
+            await install_msg.edit_text(error_text)
             logger.error(f"Unexpected error during claude-dev-kit installation: {str(e)}")
             return False
     

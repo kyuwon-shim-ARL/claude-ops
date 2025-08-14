@@ -187,6 +187,13 @@ start_monitoring() {
         
         # Also start telegram bot if not already running
         if ! tmux has-session -t telegram-bot 2>/dev/null; then
+            # 기존 telegram bot 프로세스 강제 정리
+            if pgrep -f "telegram.*bot" > /dev/null 2>&1; then
+                printf "${YELLOW}Found existing telegram bot processes, cleaning up...${NC}\n"
+                pkill -f "telegram.*bot" || true
+                sleep 3
+            fi
+            
             printf "${GREEN}Starting Telegram Bot...${NC}\n"
             tmux new-session -d -s telegram-bot \
                 "cd $(pwd) && uv run python -m claude_ops.telegram.bot"
@@ -235,10 +242,18 @@ stop_monitoring() {
         printf "${GREEN}✅ Stopped telegram bot${NC}\n" || \
         printf "${YELLOW}ℹ️  Telegram bot not running${NC}\n"
     
-    # Kill background processes
+    # Kill background processes (강화된 프로세스 정리)
     pkill -f "multi_monitor" 2>/dev/null && \
         printf "${GREEN}✅ Killed background processes${NC}\n" || \
         printf "${YELLOW}ℹ️  No background processes found${NC}\n"
+    
+    # Force kill telegram bot processes
+    pkill -f "telegram.*bot" 2>/dev/null && \
+        printf "${GREEN}✅ Force killed telegram bot processes${NC}\n" || \
+        printf "${YELLOW}ℹ️  No telegram bot processes found${NC}\n"
+    
+    # Wait for processes to fully terminate
+    sleep 2
     
     printf "${GREEN}🎉 All monitoring stopped${NC}\n"
 }
