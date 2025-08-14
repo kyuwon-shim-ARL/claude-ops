@@ -10,7 +10,7 @@ import logging
 import subprocess
 from typing import Optional
 from telegram.ext import Application, MessageHandler, CommandHandler, CallbackQueryHandler, filters
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
 
 from ..config import ClaudeOpsConfig
 
@@ -163,6 +163,10 @@ class TelegramBridge:
         if not self.check_user_authorization(user_id):
             logger.warning(f"인증되지 않은 사용자 접근 시도: {user_id}")
             await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+        
+        # Handle Reply Keyboard remote control buttons
+        if await self._handle_remote_button(update, user_input):
             return
         
         # Handle slash commands that should be sent to Claude
@@ -412,6 +416,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 • `/erase` - 현재 입력 지우기 (Ctrl+C 전송) 🆕
 • `/clear` - 화면 정리 (Ctrl+L 전송) 🆕
 • `/sessions` - 활성 세션 목록 보기 및 전환
+• `/remote` - 세션 리모컨 켜기/끄기 (화면 하단 고정)
 • `/help` - 이 도움말 보기
 
 **Reply 기반 세션 제어:** 🆕
@@ -750,6 +755,30 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         # Show session board grid
         await self._show_session_action_grid(update.message.reply_text, None)
     
+    async def remote_command(self, update, context):
+        """Toggle session remote control keyboard"""
+        user_id = update.effective_user.id
+        
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+        
+        # Get remote keyboard
+        remote_keyboard = self.get_session_remote_keyboard()
+        
+        if remote_keyboard:
+            await update.message.reply_text(
+                "🎛️ 세션 리모컨 활성화!\n\n"
+                "화면 하단의 버튼들을 사용하여:\n"
+                "• 세션명 버튼: 해당 세션으로 전환\n" 
+                "• 📺버튼: 빠른 로그 조회\n"
+                "• 🎛️ Sessions: 세션 메뉴\n"
+                "• ❌ 리모컨 끄기: 리모컨 숨기기",
+                reply_markup=remote_keyboard
+            )
+        else:
+            await update.message.reply_text("❌ 사용 가능한 Claude 세션이 없습니다.")
+    
     async def sessions_command(self, update, context):
         """Show active sessions command or switch to reply session directly"""
         user_id = update.effective_user.id
@@ -862,6 +891,54 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
              InlineKeyboardButton("❓ Help", callback_data="help")]
         ]
         return InlineKeyboardMarkup(keyboard)
+    
+    def get_session_remote_keyboard(self):
+        """Get session remote control keyboard (fixed at bottom)"""
+        sessions = self.get_all_claude_sessions()
+        
+        if not sessions:
+            return None
+        
+        # Build session buttons in rows of 3
+        keyboard = []
+        current_row = []
+        
+        for session in sessions:
+            display_name = session.replace('claude_', '') if session.startswith('claude_') else session
+            # Limit to 8 chars for button readability
+            if len(display_name) > 8:
+                display_name = display_name[:8]
+                
+            current_row.append(KeyboardButton(display_name))
+            
+            if len(current_row) == 3:
+                keyboard.append(current_row)
+                current_row = []
+        
+        # Add remaining sessions
+        if current_row:
+            keyboard.append(current_row)
+        
+        # Add quick log buttons row
+        keyboard.append([
+            KeyboardButton("📺50"),
+            KeyboardButton("📺100"), 
+            KeyboardButton("📺150"),
+            KeyboardButton("📺200")
+        ])
+        
+        # Add control buttons
+        keyboard.append([
+            KeyboardButton("🎛️ Sessions"),
+            KeyboardButton("❌ 리모컨 끄기")
+        ])
+        
+        return ReplyKeyboardMarkup(
+            keyboard,
+            resize_keyboard=True,
+            persistent=True,
+            one_time_keyboard=False
+        )
     
     async def get_session_prompt_hint(self, session_name: str) -> str:
         """Get last prompt hint for session"""
@@ -1038,6 +1115,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 • `/erase` - 현재 입력 지우기 (Ctrl+C 전송) 🆕
 • `/clear` - 화면 정리 (Ctrl+L 전송) 🆕
 • `/sessions` - 활성 세션 목록 보기 및 전환
+• `/remote` - 세션 리모컨 켜기/끄기 (화면 하단 고정)
 • `/help` - 이 도움말 보기
 
 **Reply 기반 세션 제어:** 🆕
@@ -1095,6 +1173,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         self.app.add_handler(CommandHandler("clear", self.clear_command))
         self.app.add_handler(CommandHandler("sessions", self.sessions_command))
         self.app.add_handler(CommandHandler("board", self.board_command))
+        self.app.add_handler(CommandHandler("remote", self.remote_command))
         
         # Callback query handler for inline buttons
         self.app.add_handler(CallbackQueryHandler(self.button_callback))
@@ -2080,6 +2159,60 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         except Exception as e:
             logger.error(f"빠른 로그 조회 중 오류: {str(e)}")
             await query.edit_message_text("❌ 내부 오류가 발생했습니다.")
+    
+    async def _handle_remote_button(self, update, user_input: str) -> bool:
+        """Handle Reply Keyboard remote control button presses"""
+        
+        # Handle remote control off
+        if user_input == "❌ 리모컨 끄기":
+            await update.message.reply_text(
+                "🎛️ 세션 리모컨이 비활성화되었습니다.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return True
+        
+        # Handle sessions menu
+        if user_input == "🎛️ Sessions":
+            await self._show_session_action_grid(update.message.reply_text, None)
+            return True
+        
+        # Handle quick log buttons
+        if user_input.startswith("📺") and user_input[2:].isdigit():
+            line_count = int(user_input[2:])
+            # Use current session for quick log
+            await self._log_with_lines(update, None, line_count)
+            return True
+        
+        # Handle session switch buttons
+        sessions = self.get_all_claude_sessions()
+        session_names = [s.replace('claude_', '') if s.startswith('claude_') else s for s in sessions]
+        
+        if user_input in session_names:
+            # Find the full session name
+            target_session = None
+            for session in sessions:
+                display_name = session.replace('claude_', '') if session.startswith('claude_') else session
+                if display_name == user_input:
+                    target_session = session
+                    break
+            
+            if target_session:
+                # Switch to target session
+                from ..session_manager import session_manager
+                old_session = session_manager.get_active_session()
+                success = session_manager.switch_session(target_session)
+                
+                if success:
+                    logger.info(f"🔄 리모컨 세션 전환: {old_session} → {target_session}")
+                    await update.message.reply_text(
+                        f"🔄 세션 전환 완료\n\n📤 이전: {old_session}\n📥 현재: {target_session}"
+                    )
+                else:
+                    await update.message.reply_text(f"❌ 세션 {target_session} 전환에 실패했습니다.")
+                    
+                return True
+        
+        return False
     
     def run(self):
         """Start the Telegram bot"""
