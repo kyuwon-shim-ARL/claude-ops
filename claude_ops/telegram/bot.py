@@ -306,6 +306,7 @@ class TelegramBridge:
         # Default behavior - use current session
         target_session = self.config.session_name
         target_directory = self.config.working_directory
+        project_status = "🔄 기본 세션 재시작"
         
         # If arguments provided, create new session
         if args:
@@ -331,6 +332,17 @@ class TelegramBridge:
                     
                     # Install claude-dev-kit for new projects
                     await self._install_claude_dev_kit(target_directory, project_name, update)
+                    project_status = "🆕 새 프로젝트 생성"
+                else:
+                    # 기존 프로젝트 감지 메시지
+                    await update.message.reply_text(
+                        f"📂 **기존 프로젝트 감지**\n\n"
+                        f"📁 경로: `{target_directory}`\n"
+                        f"🎯 세션: `claude_{project_name}`\n\n"
+                        f"💡 기존 프로젝트에 연결합니다...",
+                        parse_mode='Markdown'
+                    )
+                    project_status = "📂 기존 프로젝트 연결"
             
             # Create session name with claude_ prefix
             target_session = f"claude_{project_name}"
@@ -357,6 +369,7 @@ class TelegramBridge:
         welcome_msg = f"""🤖 *Claude-Telegram Bridge*
 
 {status_msg}
+{project_status}
 
 *📁 작업 디렉토리*: `{target_directory}`
 *🎯 세션 이름*: `{target_session}`
