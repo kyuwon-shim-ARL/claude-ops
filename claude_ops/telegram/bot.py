@@ -851,8 +851,16 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         
         keyboard = [
             # Direct actions for current session (top priority)
-            [InlineKeyboardButton("📊 Status", callback_data=f"direct_status:{current_session}"),
-             InlineKeyboardButton("📺 Logs", callback_data=f"direct_logs:{current_session}")],
+            [InlineKeyboardButton("📊 Status", callback_data=f"direct_status:{current_session}")],
+            
+            # Quick log buttons (most used feature gets dedicated row)
+            [InlineKeyboardButton("📺50", callback_data=f"quick_log_50:{current_session}"),
+             InlineKeyboardButton("📺100", callback_data=f"quick_log_100:{current_session}"),
+             InlineKeyboardButton("📺150", callback_data=f"quick_log_150:{current_session}")],
+            [InlineKeyboardButton("📺200", callback_data=f"quick_log_200:{current_session}"),
+             InlineKeyboardButton("📺300", callback_data=f"quick_log_300:{current_session}"),
+             InlineKeyboardButton("📺Custom", callback_data=f"direct_logs:{current_session}")],
+             
             [InlineKeyboardButton("⏸️ Pause", callback_data=f"direct_pause:{current_session}"),
              InlineKeyboardButton("🗑️ Erase", callback_data=f"direct_erase:{current_session}")],
             
@@ -936,6 +944,12 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         elif callback_data.startswith("session_erase:"):
             session_name = callback_data.split(":", 1)[1]
             await self._session_erase_callback(query, context, session_name)
+        elif callback_data.startswith("quick_log_"):
+            # Format: quick_log_150:session_name
+            parts = callback_data.split(":", 1)
+            line_count = int(parts[0].split("_")[-1])  # Extract number from quick_log_150
+            session_name = parts[1]
+            await self._quick_log_callback(query, context, line_count, session_name)
         elif callback_data == "back_to_menu":
             await self._back_to_menu_callback(query, context)
         elif callback_data == "back_to_sessions":
@@ -2015,6 +2029,61 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                 f"❌ **Erase 오류**\n\n오류: {str(e)}",
                 parse_mode='Markdown'
             )
+    
+    async def _quick_log_callback(self, query, context, line_count: int, session_name: str):
+        """Quick log callback with predefined line count"""
+        try:
+            import subprocess
+            
+            # Use tmux capture-pane with -S to specify start line (negative for history)
+            result = subprocess.run(
+                f"tmux capture-pane -t {session_name} -p -S -{line_count}", 
+                shell=True, 
+                capture_output=True, 
+                text=True
+            )
+            
+            if result.returncode == 0:
+                current_screen = result.stdout  # Don't strip - keep all original spacing
+                
+                if current_screen:
+                    lines = current_screen.split('\n')
+                    
+                    # Always show the requested number of lines
+                    if len(lines) > line_count:
+                        display_lines = lines[-line_count:]
+                    else:
+                        display_lines = lines
+                        
+                    screen_text = '\n'.join(display_lines)
+                    
+                    # Send without markdown to avoid parsing errors with session info
+                    session_display = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
+                    header = f"📺 빠른 로그 ({line_count}줄) [{session_name}]\n\n"
+                    header += f"📁 프로젝트: {session_display}\n"
+                    header += f"🎯 세션: {session_name}\n"
+                    header += f"📏 라인 수: {len(display_lines)}줄\n\n"
+                    header += "로그 내용:\n"
+                    
+                    # Check if we need to split the message due to Telegram limits
+                    max_length = 3500
+                    if len(header + screen_text) > max_length:
+                        # Truncate the content
+                        available_space = max_length - len(header) - 50  # 50 chars for truncation message
+                        truncated_text = screen_text[:available_space] + "\n\n... (내용이 길어 일부 생략됨)"
+                        message = f"{header}{truncated_text}"
+                    else:
+                        message = f"{header}{screen_text}"
+                    
+                    await query.edit_message_text(message, parse_mode=None)
+                else:
+                    await query.edit_message_text("📺 Claude 화면이 비어있습니다.")
+            else:
+                await query.edit_message_text("❌ Claude 화면을 캡처할 수 없습니다. tmux 세션을 확인해주세요.")
+                
+        except Exception as e:
+            logger.error(f"빠른 로그 조회 중 오류: {str(e)}")
+            await query.edit_message_text("❌ 내부 오류가 발생했습니다.")
     
     def run(self):
         """Start the Telegram bot"""
