@@ -365,20 +365,19 @@ class TelegramBridge:
         # Use standardized keyboard
         reply_markup = self.get_main_keyboard()
         
-        welcome_msg = f"""🤖 *Claude-Telegram Bridge*
+        welcome_msg = f"""🤖 Claude-Telegram Bridge
 
 {status_msg}
 {project_status}
 
-*📁 작업 디렉토리*: `{target_directory}`
-*🎯 세션 이름*: `{target_session}`
+📁 작업 디렉토리: {target_directory}
+🎯 세션 이름: {target_session}
 
-*제어판을 사용하여 Claude를 제어하세요:*"""
+제어판을 사용하여 Claude를 제어하세요:"""
         
         await update.message.reply_text(
             welcome_msg,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
+            reply_markup=reply_markup
         )
     
     async def help_command(self, update, context):
@@ -1261,17 +1260,14 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             os.system(f"tmux send-keys -t {session_name} Enter")
             
             # Send initialization notification
-            init_msg = f"🎆 **세션 초기화 완료**\n\n"
+            init_msg = f"🎆 세션 초기화 완료\n\n"
             if has_example_text:
-                init_msg += f"✨ 예시 텍스트 제거 후 `/init` 실행\n"
+                init_msg += f"✨ 예시 텍스트 제거 후 /init 실행\n"
             else:
-                init_msg += f"✨ 빈 세션에 `/init` 실행\n"
-            init_msg += f"🎯 세션: `{session_name}`\n\n🚀 이제 정상적으로 사용 가능합니다!"
+                init_msg += f"✨ 빈 세션에 /init 실행\n"
+            init_msg += f"🎯 세션: {session_name}\n\n🚀 이제 정상적으로 사용 가능합니다!"
             
-            await update.message.reply_text(
-                init_msg,
-                parse_mode='Markdown'
-            )
+            await update.message.reply_text(init_msg)
             
         except Exception as e:
             logger.error(f"Session initialization failed: {str(e)}")
@@ -1360,10 +1356,9 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         """Install claude-dev-kit in new project directory"""
         try:
             install_msg = await update.message.reply_text(
-                f"🛠️ **Claude Dev Kit 설치 중...**\n\n"
-                f"📁 디렉토리: `{target_directory}`\n"
-                f"💭 프로젝트: `{project_name}`",
-                parse_mode='Markdown'
+                f"🛠️ Claude Dev Kit 설치 중...\n\n"
+                f"📁 디렉토리: {target_directory}\n"
+                f"💭 프로젝트: {project_name}"
             )
             
             # Execute claude-dev-kit installation script
@@ -1386,35 +1381,32 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             
             if result.returncode == 0:
                 await install_msg.edit_text(
-                    f"✅ **Claude Dev Kit 설치 완료!**\n\n"
-                    f"🎯 프로젝트: `{project_name}`\n"
-                    f"📁 경로: `{target_directory}`\n\n"
-                    f"📝 **생성된 파일들:**\n"
+                    f"✅ Claude Dev Kit 설치 완료!\n\n"
+                    f"🎯 프로젝트: {project_name}\n"
+                    f"📁 경로: {target_directory}\n\n"
+                    f"📝 생성된 파일들:\n"
                     f"• CLAUDE.md - 프로젝트 가이드\n"
-                    f"• main_app.py - 에플리케이션 엔트리포인트\n"
+                    f"• main_app.py - 애플리케이션 엔트리포인트\n"
                     f"• src/, docs/, tests/ - 프로젝트 구조\n\n"
-                    f"🚀 Claude 세션을 시작합니다...",
-                    parse_mode='Markdown'
+                    f"🚀 Claude 세션을 시작합니다..."
                 )
                 logger.info(f"Successfully installed claude-dev-kit in {target_directory}")
                 return True
             else:
                 error_output = result.stderr[:200] if result.stderr else "Unknown error"
                 await install_msg.edit_text(
-                    f"⚠️ **Claude Dev Kit 설치 실패**\n\n"
+                    f"⚠️ Claude Dev Kit 설치 실패\n\n"
                     f"❌ 오류: {error_output}\n\n"
-                    f"💭 기본 프로젝트로 계속합니다...",
-                    parse_mode='Markdown'
+                    f"💭 기본 프로젝트로 계속합니다..."
                 )
                 logger.warning(f"Failed to install claude-dev-kit: {result.stderr}")
                 return False
                 
         except subprocess.TimeoutExpired:
             await install_msg.edit_text(
-                f"⏱️ **설치 시간초과**\n\n"
+                f"⏱️ 설치 시간초과\n\n"
                 f"⚠️ Claude Dev Kit 설치가 30초를 초과했습니다.\n"
-                f"💭 기본 프로젝트로 계속합니다...",
-                parse_mode='Markdown'
+                f"💭 기본 프로젝트로 계속합니다..."
             )
             logger.warning("Claude dev-kit installation timed out")
             return False

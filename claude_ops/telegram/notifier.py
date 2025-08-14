@@ -92,11 +92,10 @@ class SmartNotifier:
                     "text": message
                 }
             else:
-                # For simple notifications, use markdown
+                # For simple notifications, use plain text (safer)
                 data = {
                     "chat_id": chat_id,
-                    "text": message,
-                    "parse_mode": "Markdown"
+                    "text": message
                 }
             
             response = requests.post(url, data=data, timeout=10)
