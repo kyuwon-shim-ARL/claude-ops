@@ -2310,14 +2310,17 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         # Handle single prompt macros
         if user_input in self.PROMPT_MACROS:
             prompt_text = self.PROMPT_MACROS[user_input]
-            success = await self._send_to_claude(prompt_text)
+            target_session = await self._get_target_session_for_macro(update)
+            success = await self._send_to_claude_with_session(prompt_text, target_session)
+            
+            session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
             if success:
                 await update.message.reply_text(
-                    f"✅ {user_input} 프롬프트가 Claude에게 전송되었습니다."
+                    f"✅ {user_input} 프롬프트가 `{session_display}` 세션에 전송되었습니다."
                 )
             else:
                 await update.message.reply_text(
-                    f"❌ {user_input} 프롬프트 전송에 실패했습니다."
+                    f"❌ {user_input} 프롬프트를 `{session_display}` 세션에 전송하는데 실패했습니다."
                 )
             return True
         
@@ -2336,18 +2339,82 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                 # Remove the last separator
                 combined_prompt = combined_prompt.rstrip("\n\n" + "="*50 + "\n\n")
                 
-                success = await self._send_to_claude(combined_prompt)
+                target_session = await self._get_target_session_for_macro(update)
+                success = await self._send_to_claude_with_session(combined_prompt, target_session)
+                
+                session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
                 if success:
                     await update.message.reply_text(
-                        f"✅ 통합 워크플로우 프롬프트 ({user_input})가 Claude에게 전송되었습니다."
+                        f"✅ 통합 워크플로우 프롬프트 ({user_input})가 `{session_display}` 세션에 전송되었습니다."
                     )
                 else:
                     await update.message.reply_text(
-                        f"❌ 통합 워크플로우 프롬프트 ({user_input}) 전송에 실패했습니다."
+                        f"❌ 통합 워크플로우 프롬프트 ({user_input})를 `{session_display}` 세션에 전송하는데 실패했습니다."
                     )
                 return True
         
         return False
+    
+    async def _get_target_session_for_macro(self, update) -> str:
+        """Get target session for macro button press (reply-based or default)"""
+        target_session = None
+        
+        # Check if this is a reply to a bot message (same logic as forward_to_claude)
+        if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
+            original_text = update.message.reply_to_message.text
+            target_session = self.extract_session_from_message(original_text)
+            
+            if target_session:
+                logger.info(f"📍 Reply 기반 매크로 세션 타겟팅: {target_session}")
+                
+                # Check if target session exists
+                session_exists = os.system(f"tmux has-session -t {target_session}") == 0
+                if session_exists:
+                    return target_session
+                else:
+                    logger.warning(f"Reply 타겟 세션 {target_session}이 존재하지 않음, 메인 세션 사용")
+        
+        # Use main session as fallback
+        target_session = self.config.session_name
+        logger.info(f"🎯 메인 세션 사용: {target_session}")
+        return target_session
+    
+    async def _send_to_claude_with_session(self, text: str, target_session: str) -> bool:
+        """Send text to specific Claude session"""
+        try:
+            # Ensure target session exists
+            session_exists = os.system(f"tmux has-session -t {target_session}") == 0
+            if not session_exists:
+                logger.error(f"Target session {target_session} does not exist")
+                return False
+            
+            # Send text to tmux session using subprocess for better control
+            # Use -l flag to send literal text (handles special characters better)
+            result1 = subprocess.run(
+                ["tmux", "send-keys", "-t", target_session, "-l", text],
+                capture_output=True,
+                text=True
+            )
+            
+            # Send Enter key
+            result2 = subprocess.run(
+                ["tmux", "send-keys", "-t", target_session, "Enter"],
+                capture_output=True,
+                text=True
+            )
+            
+            # Check if both commands succeeded
+            if result1.returncode == 0 and result2.returncode == 0:
+                logger.info(f"Successfully sent macro prompt to {target_session}: {text[:100]}...")
+                return True
+            else:
+                logger.error(f"Failed to send to {target_session}. Return codes: {result1.returncode}, {result2.returncode}")
+                logger.error(f"Errors: {result1.stderr}, {result2.stderr}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Exception while sending macro to Claude session {target_session}: {str(e)}")
+            return False
     
     async def _send_to_claude(self, text: str) -> bool:
         """Send text to current Claude session"""
