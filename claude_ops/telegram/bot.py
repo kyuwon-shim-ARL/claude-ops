@@ -897,25 +897,36 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
             return
         
-        # Get prompt macro keyboard
-        remote_keyboard = self.get_prompt_macro_keyboard()
+        # Check if reply keyboard is currently active by context or argument
+        # For simplicity, we'll toggle: if /remote, activate; if /remote off, deactivate
+        args = context.args if context.args else []
         
-        await update.message.reply_text(
-            "🎛️ 프롬프트 매크로 리모컨 활성화!\n\n"
-            "⚡ 개발 워크플로우 매크로:\n"
-            "• @기획: 구조적 탐색 및 계획 수립\n"
-            "• @구현: DRY 원칙 기반 체계적 구현\n"
-            "• @안정화: 구조적 지속가능성 검증\n"
-            "• @배포: 최종 검증 및 배포\n\n"
-            "🔗 통합 워크플로우:\n"
-            "• 전체: 기획&구현&안정화&배포\n"
-            "• 개발: 기획&구현&안정화\n"
-            "• 마무리: 안정화&배포\n"
-            "• 실행: 구현&안정화&배포\n\n"
-            "🎛️ Sessions: 세션 메뉴\n"
-            "❌ 리모컨 끄기: 리모컨 숨기기",
-            reply_markup=remote_keyboard
-        )
+        if args and args[0].lower() in ['off', 'hide', '끄기']:
+            # Deactivate remote control
+            await update.message.reply_text(
+                "🎛️ 프롬프트 매크로 리모컨이 비활성화되었습니다.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+        else:
+            # Activate remote control
+            remote_keyboard = self.get_prompt_macro_keyboard()
+            
+            await update.message.reply_text(
+                "🎛️ 프롬프트 매크로 리모컨 활성화!\n\n"
+                "⚡ 개발 워크플로우 매크로:\n"
+                "• @기획: 구조적 탐색 및 계획 수립\n"
+                "• @구현: DRY 원칙 기반 체계적 구현\n"
+                "• @안정화: 구조적 지속가능성 검증\n"
+                "• @배포: 최종 검증 및 배포\n\n"
+                "🔗 통합 워크플로우:\n"
+                "• 전체: 기획&구현&안정화&배포\n"
+                "• 개발: 기획&구현&안정화\n"
+                "• 마무리: 안정화&배포\n"
+                "• 실행: 구현&안정화&배포\n\n"
+                "🎛️ Sessions: 세션 메뉴\n"
+                "💡 끄려면: /remote off",
+                reply_markup=remote_keyboard
+            )
     
     async def sessions_command(self, update, context):
         """Show active sessions command or switch to reply session directly"""
@@ -1058,8 +1069,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             
             # Control buttons
             [
-                KeyboardButton("🎛️ Sessions"),
-                KeyboardButton("❌ 리모컨 끄기")
+                KeyboardButton("🎛️ Sessions")
             ]
         ]
         
@@ -2292,14 +2302,6 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
     async def _handle_remote_button(self, update, user_input: str) -> bool:
         """Handle Reply Keyboard prompt macro button presses"""
         
-        # Handle remote control off
-        if user_input == "❌ 리모컨 끄기":
-            await update.message.reply_text(
-                "🎛️ 프롬프트 매크로 리모컨이 비활성화되었습니다.",
-                reply_markup=ReplyKeyboardRemove()
-            )
-            return True
-        
         # Handle sessions menu
         if user_input == "🎛️ Sessions":
             await self._show_session_action_grid(update.message.reply_text, None)
@@ -2308,10 +2310,15 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         # Handle single prompt macros
         if user_input in self.PROMPT_MACROS:
             prompt_text = self.PROMPT_MACROS[user_input]
-            await self._send_to_claude(prompt_text, update.message.reply_text)
-            await update.message.reply_text(
-                f"✅ {user_input} 프롬프트가 Claude에게 전송되었습니다."
-            )
+            success = await self._send_to_claude(prompt_text)
+            if success:
+                await update.message.reply_text(
+                    f"✅ {user_input} 프롬프트가 Claude에게 전송되었습니다."
+                )
+            else:
+                await update.message.reply_text(
+                    f"❌ {user_input} 프롬프트 전송에 실패했습니다."
+                )
             return True
         
         # Handle combined workflow prompts
@@ -2329,13 +2336,53 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                 # Remove the last separator
                 combined_prompt = combined_prompt.rstrip("\n\n" + "="*50 + "\n\n")
                 
-                await self._send_to_claude(combined_prompt, update.message.reply_text)
-                await update.message.reply_text(
-                    f"✅ 통합 워크플로우 프롬프트 ({user_input})가 Claude에게 전송되었습니다."
-                )
+                success = await self._send_to_claude(combined_prompt)
+                if success:
+                    await update.message.reply_text(
+                        f"✅ 통합 워크플로우 프롬프트 ({user_input})가 Claude에게 전송되었습니다."
+                    )
+                else:
+                    await update.message.reply_text(
+                        f"❌ 통합 워크플로우 프롬프트 ({user_input}) 전송에 실패했습니다."
+                    )
                 return True
         
         return False
+    
+    async def _send_to_claude(self, text: str) -> bool:
+        """Send text to current Claude session"""
+        try:
+            
+            # Get current session name
+            session_name = self.config.session_name
+            
+            # Send text to tmux session using subprocess for better control
+            # Use -l flag to send literal text (handles special characters better)
+            result1 = subprocess.run(
+                ["tmux", "send-keys", "-t", session_name, "-l", text],
+                capture_output=True,
+                text=True
+            )
+            
+            # Send Enter key
+            result2 = subprocess.run(
+                ["tmux", "send-keys", "-t", session_name, "Enter"],
+                capture_output=True,
+                text=True
+            )
+            
+            # Check if both commands succeeded
+            if result1.returncode == 0 and result2.returncode == 0:
+                logger.info(f"Successfully sent prompt to {session_name}: {text[:100]}...")
+                return True
+            else:
+                logger.error(f"Failed to send to {session_name}. Return codes: {result1.returncode}, {result2.returncode}")
+                logger.error(f"Errors: {result1.stderr}, {result2.stderr}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Exception while sending to Claude: {str(e)}")
+            return False
     
     def run(self):
         """Start the Telegram bot"""
