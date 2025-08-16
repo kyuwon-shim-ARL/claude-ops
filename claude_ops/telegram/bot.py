@@ -510,16 +510,16 @@ class TelegramBridge:
             reply_markup = self.get_prompt_macro_keyboard()
             await update.message.reply_text(
                 "🎛️ 프롬프트 매크로 리모컨이 활성화되었습니다.\n\n"
-                "⚡ 개발 워크플로우 매크로:\n"
-                "• @기획: 구조적 탐색 및 계획 수립\n"
-                "• @구현: DRY 원칙 기반 체계적 구현\n"
-                "• @안정화: 구조적 지속가능성 검증\n"
-                "• @배포: 최종 검증 및 배포\n\n"
-                "🔗 통합 워크플로우:\n"
+                "🔗 통합 워크플로우 (우선순위):\n"
                 "• 전체: 기획&구현&안정화&배포\n"
                 "• 개발: 기획&구현&안정화\n"
                 "• 마무리: 안정화&배포\n"
-                "• 실행: 구현&안정화&배포",
+                "• 실행: 구현&안정화&배포\n\n"
+                "⚡ 개별 매크로:\n"
+                "• @기획: 구조적 탐색 및 계획 수립\n"
+                "• @구현: DRY 원칙 기반 체계적 구현\n"
+                "• @안정화: 구조적 지속가능성 검증\n"
+                "• @배포: 최종 검증 및 배포",
                 reply_markup=reply_markup
             )
         except Exception as e:
@@ -913,17 +913,16 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             
             await update.message.reply_text(
                 "🎛️ 프롬프트 매크로 리모컨 활성화!\n\n"
-                "⚡ 개발 워크플로우 매크로:\n"
-                "• @기획: 구조적 탐색 및 계획 수립\n"
-                "• @구현: DRY 원칙 기반 체계적 구현\n"
-                "• @안정화: 구조적 지속가능성 검증\n"
-                "• @배포: 최종 검증 및 배포\n\n"
-                "🔗 통합 워크플로우:\n"
+                "🔗 통합 워크플로우 (우선순위):\n"
                 "• 전체: 기획&구현&안정화&배포\n"
                 "• 개발: 기획&구현&안정화\n"
                 "• 마무리: 안정화&배포\n"
                 "• 실행: 구현&안정화&배포\n\n"
-                "🎛️ Sessions: 세션 메뉴\n"
+                "⚡ 개별 매크로:\n"
+                "• @기획: 구조적 탐색 및 계획 수립\n"
+                "• @구현: DRY 원칙 기반 체계적 구현\n"
+                "• @안정화: 구조적 지속가능성 검증\n"
+                "• @배포: 최종 검증 및 배포\n\n"
                 "💡 끄려면: /remote off",
                 reply_markup=remote_keyboard
             )
@@ -1045,17 +1044,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         """Get prompt macro keyboard for development workflows"""
         
         keyboard = [
-            # Single keyword prompts (2x2 grid)
-            [
-                KeyboardButton("@기획"),
-                KeyboardButton("@구현")
-            ],
-            [
-                KeyboardButton("@안정화"),
-                KeyboardButton("@배포")
-            ],
-            
-            # Combined workflow prompts
+            # Combined workflow prompts (most frequently used - moved to top)
             [
                 KeyboardButton("기획&구현&안정화&배포")
             ],
@@ -1067,9 +1056,14 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                 KeyboardButton("구현&안정화&배포")
             ],
             
-            # Control buttons
+            # Single keyword prompts (2x2 grid - moved to bottom)
             [
-                KeyboardButton("🎛️ Sessions")
+                KeyboardButton("@기획"),
+                KeyboardButton("@구현")
+            ],
+            [
+                KeyboardButton("@안정화"),
+                KeyboardButton("@배포")
             ]
         ]
         
@@ -2006,11 +2000,22 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
             is_current = session_name == self.config.session_name
             
+            # Get session status and prompt hint
+            from ..utils.session_state import is_session_working, get_session_working_info
+            is_working = is_session_working(session_name)
+            status_emoji = "🔄 작업중" if is_working else "💤 대기중"
+            
+            # Get prompt hint
+            prompt_hint = await self.get_session_prompt_hint(session_name)
+            
+            # Get recent log (50 lines)
+            recent_log = await self._get_session_log_content(session_name, 50)
+            
             # Create action buttons
             keyboard = [
                 [
                     InlineKeyboardButton("🏠 메인세션 설정", callback_data=f"session_switch:{session_name}"),
-                    InlineKeyboardButton("📜 로그보기", callback_data=f"session_log:{session_name}")
+                    InlineKeyboardButton("📜 더 많은 로그", callback_data=f"session_log:{session_name}")
                 ],
                 [
                     InlineKeyboardButton("⏸️ Pause (ESC)", callback_data=f"session_pause:{session_name}"),
@@ -2026,11 +2031,25 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             
             status_text = "🎯 현재 메인" if is_current else "일반 세션"
             
+            # Create comprehensive session info with auto-log
+            session_info = f"""🎛️ **{display_name} 세션 제어판**
+
+📊 **세션 정보**:
+• **세션명**: `{session_name}`
+• **상태**: {status_text} | {status_emoji}
+
+💡 **마지막 작업**:
+{prompt_hint}
+
+📺 **최근 화면 (50줄)**:
+```
+{recent_log}
+```
+
+🎛️ **액션을 선택하세요:**"""
+            
             await query.edit_message_text(
-                f"🎛️ **{display_name} 세션 액션**\n\n"
-                f"📋 **세션명**: `{session_name}`\n"
-                f"📊 **상태**: {status_text}\n\n"
-                "원하는 액션을 선택하세요:",
+                session_info,
                 reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
@@ -2302,11 +2321,6 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
     async def _handle_remote_button(self, update, user_input: str) -> bool:
         """Handle Reply Keyboard prompt macro button presses"""
         
-        # Handle sessions menu
-        if user_input == "🎛️ Sessions":
-            await self._show_session_action_grid(update.message.reply_text, None)
-            return True
-        
         # Handle single prompt macros
         if user_input in self.PROMPT_MACROS:
             prompt_text = self.PROMPT_MACROS[user_input]
@@ -2354,6 +2368,43 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                 return True
         
         return False
+    
+    async def _get_session_log_content(self, session_name: str, line_count: int = 50) -> str:
+        """Get recent log content from session"""
+        try:
+            # Check if session exists
+            session_exists = os.system(f"tmux has-session -t {session_name}") == 0
+            if not session_exists:
+                return "세션이 존재하지 않습니다."
+            
+            # Use tmux capture-pane with -S to specify start line (negative for history)
+            result = subprocess.run(
+                f"tmux capture-pane -t {session_name} -p -S -{line_count}", 
+                shell=True, 
+                capture_output=True, 
+                text=True
+            )
+            
+            if result.returncode == 0:
+                log_content = result.stdout.strip()
+                if not log_content:
+                    return "로그 내용이 없습니다."
+                
+                # Limit content length for Telegram message
+                if len(log_content) > 3000:  # Telegram message limit consideration
+                    lines = log_content.split('\n')
+                    truncated_lines = lines[-30:]  # Show last 30 lines if too long
+                    log_content = '\n'.join(truncated_lines)
+                    log_content += f"\n\n... (총 {len(lines)}줄 중 마지막 30줄만 표시)"
+                
+                return log_content
+            else:
+                logger.error(f"Failed to capture session {session_name}: {result.stderr}")
+                return "로그를 가져올 수 없습니다."
+                
+        except Exception as e:
+            logger.error(f"Exception getting session log for {session_name}: {str(e)}")
+            return "로그 조회 중 오류가 발생했습니다."
     
     async def _get_target_session_for_macro(self, update) -> str:
         """Get target session for macro button press (reply-based or default)"""
