@@ -20,6 +20,115 @@ logger = logging.getLogger(__name__)
 class TelegramBridge:
     """Claude Telegram Bot with inline keyboard interface"""
     
+    # Prompt macro text constants
+    PROMPT_MACROS = {
+        "@기획": """🎯 **기획 (Structured Discovery & Planning Loop)**
+
+**탐색 단계:**
+- 전체 구조 파악: 현재 시스템 아키텍처와 요구사항 분석
+- As-Is/To-Be/Gap 분석: 현재 상태, 목표 상태, 차이점 식별
+- 이해관계자 요구사항 수집 및 우선순위화
+
+**계획 단계:**
+- MECE 기반 작업분해(WBS): 상호배타적이고 전체포괄적인 업무 구조
+- 우선순위 매트릭스: 중요도와 긴급도 기반 작업 순서 결정
+- 리소스 및 일정 계획 수립
+
+**수렴 단계:**
+- 탐색↔계획 반복 iterative refinement
+- PRD(Product Requirements Document) 완성
+- TodoWrite를 활용한 구조화된 작업 계획 수립
+
+**산출물:** 구체적인 실행 계획과 성공 기준이 포함된 PRD""",
+        
+        "@구현": """⚡ **구현 (Implementation with DRY)**
+
+**DRY 원칙 적용:**
+- 기존 코드 검색: Grep, Glob 도구로 유사 기능 탐색
+- 재사용 우선: 기존 라이브러리/모듈/함수 활용
+- 없으면 생성: 새로운 컴포넌트 개발 시 재사용성 고려
+
+**체계적 진행:**
+- TodoWrite 기반 단계별 구현
+- 모듈화된 코드 구조 유지
+- 코딩 컨벤션 준수 (기존 코드 스타일 분석 후 적용)
+
+**품질 보증:**
+- 단위 테스트 작성 및 실행
+- 기본 검증: 문법 체크, 타입 체크, 린트
+- 동작 확인: 핵심 기능 동작 테스트
+
+**산출물:** 테스트 통과하는 동작 가능한 코드""",
+        
+        "@안정화": """🔧 **안정화 (Structural Sustainability Protocol v2.0)**
+
+**패러다임 전환:** 기능 중심 → **구조적 지속가능성** 중심
+
+**6단계 통합 검증 루프:**
+
+1. **Repository Structure Scan**
+   - 전체 파일 분석: 디렉토리 구조, 파일 목적성 검토
+   - 중복/임시 파일 식별 및 정리 방안 수립
+   - 파일 크기 및 복잡도 분석
+
+2. **Structural Optimization**
+   - 디렉토리 정리: 논리적 그룹핑, 계층 구조 최적화
+   - 파일 분류: 목적별, 기능별 체계적 분류
+   - 네이밍 표준화: 일관된 명명 규칙 적용
+
+3. **Dependency Resolution**
+   - Import 수정: 순환 참조 해결, 의존성 최적화
+   - 참조 오류 해결: 깨진 링크, 잘못된 경로 수정
+   - 환경 동기화: requirements, configs 일치성 확인
+
+4. **Comprehensive Testing**
+   - 모듈 검증: 각 모듈별 단위 테스트
+   - API 테스트: 인터페이스 동작 확인
+   - 시스템 무결성 확인: 전체 시스템 통합 테스트
+
+5. **Documentation Sync**
+   - CLAUDE.md 반영: 변경사항 문서화
+   - README 업데이트: 사용법, 설치법 최신화
+   - .gitignore 정리: 불필요한 파일 제외 규칙 정비
+
+6. **Quality Assurance**
+   - MECE 분석: 빠진 것은 없는지, 중복은 없는지 확인
+   - 성능 벤치마크: 기준 성능 대비 측정
+   - 정량 평가: 코드 커버리지, 복잡도, 품질 지표
+
+**예방적 관리 트리거:**
+- 루트 20개 파일 이상
+- 임시 파일 5개 이상
+- Import 오류 3개 이상
+→ 자동 안정화 프로세스 실행
+
+**산출물:** 지속가능하고 확장 가능한 깔끔한 코드베이스""",
+        
+        "@배포": """🚀 **배포 (Deployment)**
+
+**최종 검증:**
+- 체크리스트 완료 확인: 모든 TODO 완료, 테스트 통과
+- 코드 리뷰: 보안, 성능, 코딩 표준 최종 점검
+- 배포 전 시나리오 테스트: 프로덕션 환경 시뮬레이션
+
+**구조화 커밋:**
+- 의미있는 커밋 메시지: 변경사항의 목적과 영향 명시
+- 원자성 보장: 하나의 논리적 변경사항 = 하나의 커밋
+- 관련 이슈/티켓 링크: 추적가능성 확보
+
+**원격 배포:**
+- 푸시: origin 저장소로 변경사항 전송
+- 버전 태깅: semantic versioning (major.minor.patch)
+- 배포 스크립트 실행: CI/CD 파이프라인 트리거
+
+**배포 후 모니터링:**
+- 서비스 상태 확인: 헬스체크, 로그 모니터링
+- 성능 지표 추적: 응답시간, 처리량, 오류율
+- 롤백 준비: 문제 발생 시 즉시 이전 버전으로 복구
+
+**산출물:** 안정적으로 운영되는 프로덕션 서비스"""
+    }
+    
     def __init__(self, config: Optional[ClaudeOpsConfig] = None):
         """
         Initialize the Telegram bot
@@ -391,6 +500,31 @@ class TelegramBridge:
             welcome_msg,
             reply_markup=reply_markup
         )
+        
+        # Auto-activate remote control for better UX
+        await self._auto_activate_remote(update)
+    
+    async def _auto_activate_remote(self, update):
+        """Auto-activate prompt macro remote control"""
+        try:
+            reply_markup = self.get_prompt_macro_keyboard()
+            await update.message.reply_text(
+                "🎛️ 프롬프트 매크로 리모컨이 활성화되었습니다.\n\n"
+                "⚡ 개발 워크플로우 매크로:\n"
+                "• @기획: 구조적 탐색 및 계획 수립\n"
+                "• @구현: DRY 원칙 기반 체계적 구현\n"
+                "• @안정화: 구조적 지속가능성 검증\n"
+                "• @배포: 최종 검증 및 배포\n\n"
+                "🔗 통합 워크플로우:\n"
+                "• 전체: 기획&구현&안정화&배포\n"
+                "• 개발: 기획&구현&안정화\n"
+                "• 마무리: 안정화&배포\n"
+                "• 실행: 구현&안정화&배포",
+                reply_markup=reply_markup
+            )
+        except Exception as e:
+            logger.error(f"Auto remote activation error: {str(e)}")
+            # Silent fail - don't disrupt main flow
     
     async def help_command(self, update, context):
         """Help command handler"""
@@ -756,28 +890,32 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         await self._show_session_action_grid(update.message.reply_text, None)
     
     async def remote_command(self, update, context):
-        """Toggle session remote control keyboard"""
+        """Toggle prompt macro remote control keyboard"""
         user_id = update.effective_user.id
         
         if not self.check_user_authorization(user_id):
             await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
             return
         
-        # Get remote keyboard
-        remote_keyboard = self.get_session_remote_keyboard()
+        # Get prompt macro keyboard
+        remote_keyboard = self.get_prompt_macro_keyboard()
         
-        if remote_keyboard:
-            await update.message.reply_text(
-                "🎛️ 세션 리모컨 활성화!\n\n"
-                "화면 하단의 버튼들을 사용하여:\n"
-                "• 세션명 버튼: 해당 세션으로 전환\n" 
-                "• 📺버튼: 빠른 로그 조회\n"
-                "• 🎛️ Sessions: 세션 메뉴\n"
-                "• ❌ 리모컨 끄기: 리모컨 숨기기",
-                reply_markup=remote_keyboard
-            )
-        else:
-            await update.message.reply_text("❌ 사용 가능한 Claude 세션이 없습니다.")
+        await update.message.reply_text(
+            "🎛️ 프롬프트 매크로 리모컨 활성화!\n\n"
+            "⚡ 개발 워크플로우 매크로:\n"
+            "• @기획: 구조적 탐색 및 계획 수립\n"
+            "• @구현: DRY 원칙 기반 체계적 구현\n"
+            "• @안정화: 구조적 지속가능성 검증\n"
+            "• @배포: 최종 검증 및 배포\n\n"
+            "🔗 통합 워크플로우:\n"
+            "• 전체: 기획&구현&안정화&배포\n"
+            "• 개발: 기획&구현&안정화\n"
+            "• 마무리: 안정화&배포\n"
+            "• 실행: 구현&안정화&배포\n\n"
+            "🎛️ Sessions: 세션 메뉴\n"
+            "❌ 리모컨 끄기: 리모컨 숨기기",
+            reply_markup=remote_keyboard
+        )
     
     async def sessions_command(self, update, context):
         """Show active sessions command or switch to reply session directly"""
@@ -892,55 +1030,38 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         ]
         return InlineKeyboardMarkup(keyboard)
     
-    def get_session_remote_keyboard(self):
-        """Get session remote control keyboard (fixed at bottom)"""
-        sessions = self.get_all_claude_sessions()
+    def get_prompt_macro_keyboard(self):
+        """Get prompt macro keyboard for development workflows"""
         
-        if not sessions:
-            return None
-        
-        # Build session buttons with optimized layout
-        keyboard = []
-        current_row = []
-        
-        for session in sessions:
-            display_name = session.replace('claude_', '') if session.startswith('claude_') else session
+        keyboard = [
+            # Single keyword prompts (2x2 grid)
+            [
+                KeyboardButton("@기획"),
+                KeyboardButton("@구현")
+            ],
+            [
+                KeyboardButton("@안정화"),
+                KeyboardButton("@배포")
+            ],
             
-            # Smart truncation: try to keep meaningful part
-            if len(display_name) > 12:
-                # Try to keep the meaningful part (e.g., "PaperFlow" instead of "share_snack")
-                if '_' in display_name:
-                    parts = display_name.split('_')
-                    # Use the longest meaningful part or first two parts
-                    if len(parts) > 1:
-                        display_name = parts[0][:6] + '_' + parts[1][:5] if len(parts[1]) > 5 else parts[0][:12]
-                else:
-                    display_name = display_name[:12]
+            # Combined workflow prompts
+            [
+                KeyboardButton("기획&구현&안정화&배포")
+            ],
+            [
+                KeyboardButton("기획&구현&안정화"),
+                KeyboardButton("안정화&배포")
+            ],
+            [
+                KeyboardButton("구현&안정화&배포")
+            ],
             
-            current_row.append(KeyboardButton(display_name))
-            
-            # Use 2 buttons per row for better readability with longer names
-            if len(current_row) == 2:
-                keyboard.append(current_row)
-                current_row = []
-        
-        # Add remaining sessions
-        if current_row:
-            keyboard.append(current_row)
-        
-        # Add quick log buttons row
-        keyboard.append([
-            KeyboardButton("📺50"),
-            KeyboardButton("📺100"), 
-            KeyboardButton("📺150"),
-            KeyboardButton("📺200")
-        ])
-        
-        # Add control buttons
-        keyboard.append([
-            KeyboardButton("🎛️ Sessions"),
-            KeyboardButton("❌ 리모컨 끄기")
-        ])
+            # Control buttons
+            [
+                KeyboardButton("🎛️ Sessions"),
+                KeyboardButton("❌ 리모컨 끄기")
+            ]
+        ]
         
         return ReplyKeyboardMarkup(
             keyboard,
@@ -2169,12 +2290,12 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             await query.edit_message_text("❌ 내부 오류가 발생했습니다.")
     
     async def _handle_remote_button(self, update, user_input: str) -> bool:
-        """Handle Reply Keyboard remote control button presses"""
+        """Handle Reply Keyboard prompt macro button presses"""
         
         # Handle remote control off
         if user_input == "❌ 리모컨 끄기":
             await update.message.reply_text(
-                "🎛️ 세션 리모컨이 비활성화되었습니다.",
+                "🎛️ 프롬프트 매크로 리모컨이 비활성화되었습니다.",
                 reply_markup=ReplyKeyboardRemove()
             )
             return True
@@ -2184,75 +2305,34 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             await self._show_session_action_grid(update.message.reply_text, None)
             return True
         
-        # Handle quick log buttons
-        if user_input.startswith("📺") and user_input[2:].isdigit():
-            line_count = int(user_input[2:])
-            # Use current session for quick log
-            await self._log_with_lines(update, None, line_count)
+        # Handle single prompt macros
+        if user_input in self.PROMPT_MACROS:
+            prompt_text = self.PROMPT_MACROS[user_input]
+            await self._send_to_claude(prompt_text, update.message.reply_text)
+            await update.message.reply_text(
+                f"✅ {user_input} 프롬프트가 Claude에게 전송되었습니다."
+            )
             return True
         
-        # Handle session switch buttons
-        sessions = self.get_all_claude_sessions()
-        session_names = [s.replace('claude_', '') if s.startswith('claude_') else s for s in sessions]
-        
-        if user_input in session_names:
-            # Find the full session name
-            target_session = None
-            for session in sessions:
-                display_name = session.replace('claude_', '') if session.startswith('claude_') else session
-                if display_name == user_input:
-                    target_session = session
-                    break
+        # Handle combined workflow prompts
+        if "&" in user_input:
+            # Parse combined prompts like "기획&구현&안정화&배포"
+            keywords = user_input.split("&")
+            combined_prompt = ""
             
-            if target_session:
-                # Show session grid instead of just switching
-                try:
-                    display_name = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
-                    is_current = target_session == self.config.session_name
-                    
-                    # Get session status and prompt hint
-                    from ..utils.session_state import is_session_working, get_session_working_info
-                    is_working = is_session_working(target_session)
-                    status_emoji = "🔄 작업중" if is_working else "💤 대기중"
-                    
-                    # Get full prompt hint for this view
-                    prompt_hint = await self.get_session_prompt_hint(target_session)
-                    
-                    # Create quick log buttons grid (useful actions)
-                    keyboard = [
-                        [
-                            InlineKeyboardButton("📺50", callback_data=f"quick_log_50:{target_session}"),
-                            InlineKeyboardButton("📺100", callback_data=f"quick_log_100:{target_session}"),
-                            InlineKeyboardButton("📺150", callback_data=f"quick_log_150:{target_session}")
-                        ],
-                        [
-                            InlineKeyboardButton("📺200", callback_data=f"quick_log_200:{target_session}"),
-                            InlineKeyboardButton("📺300", callback_data=f"quick_log_300:{target_session}"),
-                            InlineKeyboardButton("🏠 메인설정", callback_data=f"session_switch:{target_session}")
-                        ],
-                        [
-                            InlineKeyboardButton("⏸️ Pause", callback_data=f"session_pause:{target_session}"),
-                            InlineKeyboardButton("🗑️ Erase", callback_data=f"session_erase:{target_session}"),
-                            InlineKeyboardButton("◀️ 뒤로", callback_data="session_actions")
-                        ]
-                    ]
-                    
-                    reply_markup = InlineKeyboardMarkup(keyboard)
-                    
-                    await update.message.reply_text(
-                        f"🎯 **세션 제어판**: {display_name}\n\n"
-                        f"📊 **상태**: {status_emoji}\n"
-                        f"🆔 **세션명**: `{target_session}`\n"
-                        f"⭐ **메인**: {'예' if is_current else '아니오'}\n\n"
-                        f"💡 **마지막 작업**:\n{prompt_hint}\n\n"
-                        f"🎛️ **액션을 선택하세요:**",
-                        reply_markup=reply_markup,
-                        parse_mode='Markdown'
-                    )
-                except Exception as e:
-                    logger.error(f"세션 보드 표시 오류: {str(e)}")
-                    await update.message.reply_text(f"❌ 세션 {target_session} 정보를 불러올 수 없습니다.")
-                    
+            for keyword in keywords:
+                macro_key = f"@{keyword.strip()}"
+                if macro_key in self.PROMPT_MACROS:
+                    combined_prompt += self.PROMPT_MACROS[macro_key] + "\n\n" + "="*50 + "\n\n"
+            
+            if combined_prompt:
+                # Remove the last separator
+                combined_prompt = combined_prompt.rstrip("\n\n" + "="*50 + "\n\n")
+                
+                await self._send_to_claude(combined_prompt, update.message.reply_text)
+                await update.message.reply_text(
+                    f"✅ 통합 워크플로우 프롬프트 ({user_input})가 Claude에게 전송되었습니다."
+                )
                 return True
         
         return False
