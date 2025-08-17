@@ -261,6 +261,19 @@ class TelegramBridge:
         
         return None, False
     
+    def expand_macro_keywords(self, text: str) -> str:
+        """Expand @keywords to full prompt macros"""
+        expanded_text = text
+        
+        for keyword, full_prompt in self.PROMPT_MACROS.items():
+            if keyword in expanded_text:
+                # Replace standalone @keywords (not part of larger words)
+                import re
+                pattern = r'\b' + re.escape(keyword) + r'\b'
+                expanded_text = re.sub(pattern, full_prompt, expanded_text)
+        
+        return expanded_text
+
     async def forward_to_claude(self, update, context):
         """Forward user input to Claude tmux session with reply-based targeting"""
         user_id = update.effective_user.id
@@ -273,6 +286,12 @@ class TelegramBridge:
             logger.warning(f"인증되지 않은 사용자 접근 시도: {user_id}")
             await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
             return
+        
+        # Expand @keywords to full prompts
+        expanded_input = self.expand_macro_keywords(user_input)
+        if expanded_input != user_input:
+            logger.info(f"🎯 매크로 확장됨: {user_input[:50]}... → 전체 프롬프트")
+            user_input = expanded_input
         
         # Handle Reply Keyboard remote control buttons
         if await self._handle_remote_button(update, user_input):
