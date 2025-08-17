@@ -2431,7 +2431,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         return target_session
     
     async def _send_to_claude_with_session(self, text: str, target_session: str) -> bool:
-        """Send text to specific Claude session"""
+        """Send text to specific Claude session with improved reliability"""
         try:
             # Ensure target session exists
             session_exists = os.system(f"tmux has-session -t {target_session}") == 0
@@ -2439,68 +2439,50 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                 logger.error(f"Target session {target_session} does not exist")
                 return False
             
+            logger.info(f"Sending macro to {target_session}: {text[:100]}...")
+            
             # Send text to tmux session using subprocess for better control
             # Use -l flag to send literal text (handles special characters better)
             result1 = subprocess.run(
                 ["tmux", "send-keys", "-t", target_session, "-l", text],
                 capture_output=True,
-                text=True
+                text=True,
+                timeout=10  # Add timeout for reliability
             )
+            
+            if result1.returncode != 0:
+                logger.error(f"Failed to send text to {target_session}. Return code: {result1.returncode}")
+                logger.error(f"Text send error: {result1.stderr}")
+                return False
+            
+            # Small delay to ensure text is processed
+            import asyncio
+            await asyncio.sleep(0.1)
             
             # Send Enter key
             result2 = subprocess.run(
                 ["tmux", "send-keys", "-t", target_session, "Enter"],
                 capture_output=True,
-                text=True
+                text=True,
+                timeout=10  # Add timeout for reliability
             )
             
-            # Check if both commands succeeded
-            if result1.returncode == 0 and result2.returncode == 0:
-                logger.info(f"Successfully sent macro prompt to {target_session}: {text[:100]}...")
-                return True
-            else:
-                logger.error(f"Failed to send to {target_session}. Return codes: {result1.returncode}, {result2.returncode}")
-                logger.error(f"Errors: {result1.stderr}, {result2.stderr}")
+            if result2.returncode != 0:
+                logger.error(f"Failed to send Enter to {target_session}. Return code: {result2.returncode}")
+                logger.error(f"Enter send error: {result2.stderr}")
                 return False
+            
+            logger.info(f"Successfully sent macro prompt with Enter to {target_session}")
+            return True
                 
         except Exception as e:
             logger.error(f"Exception while sending macro to Claude session {target_session}: {str(e)}")
             return False
     
     async def _send_to_claude(self, text: str) -> bool:
-        """Send text to current Claude session"""
-        try:
-            
-            # Get current session name
-            session_name = self.config.session_name
-            
-            # Send text to tmux session using subprocess for better control
-            # Use -l flag to send literal text (handles special characters better)
-            result1 = subprocess.run(
-                ["tmux", "send-keys", "-t", session_name, "-l", text],
-                capture_output=True,
-                text=True
-            )
-            
-            # Send Enter key
-            result2 = subprocess.run(
-                ["tmux", "send-keys", "-t", session_name, "Enter"],
-                capture_output=True,
-                text=True
-            )
-            
-            # Check if both commands succeeded
-            if result1.returncode == 0 and result2.returncode == 0:
-                logger.info(f"Successfully sent prompt to {session_name}: {text[:100]}...")
-                return True
-            else:
-                logger.error(f"Failed to send to {session_name}. Return codes: {result1.returncode}, {result2.returncode}")
-                logger.error(f"Errors: {result1.stderr}, {result2.stderr}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Exception while sending to Claude: {str(e)}")
-            return False
+        """Send text to current Claude session (legacy function - now uses _send_to_claude_with_session)"""
+        session_name = self.config.session_name
+        return await self._send_to_claude_with_session(text, session_name)
     
     def run(self):
         """Start the Telegram bot"""
