@@ -923,9 +923,35 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                 "• @구현: DRY 원칙 기반 체계적 구현\n"
                 "• @안정화: 구조적 지속가능성 검증\n"
                 "• @배포: 최종 검증 및 배포\n\n"
-                "💡 끄려면: /remote off",
+                "💡 끄려면: /remote off\n"
+                "🔧 인라인 매크로: /imacro",
                 reply_markup=remote_keyboard
             )
+    
+    async def imacro_command(self, update, context):
+        """Show inline macro buttons (Reply-compatible)"""
+        user_id = update.effective_user.id
+        
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+        
+        inline_keyboard = self.get_inline_macro_keyboard()
+        
+        await update.message.reply_text(
+            "🎯 **인라인 매크로 시스템**\n\n"
+            "💡 **사용법:**\n"
+            "• 버튼 클릭 → 텍스트 자동 삽입\n"
+            "• 추가 내용 작성 후 전송\n"
+            "• Reply 상태에서도 사용 가능!\n\n"
+            "🔄 **통합 워크플로우:**\n"
+            "• 전체: 기획→구현→안정화→배포\n"
+            "• 개발: 기획→구현→안정화\n"
+            "• 마무리: 안정화→배포\n"
+            "• 실행: 구현→안정화→배포\n\n"
+            "⚡ **개별 매크로:** 기획/구현/안정화/배포",
+            reply_markup=inline_keyboard
+        )
     
     async def sessions_command(self, update, context):
         """Show active sessions command or switch to reply session directly"""
@@ -1041,7 +1067,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         return InlineKeyboardMarkup(keyboard)
     
     def get_prompt_macro_keyboard(self):
-        """Get prompt macro keyboard for development workflows"""
+        """Get prompt macro keyboard for development workflows (ReplyKeyboard)"""
         
         keyboard = [
             # Combined workflow prompts (most frequently used - moved to top)
@@ -1072,6 +1098,83 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             resize_keyboard=True,
             one_time_keyboard=False
         )
+    
+    def get_inline_macro_keyboard(self):
+        """Get inline macro keyboard with switch_inline_query for Reply compatibility"""
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        
+        keyboard = [
+            # Combined workflow prompts (most frequently used)
+            [
+                InlineKeyboardButton(
+                    "🔄 전체", 
+                    switch_inline_query_current_chat=self._get_combined_prompt(["@기획", "@구현", "@안정화", "@배포"])
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🛠️ 개발", 
+                    switch_inline_query_current_chat=self._get_combined_prompt(["@기획", "@구현", "@안정화"])
+                ),
+                InlineKeyboardButton(
+                    "✅ 마무리", 
+                    switch_inline_query_current_chat=self._get_combined_prompt(["@안정화", "@배포"])
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "⚡ 실행", 
+                    switch_inline_query_current_chat=self._get_combined_prompt(["@구현", "@안정화", "@배포"])
+                )
+            ],
+            
+            # Single keyword prompts
+            [
+                InlineKeyboardButton(
+                    "🎯 기획", 
+                    switch_inline_query_current_chat=self.PROMPT_MACROS["@기획"]
+                ),
+                InlineKeyboardButton(
+                    "⚡ 구현", 
+                    switch_inline_query_current_chat=self.PROMPT_MACROS["@구현"]
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔧 안정화", 
+                    switch_inline_query_current_chat=self.PROMPT_MACROS["@안정화"]
+                ),
+                InlineKeyboardButton(
+                    "🚀 배포", 
+                    switch_inline_query_current_chat=self.PROMPT_MACROS["@배포"]
+                )
+            ]
+        ]
+        
+        return InlineKeyboardMarkup(keyboard)
+    
+    def _get_combined_prompt(self, macro_keys):
+        """Combine multiple macro prompts with clear separators"""
+        # For switch_inline_query, use shorter version due to 256 char limit
+        combined = []
+        for key in macro_keys:
+            if key in self.PROMPT_MACROS:
+                combined.append(self.PROMPT_MACROS[key])
+        
+        full_prompt = "\n\n" + "─" * 50 + "\n\n".join(combined)
+        
+        # If too long for switch_inline_query, use summary version
+        if len(full_prompt) > 250:
+            summaries = {
+                "@기획": "🎯 @기획 - 구조적 탐색 및 계획 수립 단계",
+                "@구현": "⚡ @구현 - DRY 원칙 기반 체계적 구현 단계", 
+                "@안정화": "🔧 @안정화 - 구조적 지속가능성 검증 단계",
+                "@배포": "🚀 @배포 - 최종 검증 및 배포 단계"
+            }
+            summary_parts = [summaries.get(key, key) for key in macro_keys if key in summaries]
+            return " → ".join(summary_parts) + "\n\n현재 진행하고자 하는 작업을 구체적으로 설명해주세요."
+        
+        return full_prompt
     
     async def get_session_prompt_hint(self, session_name: str) -> str:
         """Get last prompt hint for session"""
@@ -1307,6 +1410,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         self.app.add_handler(CommandHandler("sessions", self.sessions_command))
         self.app.add_handler(CommandHandler("board", self.board_command))
         self.app.add_handler(CommandHandler("remote", self.remote_command))
+        self.app.add_handler(CommandHandler("imacro", self.imacro_command))
         
         # Callback query handler for inline buttons
         self.app.add_handler(CallbackQueryHandler(self.button_callback))
