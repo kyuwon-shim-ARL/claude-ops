@@ -141,9 +141,10 @@ class TelegramBridge:
         
     def validate_input(self, user_input: str) -> tuple[bool, str]:
         """Validate and filter dangerous commands"""
+        # More targeted dangerous patterns - exclude common text characters
         dangerous_patterns = [
-            'rm -rf', 'sudo', 'chmod', 'chown', 'passwd', 'shutdown', 'reboot',
-            '>', '>>', '|', '&', ';', '$(', '`', 'eval', 'exec'
+            'rm -rf', 'sudo ', 'chmod ', 'chown ', 'passwd', 'shutdown', 'reboot',
+            ' > /', ' >> /', '$(', '`rm', '`sudo', 'eval(', 'exec('
         ]
         
         user_input_lower = user_input.lower()
@@ -151,8 +152,9 @@ class TelegramBridge:
             if pattern in user_input_lower:
                 return False, f"위험한 명령어 패턴이 감지되었습니다: {pattern}"
         
-        if len(user_input) > 500:
-            return False, "입력값이 너무 깁니다 (최대 500자)"
+        # Increased length limit for expanded prompts
+        if len(user_input) > 10000:
+            return False, "입력값이 너무 깁니다 (최대 10,000자)"
         
         return True, "OK"
     
