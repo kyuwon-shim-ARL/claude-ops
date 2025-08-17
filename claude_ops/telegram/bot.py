@@ -1100,7 +1100,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         )
     
     def get_inline_macro_keyboard(self):
-        """Get inline macro keyboard with switch_inline_query for Reply compatibility"""
+        """Get inline macro keyboard with callback_data for full prompt insertion"""
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         
         keyboard = [
@@ -1108,23 +1108,23 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             [
                 InlineKeyboardButton(
                     "🔄 전체", 
-                    switch_inline_query_current_chat=self._get_combined_prompt(["@기획", "@구현", "@안정화", "@배포"])
+                    callback_data="macro_combined_all"
                 )
             ],
             [
                 InlineKeyboardButton(
                     "🛠️ 개발", 
-                    switch_inline_query_current_chat=self._get_combined_prompt(["@기획", "@구현", "@안정화"])
+                    callback_data="macro_combined_dev"
                 ),
                 InlineKeyboardButton(
                     "✅ 마무리", 
-                    switch_inline_query_current_chat=self._get_combined_prompt(["@안정화", "@배포"])
+                    callback_data="macro_combined_finish"
                 )
             ],
             [
                 InlineKeyboardButton(
                     "⚡ 실행", 
-                    switch_inline_query_current_chat=self._get_combined_prompt(["@구현", "@안정화", "@배포"])
+                    callback_data="macro_combined_exec"
                 )
             ],
             
@@ -1132,21 +1132,21 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             [
                 InlineKeyboardButton(
                     "🎯 기획", 
-                    switch_inline_query_current_chat=self.PROMPT_MACROS["@기획"]
+                    callback_data="macro_single_기획"
                 ),
                 InlineKeyboardButton(
                     "⚡ 구현", 
-                    switch_inline_query_current_chat=self.PROMPT_MACROS["@구현"]
+                    callback_data="macro_single_구현"
                 )
             ],
             [
                 InlineKeyboardButton(
                     "🔧 안정화", 
-                    switch_inline_query_current_chat=self.PROMPT_MACROS["@안정화"]
+                    callback_data="macro_single_안정화"
                 ),
                 InlineKeyboardButton(
                     "🚀 배포", 
-                    switch_inline_query_current_chat=self.PROMPT_MACROS["@배포"]
+                    callback_data="macro_single_배포"
                 )
             ]
         ]
@@ -1226,6 +1226,8 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             await self._new_project_guide_callback(query, context)
         elif callback_data == "help":
             await self._help_callback(query, context)
+        elif callback_data.startswith("macro_"):
+            await self._macro_callback(query, context)
         elif callback_data.startswith("select_session:"):
             session_name = callback_data.split(":", 1)[1]
             await self._select_session_callback(query, context, session_name)
@@ -1333,6 +1335,47 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             logger.error(f"작업 중단 중 오류: {str(e)}")
             await query.edit_message_text("❌ 내부 오류가 발생했습니다.")
     
+    async def _macro_callback(self, query, context):
+        """Handle macro button callbacks"""
+        callback_data = query.data
+        
+        # Determine which macro was selected
+        if callback_data == "macro_combined_all":
+            macro_keys = ["@기획", "@구현", "@안정화", "@배포"]
+        elif callback_data == "macro_combined_dev":
+            macro_keys = ["@기획", "@구현", "@안정화"] 
+        elif callback_data == "macro_combined_finish":
+            macro_keys = ["@안정화", "@배포"]
+        elif callback_data == "macro_combined_exec":
+            macro_keys = ["@구현", "@안정화", "@배포"]
+        elif callback_data.startswith("macro_single_"):
+            macro_type = callback_data.split("_")[-1]
+            macro_keys = [f"@{macro_type}"]
+        else:
+            await query.answer("❌ 알 수 없는 매크로입니다.")
+            return
+        
+        # Get full prompt content
+        combined_prompt = self._get_full_combined_prompt(macro_keys)
+        
+        # Send the macro as a message that user can copy or forward
+        await query.message.reply_text(
+            f"🎯 **매크로 삽입됨**\n\n{combined_prompt}\n\n"
+            "💡 이 메시지를 복사하거나 포워드해서 사용하세요.",
+            parse_mode='Markdown'
+        )
+        
+        await query.answer("✅ 매크로가 메시지로 전송되었습니다!")
+    
+    def _get_full_combined_prompt(self, macro_keys):
+        """Get full combined prompt without length restrictions"""
+        combined = []
+        for key in macro_keys:
+            if key in self.PROMPT_MACROS:
+                combined.append(self.PROMPT_MACROS[key])
+        
+        return "\n\n" + "─" * 50 + "\n\n".join(combined)
+
     async def _help_callback(self, query, context):
         """Help callback"""
         help_text = """
