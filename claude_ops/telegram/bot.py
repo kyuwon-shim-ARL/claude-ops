@@ -262,13 +262,32 @@ class TelegramBridge:
         return None, False
     
     def expand_macro_keywords(self, text: str) -> str:
-        """Expand @keywords to full prompt macros"""
+        """Expand @keywords and combined workflows to full prompt macros"""
         expanded_text = text
         
+        # Handle combined workflows first (e.g., "기획&구현&안정화&배포")
+        import re
+        combined_pattern = r'\b([가-힣]+(?:&[가-힣]+)+)\b'
+        combined_matches = re.findall(combined_pattern, expanded_text)
+        
+        for combined_match in combined_matches:
+            keywords = combined_match.split("&")
+            combined_prompt = ""
+            
+            for keyword in keywords:
+                macro_key = f"@{keyword.strip()}"
+                if macro_key in self.PROMPT_MACROS:
+                    combined_prompt += self.PROMPT_MACROS[macro_key] + "\n\n" + "="*50 + "\n\n"
+            
+            if combined_prompt:
+                # Remove the last separator
+                combined_prompt = combined_prompt.rstrip("\n\n" + "="*50 + "\n\n")
+                expanded_text = expanded_text.replace(combined_match, combined_prompt)
+        
+        # Handle individual @keywords
         for keyword, full_prompt in self.PROMPT_MACROS.items():
             if keyword in expanded_text:
                 # Replace standalone @keywords (not part of larger words)
-                import re
                 pattern = r'\b' + re.escape(keyword) + r'\b'
                 expanded_text = re.sub(pattern, full_prompt, expanded_text)
         
@@ -2358,50 +2377,33 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
     async def _handle_remote_button(self, update, user_input: str) -> bool:
         """Handle Reply Keyboard prompt macro button presses"""
         
-        # Handle single prompt macros
+        # Handle single prompt macros - just acknowledge button press, no auto-send
         if user_input in self.PROMPT_MACROS:
-            prompt_text = self.PROMPT_MACROS[user_input]
-            target_session = await self._get_target_session_for_macro(update)
-            success = await self._send_to_claude_with_session(prompt_text, target_session)
-            
-            session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
-            if success:
-                await update.message.reply_text(
-                    f"✅ {user_input} 프롬프트가 `{session_display}` 세션에 전송되었습니다."
-                )
-            else:
-                await update.message.reply_text(
-                    f"❌ {user_input} 프롬프트를 `{session_display}` 세션에 전송하는데 실패했습니다."
-                )
+            await update.message.reply_text(
+                f"🎯 **{user_input} 매크로 준비됨**\n\n"
+                f"💡 **사용 방법:**\n"
+                f"1. 추가 텍스트 작성: `{user_input} 오늘 작업은...`\n"
+                f"2. 원하는 세션에 Reply로 전송\n"
+                f"3. 자동으로 전체 프롬프트로 확장됨\n\n"
+                f"또는 지금 바로 전송하려면 이 메시지에 Reply로 세션을 지정하세요."
+            )
             return True
         
-        # Handle combined workflow prompts
+        # Handle combined workflow prompts - just acknowledge, no auto-send
         if "&" in user_input:
             # Parse combined prompts like "기획&구현&안정화&배포"
             keywords = user_input.split("&")
-            combined_prompt = ""
+            macro_names = [f"@{kw.strip()}" for kw in keywords if f"@{kw.strip()}" in self.PROMPT_MACROS]
             
-            for keyword in keywords:
-                macro_key = f"@{keyword.strip()}"
-                if macro_key in self.PROMPT_MACROS:
-                    combined_prompt += self.PROMPT_MACROS[macro_key] + "\n\n" + "="*50 + "\n\n"
-            
-            if combined_prompt:
-                # Remove the last separator
-                combined_prompt = combined_prompt.rstrip("\n\n" + "="*50 + "\n\n")
-                
-                target_session = await self._get_target_session_for_macro(update)
-                success = await self._send_to_claude_with_session(combined_prompt, target_session)
-                
-                session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
-                if success:
-                    await update.message.reply_text(
-                        f"✅ 통합 워크플로우 프롬프트 ({user_input})가 `{session_display}` 세션에 전송되었습니다."
-                    )
-                else:
-                    await update.message.reply_text(
-                        f"❌ 통합 워크플로우 프롬프트 ({user_input})를 `{session_display}` 세션에 전송하는데 실패했습니다."
-                    )
+            if macro_names:
+                await update.message.reply_text(
+                    f"🔄 **통합 워크플로우 준비됨**: {' → '.join(macro_names)}\n\n"
+                    f"💡 **사용 방법:**\n"
+                    f"1. 추가 텍스트 작성: `{user_input} 오늘의 목표는...`\n"
+                    f"2. 원하는 세션에 Reply로 전송\n"
+                    f"3. 자동으로 전체 워크플로우로 확장됨\n\n"
+                    f"또는 지금 바로 전송하려면 이 메시지에 Reply로 세션을 지정하세요."
+                )
                 return True
         
         return False
