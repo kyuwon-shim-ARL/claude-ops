@@ -1896,6 +1896,9 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             # Get full prompt hint for this view
             prompt_hint = await self.get_session_prompt_hint(session_name)
             
+            # Get recent log (30 lines for session action view)
+            recent_log = await self._get_session_log_content(session_name, 30)
+            
             # Create quick log buttons grid (useful actions)
             keyboard = [
                 [
@@ -1917,12 +1920,25 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             
             reply_markup = InlineKeyboardMarkup(keyboard)
             
+            # Create reply-targeting optimized message format
+            session_action_msg = f"""🎯 **{display_name}** 세션 액션
+
+📊 **상태**: {status_emoji}
+🎯 **메인 세션**: {'✅ 현재 메인' if is_current else '❌ 다른 세션'}
+🎛️ 세션: `{session_name}`
+
+{prompt_hint}
+
+📺 **최근 진행사항 (30줄)**:
+```
+{recent_log}
+```
+
+💆‍♂️ **원클릭 액션 선택**:
+이 메시지에 답장하여 `{session_name}` 세션에 직접 명령어를 전송할 수 있습니다."""
+            
             await query.edit_message_text(
-                f"🎯 **{display_name}** 세션 액션\n\n"
-                f"📊 **상태**: {status_emoji}\n"
-                f"🎯 **메인 세션**: {'✅ 현재 메인' if is_current else '❌ 다른 세션'}\n"
-                f"{prompt_hint}\n"
-                "💆‍♂️ **원클릭 액션 선택**:",
+                session_action_msg,
                 reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
