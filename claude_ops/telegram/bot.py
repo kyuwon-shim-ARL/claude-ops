@@ -923,35 +923,10 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                 "• @구현: DRY 원칙 기반 체계적 구현\n"
                 "• @안정화: 구조적 지속가능성 검증\n"
                 "• @배포: 최종 검증 및 배포\n\n"
-                "💡 끄려면: /remote off\n"
-                "🔧 인라인 매크로: /imacro",
+                "💡 끄려면: /remote off",
                 reply_markup=remote_keyboard
             )
     
-    async def imacro_command(self, update, context):
-        """Show inline macro buttons (Reply-compatible)"""
-        user_id = update.effective_user.id
-        
-        if not self.check_user_authorization(user_id):
-            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
-            return
-        
-        inline_keyboard = self.get_inline_macro_keyboard()
-        
-        await update.message.reply_text(
-            "🎯 **인라인 매크로 시스템**\n\n"
-            "💡 **사용법:**\n"
-            "• 버튼 클릭 → 텍스트 자동 삽입\n"
-            "• 추가 내용 작성 후 전송\n"
-            "• Reply 상태에서도 사용 가능!\n\n"
-            "🔄 **통합 워크플로우:**\n"
-            "• 전체: 기획→구현→안정화→배포\n"
-            "• 개발: 기획→구현→안정화\n"
-            "• 마무리: 안정화→배포\n"
-            "• 실행: 구현→안정화→배포\n\n"
-            "⚡ **개별 매크로:** 기획/구현/안정화/배포",
-            reply_markup=inline_keyboard
-        )
     
     async def sessions_command(self, update, context):
         """Show active sessions command or switch to reply session directly"""
@@ -1099,82 +1074,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             one_time_keyboard=False
         )
     
-    def get_inline_macro_keyboard(self):
-        """Get inline macro keyboard with callback_data for full prompt insertion"""
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        
-        keyboard = [
-            # Combined workflow prompts (most frequently used)
-            [
-                InlineKeyboardButton(
-                    "🔄 전체", 
-                    callback_data="macro_combined_all"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "🛠️ 개발", 
-                    callback_data="macro_combined_dev"
-                ),
-                InlineKeyboardButton(
-                    "✅ 마무리", 
-                    callback_data="macro_combined_finish"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "⚡ 실행", 
-                    callback_data="macro_combined_exec"
-                )
-            ],
-            
-            # Single keyword prompts
-            [
-                InlineKeyboardButton(
-                    "🎯 기획", 
-                    callback_data="macro_single_기획"
-                ),
-                InlineKeyboardButton(
-                    "⚡ 구현", 
-                    callback_data="macro_single_구현"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "🔧 안정화", 
-                    callback_data="macro_single_안정화"
-                ),
-                InlineKeyboardButton(
-                    "🚀 배포", 
-                    callback_data="macro_single_배포"
-                )
-            ]
-        ]
-        
-        return InlineKeyboardMarkup(keyboard)
     
-    def _get_combined_prompt(self, macro_keys):
-        """Combine multiple macro prompts with clear separators"""
-        # For switch_inline_query, use shorter version due to 256 char limit
-        combined = []
-        for key in macro_keys:
-            if key in self.PROMPT_MACROS:
-                combined.append(self.PROMPT_MACROS[key])
-        
-        full_prompt = "\n\n" + "─" * 50 + "\n\n".join(combined)
-        
-        # If too long for switch_inline_query, use summary version
-        if len(full_prompt) > 250:
-            summaries = {
-                "@기획": "🎯 @기획 - 구조적 탐색 및 계획 수립 단계",
-                "@구현": "⚡ @구현 - DRY 원칙 기반 체계적 구현 단계", 
-                "@안정화": "🔧 @안정화 - 구조적 지속가능성 검증 단계",
-                "@배포": "🚀 @배포 - 최종 검증 및 배포 단계"
-            }
-            summary_parts = [summaries.get(key, key) for key in macro_keys if key in summaries]
-            return " → ".join(summary_parts) + "\n\n현재 진행하고자 하는 작업을 구체적으로 설명해주세요."
-        
-        return full_prompt
     
     async def get_session_prompt_hint(self, session_name: str) -> str:
         """Get last prompt hint for session"""
@@ -1226,8 +1126,6 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             await self._new_project_guide_callback(query, context)
         elif callback_data == "help":
             await self._help_callback(query, context)
-        elif callback_data.startswith("macro_"):
-            await self._macro_callback(query, context)
         elif callback_data.startswith("select_session:"):
             session_name = callback_data.split(":", 1)[1]
             await self._select_session_callback(query, context, session_name)
@@ -1335,46 +1233,6 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             logger.error(f"작업 중단 중 오류: {str(e)}")
             await query.edit_message_text("❌ 내부 오류가 발생했습니다.")
     
-    async def _macro_callback(self, query, context):
-        """Handle macro button callbacks"""
-        callback_data = query.data
-        
-        # Determine which macro was selected
-        if callback_data == "macro_combined_all":
-            macro_keys = ["@기획", "@구현", "@안정화", "@배포"]
-        elif callback_data == "macro_combined_dev":
-            macro_keys = ["@기획", "@구현", "@안정화"] 
-        elif callback_data == "macro_combined_finish":
-            macro_keys = ["@안정화", "@배포"]
-        elif callback_data == "macro_combined_exec":
-            macro_keys = ["@구현", "@안정화", "@배포"]
-        elif callback_data.startswith("macro_single_"):
-            macro_type = callback_data.split("_")[-1]
-            macro_keys = [f"@{macro_type}"]
-        else:
-            await query.answer("❌ 알 수 없는 매크로입니다.")
-            return
-        
-        # Get full prompt content
-        combined_prompt = self._get_full_combined_prompt(macro_keys)
-        
-        # Send the macro as a message that user can copy or forward
-        await query.message.reply_text(
-            f"🎯 **매크로 삽입됨**\n\n{combined_prompt}\n\n"
-            "💡 이 메시지를 복사하거나 포워드해서 사용하세요.",
-            parse_mode='Markdown'
-        )
-        
-        await query.answer("✅ 매크로가 메시지로 전송되었습니다!")
-    
-    def _get_full_combined_prompt(self, macro_keys):
-        """Get full combined prompt without length restrictions"""
-        combined = []
-        for key in macro_keys:
-            if key in self.PROMPT_MACROS:
-                combined.append(self.PROMPT_MACROS[key])
-        
-        return "\n\n" + "─" * 50 + "\n\n".join(combined)
 
     async def _help_callback(self, query, context):
         """Help callback"""
@@ -1449,11 +1307,9 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         self.app.add_handler(CommandHandler("log300", self.log300_command))
         self.app.add_handler(CommandHandler("stop", self.stop_command))
         self.app.add_handler(CommandHandler("erase", self.erase_command))
-        self.app.add_handler(CommandHandler("clear", self.clear_command))
         self.app.add_handler(CommandHandler("sessions", self.sessions_command))
         self.app.add_handler(CommandHandler("board", self.board_command))
         self.app.add_handler(CommandHandler("remote", self.remote_command))
-        self.app.add_handler(CommandHandler("imacro", self.imacro_command))
         
         # Callback query handler for inline buttons
         self.app.add_handler(CallbackQueryHandler(self.button_callback))
@@ -1474,14 +1330,13 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
     async def setup_bot_commands(self):
         """Setup bot command menu"""
         commands = [
-            BotCommand("start", "🚀 Claude 세션 시작 (옵션: project_name [path])"),
+            BotCommand("sessions", "🔄 활성 세션 목록 보기"),
             BotCommand("board", "🎯 세션 보드"),
-            BotCommand("status", "📊 봇 및 tmux 세션 상태 확인"),
-            BotCommand("log", "📺 현재 Claude 화면 실시간 확인"),
             BotCommand("stop", "⛔ Claude 작업 중단 (ESC 키 전송)"),
             BotCommand("erase", "🧹 현재 입력 지우기 (Ctrl+C 전송)"),
-            BotCommand("clear", "🖥️ 화면 정리 (Ctrl+L 전송)"),
-            BotCommand("sessions", "🔄 활성 세션 목록 보기"),
+            BotCommand("status", "📊 봇 및 tmux 세션 상태 확인"),
+            BotCommand("log", "📺 현재 Claude 화면 실시간 확인"),
+            BotCommand("start", "🚀 Claude 세션 시작 (옵션: project_name [path])"),
             BotCommand("help", "❓ 도움말 보기")
         ]
         
