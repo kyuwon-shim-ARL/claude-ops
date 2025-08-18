@@ -289,8 +289,8 @@ class TelegramBridge:
         # Handle individual @keywords
         for keyword, full_prompt in self.PROMPT_MACROS.items():
             if keyword in expanded_text:
-                # Replace standalone @keywords (not part of larger words)
-                pattern = r'\b' + re.escape(keyword) + r'\b'
+                # Replace @keywords - use word boundary for @ but not for Korean
+                pattern = re.escape(keyword) + r'(?=\s|$|[^\w가-힣])'
                 expanded_text = re.sub(pattern, full_prompt, expanded_text)
         
         return expanded_text

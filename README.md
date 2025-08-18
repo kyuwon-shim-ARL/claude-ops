@@ -1,86 +1,74 @@
-# 🚀 Claude-Ops: Multi-Project AI Automation Hub
+# 🚀 Claude-Ops: Telegram-Claude Bridge System
 
-**Claude Code + Notion + GitHub + Telegram 통합 자동화 시스템**
+**Telegram으로 Claude Code 세션 원격 제어 및 모니터링**
 
 [![Setup Time](https://img.shields.io/badge/Setup-5_minutes-green)](./QUICK_START.md)
 [![Multi Project](https://img.shields.io/badge/Multi_Project-Management-blue)](#multi-project-management)
 [![Reply Based](https://img.shields.io/badge/Telegram-Reply_Based_Targeting-green)](#telegram-reply-targeting)
 [![Auto Merge](https://img.shields.io/badge/Workflow-Fully_Automated-blue)](#자동화-기능)
 
-**홈 폴더에서 모든 Claude 프로젝트를 중앙 관리하는 완전 자동화 시스템**
+**Claude Code 세션을 텔레그램으로 원격 제어하는 스마트 브리지 시스템**
 
-- 🏠 **홈 폴더 중앙 관리**: 한 곳에서 모든 프로젝트 제어
-- 🎯 **Reply 기반 타겟팅**: 텔레그램 Reply로 정확한 세션 선택
-- 🔄 **멀티 세션 모니터링**: 모든 프로젝트 동시 감시
-- 📱 **원격 프로젝트 생성**: 텔레그램에서 `/start new-project` 가능
+- 🤖 **스마트 봇 제어**: 텔레그램 봇으로 Claude 세션 원격 조작
+- 🎯 **Reply 기반 타겟팅**: Reply로 정확한 세션 선택, 혼동 방지
+- 🔄 **실시간 모니터링**: 작업 완료 시 즉시 알림 수신
+- 📱 **멀티 세션 관리**: 여러 프로젝트 동시 모니터링 및 제어
 
-## 🏠 홈 폴더 중앙 관리 설정
+## ⚡ 빠른 설정
 
-### 빠른 설정 (권장)
+### 1분 설정 (권장)
 
 ```bash
-# 1. 홈 폴더에 Claude-Ops 설치
+# 1. Claude-Ops 설치
 cd ~
 git clone https://github.com/kyuwon-shim-ARL/claude-ops.git claude-ops
 cd claude-ops
 
-# 2. 환경 설정 복사 (기존 설정 재사용 가능)
+# 2. 환경 설정
 cp .env.example .env
-# .env 파일에 API 키 설정 (Notion, GitHub, Telegram)
+# .env 파일에 텔레그램 봇 토큰 설정
+# TELEGRAM_BOT_TOKEN=your_bot_token
+# TELEGRAM_CHAT_ID=your_chat_id
 
 # 3. 의존성 설치
 uv sync
 
-# 4. 홈 디렉토리 설정
-echo "CLAUDE_WORKING_DIR=$HOME" >> .env
-
-# 5. CLI 도구 PATH 추가
-./scripts/claude-ops.sh install
-source ~/.bashrc
-
-# 6. 멀티 프로젝트 모니터링 시작
-claude-ops start-monitoring
+# 4. 봇 시작
+python -m claude_ops.telegram.bot
 ```
 
 
-## ⚡ 멀티 프로젝트 사용법
+## 🚀 기본 사용법
 
-### 🚀 새 프로젝트 생성
+### 세션 생성 및 제어
 
-**방법 1: CLI 명령어 (권장)**
+**텔레그램 명령어**
+```
+/start <session-name> [directory]   # 새 Claude 세션 시작
+/sessions                           # 활성 세션 목록
+/status                            # 봇 상태 확인
+/switch <session-name>             # 기본 세션 전환
+```
+
+**수동 세션 생성 (고급 사용자)**
 ```bash
-# 새 프로젝트 생성
-claude-ops new-project my-ai-app                    # ~/projects/my-ai-app
-claude-ops new-project web-scraper ~/work/client   # ~/work/client
-
-# 기존 프로젝트에 Claude 추가
-claude-ops new-project existing-app ~/work/existing-project
-
-# 시스템 관리
-claude-ops status          # 상태 확인
-claude-ops sessions        # 활성 세션 목록
-claude-ops stop-monitoring # 모니터링 종료
-```
-
-**방법 2: 텔레그램 원격 제어**
-```
-/start my-ai-app                    # ~/projects/my-ai-app에서 claude_my-ai-app 시작
-/start web-scraper ~/work/client    # ~/work/client에서 claude_web-scraper 시작
-```
-
-**방법 3: 수동 tmux 세션 (100% 확실)**
-```bash
-# 수동으로 세션 생성 (가장 확실한 방법)
-mkdir -p ~/projects/my-project
+# tmux로 Claude 세션 생성
 tmux new-session -d -s claude_my-project -c ~/projects/my-project
 tmux send-keys -t claude_my-project 'claude' Enter
 
 # 연결: tmux attach -t claude_my-project
 ```
 
-### 🎯 Reply 기반 텔레그램 제어
+**빠른 시작 예시**
+```
+/start my-ai-app ~/projects/my-ai-app
+/start data-analysis ~/work/analysis
+/sessions
+```
 
-**1. 작업 완료 알림 받기**
+### 🎯 스마트 알림 및 Reply 제어
+
+**1. 실시간 작업 완료 알림**
 ```
 ✅ 작업 완료 [claude_my-ai-app]
 
@@ -88,224 +76,213 @@ tmux send-keys -t claude_my-project 'claude' Enter
 🎯 세션: claude_my-ai-app
 ⏰ 완료 시간: 14:30:25
 
-[작업 내용]
+[주요 작업 내용 요약]
 
 💡 답장하려면 이 메시지에 Reply로 응답하세요!
 ```
 
-**2. Reply로 정확한 세션에 답장**
-- 알림 메시지에 Reply → 자동으로 해당 세션으로 전송
-- 일반 메시지 → 현재 활성 세션으로 전송
-- 세션 혼동 걱정 없음! ✨
+**2. Reply 기반 정확한 타겟팅**
+- ✅ 알림 메시지에 Reply → 해당 세션으로 자동 전송
+- ✅ 일반 메시지 → 현재 활성 세션으로 전송
+- ✅ 세션 혼동 방지: Reply로 정확한 세션 선택
+- ✅ 매크로 확장: `@기획`, `@구현`, `@안정화`, `@배포` 자동 전개
 
 ## 🔧 시스템 관리
 
-### 🚀 시작하기
+### 🚀 모니터링 시작
 
-**멀티 프로젝트 모니터링 시작**
+**봇 실행**
 ```bash
-# CLI 명령어 (권장)
-claude-ops start-monitoring
+# 메인 봇 실행
+python -m claude_ops.telegram.bot
 
-# 또는 직접 실행
-cd ~/claude-ops
-./scripts/start_multi_monitoring.sh
+# 또는 백그라운드 실행
+nohup python -m claude_ops.telegram.bot &
 ```
 
-**단일 명령으로 모든 것 관리됩니다:**
+**자동 기능:**
 - ✅ 모든 `claude_*` 세션 자동 감지
 - ✅ 작업 완료 시 텔레그램 알림
 - ✅ Reply 기반 정확한 세션 타겟팅
-- ✅ 새 세션 자동 추가 모니터링
+- ✅ 매크로 확장으로 빠른 프롬프트 입력
 
-### 🛑 종료하기
+### 🛑 시스템 제어
 
-**모니터링 완전 종료**
+**봇 종료**
 ```bash
-# CLI 명령어 (권장)
-claude-ops stop-monitoring
+# 프로세스 종료
+pkill -f "claude_ops.telegram.bot"
 
-# 또는 수동으로
-tmux kill-session -t claude-multi-monitor 2>/dev/null
-tmux kill-session -t claude-monitor 2>/dev/null
-pkill -f "multi_monitor"
+# 또는 Ctrl+C로 직접 종료
 ```
 
-**개별 프로젝트 세션 종료**
+**세션 관리**
 ```bash
-tmux kill-session -t claude_my-project  # 특정 프로젝트만
-tmux kill-session -t claude_*           # 모든 Claude 세션 (주의!)
+tmux kill-session -t claude_my-project  # 특정 세션 종료
+tmux list-sessions | grep claude        # Claude 세션 목록
 ```
 
 ### 📊 상태 확인
 
-**CLI 명령어로 확인**
+**텔레그램 명령어**
+```
+/sessions    # 활성 세션 목록 및 전환
+/status      # 봇 상태 및 현재 세션
+```
+
+**터미널 확인**
 ```bash
-claude-ops status      # 전체 시스템 상태
-claude-ops sessions    # 활성 세션 목록
+tmux list-sessions | grep claude    # Claude 세션 목록
+ps aux | grep claude_ops            # 봇 프로세스 확인
 ```
 
-**수동 확인**
-```bash
-tmux list-sessions | grep claude        # 모든 Claude 세션
-tmux attach -t claude-multi-monitor     # 모니터링 로그 보기
+### 💡 매크로 시스템
+
+**내장 워크플로우 매크로**
+- `@기획`: 프로젝트 기획 및 분석 프롬프트
+- `@구현`: 구체적 구현 작업 프롬프트
+- `@안정화`: 코드 리팩토링 및 최적화 프롬프트
+- `@배포`: 배포 준비 및 문서화 프롬프트
+
+**사용 예시**
 ```
-
-**텔레그램에서**
+텔레그램에서: @기획 새로운 데이터 분석 파이프라인
+→ 자동 확장되어 상세한 기획 프롬프트로 전송
 ```
-/sessions    # 모든 활성 세션 목록 + 전환
-/status      # 현재 봇 상태
-```
-
-### 🔧 기존 프로젝트에 추가
-
-**기존 작업 중인 프로젝트에 Claude Code 워크플로우를 추가하려면:**
-
-```bash
-# 방법 1: 원클릭 설치 (권장)
-curl -sSL https://raw.githubusercontent.com/kyuwon-shim-ARL/claude-ops/main/install-to-existing.sh | bash
-
-# 방법 2: 수동 설치
-git clone https://github.com/kyuwon-shim-ARL/claude-ops.git /tmp/claude-ops-template
-cp /tmp/claude-ops-template/CLAUDE.md .
-cp /tmp/claude-ops-template/.env.example .
-cp -r /tmp/claude-ops-template/slash_commands/ .
-cp /tmp/claude-ops-template/src/workflow_manager.py ./src/
-cat /tmp/claude-ops-template/.gitattributes >> .gitattributes
-rm -rf /tmp/claude-ops-template
-```
-
-**👉 [상세 설정 가이드](./QUICK_START.md)**
 
 ## 🎯 핵심 특징
 
-### ✨ 완전 자동화 워크플로우
-- **자동 PR 생성 & 병합**: `--auto-merge` 플래그로 개발자 개입 최소화
-- **자동 브랜치 정리**: Merge 후 로컬/원격 브랜치 자동 삭제
-- **자동 상태 동기화**: Notion Task 상태 실시간 업데이트
+### 🤖 스마트 텔레그램 봇
+- **Reply 타겟팅**: Reply로 정확한 세션 지정, 혼동 방지
+- **실시간 모니터링**: Claude 작업 완료 시 즉시 알림
+- **매크로 확장**: 워크플로우 매크로로 빠른 프롬프트 입력
 
-### 📊 구조화된 문서화
-- **대화 요약**: Raw 로그 대신 읽기 쉬운 구조화된 요약
-- **구체적 산출물**: 각 Task에 명확한 deliverable과 success criteria
-- **자동 아카이빙**: 모든 탐색 과정이 Notion에 체계적으로 보관
+### ⚡ 세션 관리
+- **멀티 세션 지원**: 여러 프로젝트 동시 모니터링
+- **자동 세션 감지**: `claude_*` 패턴 세션 자동 인식
+- **세션 전환**: 텔레그램에서 원클릭 세션 전환
 
-### 🗂️ Git LFS 자동 추적
-- **결과물 버전 관리**: `*.txt`, `*.csv`, `*.tsv` 파일 자동 LFS 추적
-- **대용량 파일 지원**: 분석 결과, 모델, 데이터셋 등 효율적 관리
-- **코드-결과 연결성**: Git 히스토리와 결과물 완벽 연동
+### 🔧 개발자 친화적
+- **최소 설정**: 봇 토큰만으로 즉시 시작
+- **안전한 입력**: 위험 명령어 패턴 자동 차단
+- **한국어 지원**: 한글 매크로 및 메시지 완벽 지원
 
 ## 🏗️ 시스템 아키텍처
 
-### 🏛️ Notion (전략 본부)
-- **프로젝트 계획**: Epic → Task 계층 구조
-- **진행 상황 추적**: 실시간 상태 업데이트
-- **지식 아카이브**: 구조화된 탐색 과정 기록
+### 📱 Telegram Bot Layer
+- **사용자 인터페이스**: 모든 제어가 텔레그램에서 가능
+- **명령어 처리**: `/start`, `/sessions`, `/status` 등
+- **매크로 확장**: 워크플로우 프롬프트 자동 생성
 
-### 🛠️ Git & Terminal (개발 작업실)  
-- **코드 개발**: 브랜치 기반 협업 워크플로우
-- **결과물 관리**: Git LFS로 대용량 파일 추적
-- **자동화 실행**: Claude Code 슬래시 명령어
+### 🔄 Session Management Layer
+- **Tmux 통합**: Claude Code 세션 상태 실시간 감지
+- **멀티 세션**: 여러 프로젝트 동시 관리
+- **스마트 라우팅**: Reply 기반 정확한 세션 타겟팅
 
-## 📋 사용 예시
+### ⚙️ Core Bridge System
+- **상태 감지**: 작업 완료/대기 상태 자동 인식
+- **알림 시스템**: 중요 이벤트 즉시 전달
+- **안전 검증**: 입력값 보안 검사 및 필터링
+
+## 📋 실사용 시나리오
 
 ### 1. 새 프로젝트 시작
-```bash
-# 프로젝트 계획서 작성
-echo "# 새로운 분석 프로젝트" > docs/proposals/my-project.md
+```
+# 텔레그램에서
+/start my-data-analysis ~/projects/data-analysis
 
-# Notion에 프로젝트 구조 생성 (Epic, Task 포함)
-/project-plan docs/proposals/my-project.md
+# Claude 세션이 자동으로 시작됨
+# 작업 완료 시 알림 수신
 ```
 
-### 2. Task 실행 (완전 자동화)
-```bash
-# Task 시작 (브랜치 생성 + Notion 상태 업데이트)
-/task-start 23a5d36f-fc73-81ff-xxxx
+### 2. 멀티 프로젝트 관리
+```
+# 여러 프로젝트 동시 모니터링
+/start frontend ~/work/frontend
+/start backend ~/work/backend
+/sessions  # 활성 세션 확인
 
-# 작업 수행
-echo "print('Hello Research!')" > analysis.py
-python analysis.py > results.txt
-
-# 완전 자동화 완료 (PR 생성 → 병합 → 정리)
-/task-finish 23a5d36f-fc73-81ff-xxxx --pr --auto-merge
+# Reply로 특정 세션에 명령 전송
+# 알림 메시지에 Reply → 해당 프로젝트로 전송
 ```
 
-### 3. 대화 아카이빙
-```bash
-# 현재 작업의 구조화된 요약을 Notion에 저장
-/task-archive  # Git 브랜치에서 자동 TID 감지
+### 3. 매크로를 활용한 빠른 작업
+```
+# 텔레그램에서
+@기획 새로운 API 엔드포인트 설계
+→ 자동으로 상세한 기획 프롬프트로 확장되어 전송
+
+@구현 사용자 인증 시스템
+→ 구현 가이드라인 프롬프트로 확장
 ```
 
 ## 📁 Repository 구조
 
 ```
-MC_test_ops/
+claude-ops/
 ├── 📚 README.md                    # 이 파일
-├── 🚀 QUICK_START.md               # 5분 설정 가이드
-├── 🤖 CLAUDE.md                    # Claude Code 지침 (피드백 반영)
+├── 🤖 CLAUDE.md                    # Claude Code 사용 가이드
 ├── ⚙️ .env.example                 # 환경 설정 템플릿
 ├── 📦 pyproject.toml               # Python 의존성 (uv 관리)
-├── 🗂️ data/                        # 입력 데이터
-├── 📄 docs/                        # 문서
-│   ├── proposals/                  # 프로젝트 제안서
-│   │   └── 2025-07-24_improved-data-analysis-pipeline.md
-│   └── prds/                       # 상세 요구사항
-├── 💻 src/                         # 소스 코드
-│   ├── workflow_manager.py         # 핵심 워크플로우 시스템
-│   └── modules/                    # 구현 모듈들
-├── ⚡ slash_commands/               # Claude Code 명령어
-│   ├── project-plan.md
-│   ├── task-start.md
-│   ├── task-archive.md
-│   └── task-finish.md
-└── 🎯 prompts/                     # AI 프롬프트 템플릿
+├── 🤖 claude_ops/                  # 메인 패키지
+│   ├── __init__.py                 # 패키지 진입점
+│   ├── config.py                   # 환경 설정
+│   ├── session_manager.py          # 세션 관리
+│   ├── telegram/                   # 텔레그램 봇 모듈
+│   │   ├── bot.py                  # 메인 봇 구현
+│   │   ├── monitor.py              # 세션 모니터링
+│   │   └── notifier.py             # 스마트 알림 시스템
+│   └── utils/                      # 유틸리티
+│       ├── session_state.py        # 세션 상태 감지
+│       └── working_detector.py     # 작업 상태 분석
+└── 🧪 tests/                       # 테스트 파일
 ```
 
 ## 🔧 고급 기능
 
-### 배치 작업
+### 커스텀 매크로 추가
+```python
+# claude_ops/telegram/bot.py에서 매크로 추가
+PROMPT_MACROS = {
+    "@my_custom": "내 커스텀 프롬프트 템플릿...",
+    # 기존 매크로들...
+}
+```
+
+### 세션 자동화 스크립트
 ```bash
-# 여러 Task 연속 실행
-for tid in TID1 TID2 TID3; do
-    /task-start $tid
-    # 작업 수행
-    /task-finish $tid --pr --auto-merge
+# 여러 세션 자동 시작
+sessions=("frontend" "backend" "database")
+for session in "${sessions[@]}"; do
+    tmux new-session -d -s "claude_$session" -c "~/projects/$session"
+    tmux send-keys -t "claude_$session" 'claude' Enter
 done
 ```
 
-### 커스텀 프로젝트
-```bash
-# 자신만의 프로젝트 템플릿 생성
-cp docs/proposals/2025-07-24_improved-data-analysis-pipeline.md docs/proposals/my-custom-project.md
-# 내용 수정 후
-/project-plan docs/proposals/my-custom-project.md
+### 모니터링 커스터마이징
+```python
+# 알림 조건 변경
+# claude_ops/utils/session_state.py에서 상태 감지 로직 수정
 ```
 
-### Git LFS 확인
-```bash
-git lfs ls-files        # LFS 추적 파일 목록
-git lfs status          # LFS 상태 확인
-```
+## 🎉 주요 개선사항
 
-## 🎉 피드백 반영 개선사항
+실제 사용자 피드백을 반영한 개선사항:
 
-이 시스템은 실제 사용자 피드백을 반영하여 다음과 같이 개선되었습니다:
-
-- ✅ **즉시 사용 가능**: 5분 설정으로 바로 시작
-- ✅ **완전 자동화**: PR 생성부터 병합까지 자동
-- ✅ **구조화된 아카이빙**: Raw 로그 대신 읽기 쉬운 요약
-- ✅ **구체적 산출물**: 명확한 deliverable과 success criteria
-- ✅ **정확한 상태 관리**: Notion API 호출 검증 및 재시도
+- ✅ **즉시 사용 가능**: 1분 설정으로 바로 시작
+- ✅ **텔레그램 중심**: 모든 제어가 텔레그램에서 가능
+- ✅ **Reply 타겟팅**: 세션 혼동 방지, 정확한 명령 전달
+- ✅ **매크로 시스템**: 빠른 워크플로우 프롬프트 입력
+- ✅ **안전한 입력**: 위험 명령어 자동 차단, 길이 제한 완화
 
 ## 🔗 관련 링크
 
-- [빠른 시작 가이드](./QUICK_START.md) - 5분 설정
 - [Claude Code 문서](https://docs.anthropic.com/en/docs/claude-code)
-- [Notion API 문서](https://developers.notion.com/)
-- [Git LFS 가이드](https://git-lfs.github.io/)
+- [python-telegram-bot 문서](https://python-telegram-bot.readthedocs.io/)
+- [Tmux 가이드](https://github.com/tmux/tmux/wiki)
 
 ---
 
-**🎯 목표**: 연구원이 창의적이고 분석적인 업무에만 집중할 수 있도록, 모든 문서화와 프로젝트 관리를 AI가 자동화합니다.
+**🎯 목표**: 텔레그램을 통해 Claude Code 세션을 원격으로 제어하고 모니터링하여 개발 효율성을 극대화합니다.
 
-**🚀 시작하기**: [QUICK_START.md](./QUICK_START.md)를 읽고 5분 만에 시작하세요!
+**🚀 시작하기**: `.env` 파일 설정 후 `python -m claude_ops.telegram.bot` 실행!

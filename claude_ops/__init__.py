@@ -1,34 +1,31 @@
 """
-Claude-Ops: Integrated Notion-Git-Claude-Telegram Workflow System
+Claude-Ops: Telegram-Claude Bridge System
 
-A comprehensive system that integrates:
-- Notion task management
-- Git branch management  
-- Claude Code automation
+A streamlined system that integrates:
+- Claude Code session management
 - Telegram monitoring and control
+- Session state detection
+- Smart notifications
 
-This package provides a unified interface for research and development workflows.
+This package provides a unified interface for Claude development workflows via Telegram.
 
 Usage:
-    # CLI
-    claude-ops telegram start
-    claude-ops notion task-start TID
-    claude-ops workflow init
+    # Direct execution
+    python -m claude_ops.telegram.bot
     
     # Programmatic  
-    from claude_ops import TelegramBridge, WorkflowManager
+    from claude_ops import TelegramBridge, SmartNotifier
     bridge = TelegramBridge()
-    workflow = WorkflowManager()
+    notifier = SmartNotifier()
 """
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 __author__ = "Claude-Ops Team"
-__description__ = "Integrated Notion-Git-Claude-Telegram workflow system"
+__description__ = "Telegram-Claude Bridge System"
 __url__ = "https://github.com/kyuwon-shim-ARL/claude-ops"
 
 # Import main components
 from .telegram import TelegramBridge, TelegramMonitor, SmartNotifier
-from .notion import WorkflowManager, TaskManager
 from .config import ClaudeOpsConfig
 from .session_manager import SessionManager, session_manager
 
@@ -36,8 +33,6 @@ __all__ = [
     "TelegramBridge",
     "TelegramMonitor", 
     "SmartNotifier",
-    "WorkflowManager",
-    "TaskManager",
     "ClaudeOpsConfig",
     "SessionManager",
     "session_manager",
