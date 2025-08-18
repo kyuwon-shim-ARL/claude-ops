@@ -79,7 +79,7 @@ class TelegramBridge:
         return True, "세션이 활성 상태입니다"
     
     def get_all_claude_sessions(self) -> list[str]:
-        """Get list of all Claude sessions"""
+        """Get list of all Claude Code sessions (excluding monitoring/management sessions)"""
         try:
             import subprocess
             result = subprocess.run(
@@ -90,8 +90,23 @@ class TelegramBridge:
             )
             
             if result.returncode == 0:
-                sessions = [s.strip() for s in result.stdout.split('\n') if s.strip()]
-                return sessions
+                all_sessions = [s.strip() for s in result.stdout.split('\n') if s.strip()]
+                
+                # Filter out monitoring and management sessions
+                excluded_patterns = [
+                    'claude-monitor',  # Monitoring sessions
+                    'claude-ops',      # Management sessions  
+                    'claude_monitor',  # Alternative naming
+                    'claude_ops'       # Alternative naming
+                ]
+                
+                claude_code_sessions = []
+                for session in all_sessions:
+                    # Exclude sessions that match monitoring/management patterns
+                    if not any(pattern in session for pattern in excluded_patterns):
+                        claude_code_sessions.append(session)
+                
+                return claude_code_sessions
             else:
                 return []
         except Exception as e:
