@@ -13,20 +13,25 @@ class TestTelegramBridge:
     """Test core TelegramBridge functionality"""
     
     def test_prompt_macros_exist(self):
-        """Test that prompt macros are properly defined"""
-        assert "@기획" in TelegramBridge.PROMPT_MACROS
-        assert "@구현" in TelegramBridge.PROMPT_MACROS  
-        assert "@안정화" in TelegramBridge.PROMPT_MACROS
-        assert "@배포" in TelegramBridge.PROMPT_MACROS
+        """Test that prompt macros are properly loaded from claude-dev-kit"""
+        bridge = TelegramBridge()
+        available_prompts = bridge.prompts.get_available_prompts()
+        
+        assert "@기획" in available_prompts
+        assert "@구현" in available_prompts  
+        assert "@안정화" in available_prompts
+        assert "@배포" in available_prompts
         
         # Verify macro content is non-empty
-        for macro_name, content in TelegramBridge.PROMPT_MACROS.items():
+        for macro_name in ["@기획", "@구현", "@안정화", "@배포"]:
+            content = bridge.prompts.get_prompt(macro_name)
             assert len(content.strip()) > 50, f"Macro {macro_name} content too short"
     
     def test_macro_structure(self):
         """Test macro content structure and formatting"""
-        planning_macro = TelegramBridge.PROMPT_MACROS["@기획"]
-        implementation_macro = TelegramBridge.PROMPT_MACROS["@구현"]
+        bridge = TelegramBridge()
+        planning_macro = bridge.prompts.get_prompt("@기획")
+        implementation_macro = bridge.prompts.get_prompt("@구현")
         
         # Check for key sections
         assert "탐색 단계" in planning_macro
@@ -47,17 +52,18 @@ class TestTelegramBridge:
     def test_macro_expansion_logic(self):
         """Test macro expansion functionality"""
         bridge = TelegramBridge()
+        available_prompts = bridge.prompts.get_available_prompts()
         
         # Test basic macro detection
         test_message = "@기획 새로운 프로젝트 시작"
         
         # This tests the macro detection logic
-        has_macro = any(macro in test_message for macro in TelegramBridge.PROMPT_MACROS.keys())
+        has_macro = any(macro in test_message for macro in available_prompts)
         assert has_macro is True
         
         # Test non-macro message
         normal_message = "일반적인 메시지입니다"
-        has_macro = any(macro in normal_message for macro in TelegramBridge.PROMPT_MACROS.keys())
+        has_macro = any(macro in normal_message for macro in available_prompts)
         assert has_macro is False
 
 
@@ -66,13 +72,20 @@ class TestMacroExpansion:
     
     def test_all_macro_keywords(self):
         """Test all macro keywords are valid Korean"""
-        for macro_key in TelegramBridge.PROMPT_MACROS.keys():
+        bridge = TelegramBridge()
+        available_prompts = bridge.prompts.get_available_prompts()
+        
+        for macro_key in available_prompts:
             assert macro_key.startswith("@"), f"Macro key {macro_key} should start with @"
             assert len(macro_key) > 2, f"Macro key {macro_key} too short"
     
     def test_macro_content_quality(self):
         """Test macro content meets quality standards"""
-        for macro_name, content in TelegramBridge.PROMPT_MACROS.items():
+        bridge = TelegramBridge()
+        available_prompts = bridge.prompts.get_available_prompts()
+        
+        for macro_name in available_prompts:
+            content = bridge.prompts.get_prompt(macro_name)
             # Content should be substantial
             assert len(content) > 100, f"Macro {macro_name} content too short"
             
@@ -83,6 +96,9 @@ class TestMacroExpansion:
     
     def test_macro_expansion_scenarios(self):
         """Test various macro expansion scenarios"""
+        bridge = TelegramBridge()
+        available_prompts = bridge.prompts.get_available_prompts()
+        
         test_cases = [
             "@기획 데이터 분석 파이프라인 구축",
             "@구현 사용자 인증 시스템",
@@ -93,13 +109,14 @@ class TestMacroExpansion:
         for test_case in test_cases:
             # Find matching macro
             found_macro = None
-            for macro_key in TelegramBridge.PROMPT_MACROS.keys():
+            for macro_key in available_prompts:
                 if macro_key in test_case:
                     found_macro = macro_key
                     break
             
             assert found_macro is not None, f"No macro found for: {test_case}"
-            assert len(TelegramBridge.PROMPT_MACROS[found_macro]) > 50
+            content = bridge.prompts.get_prompt(found_macro)
+            assert len(content) > 50
 
 
 class TestSessionManagement:
@@ -148,6 +165,9 @@ class TestErrorHandling:
     
     def test_macro_edge_cases(self):
         """Test macro handling edge cases"""
+        bridge = TelegramBridge()
+        available_prompts = bridge.prompts.get_available_prompts()
+        
         edge_cases = [
             "@기획",  # Macro only, no additional text
             "@ 기획 잘못된 형식",  # Space after @
@@ -159,7 +179,7 @@ class TestErrorHandling:
         for case in edge_cases:
             # Test that macro detection handles edge cases gracefully
             has_valid_macro = False
-            for macro_key in TelegramBridge.PROMPT_MACROS.keys():
+            for macro_key in available_prompts:
                 if macro_key in case and case.count(macro_key) == 1:
                     has_valid_macro = True
                     break
