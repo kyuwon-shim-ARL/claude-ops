@@ -9,6 +9,7 @@ import os
 import logging
 import subprocess
 import re
+import asyncio
 from typing import Optional
 from telegram.ext import Application, MessageHandler, CommandHandler, CallbackQueryHandler, filters
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
@@ -16,6 +17,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, Rep
 from ..config import ClaudeOpsConfig
 from ..prompt_loader import ClaudeDevKitPrompts
 from .project_templates import ProjectTemplateManager
+from ..project_creator import ProjectCreator
 
 logger = logging.getLogger(__name__)
 
@@ -383,7 +385,7 @@ class TelegramBridge:
         await update.message.reply_text(status_message, parse_mode='Markdown')
     
     async def start_claude_command(self, update, context):
-        """Start Claude session with interactive project selection"""
+        """Start Claude session using unified ProjectCreator"""
         user_id = update.effective_user.id
         
         if not self.check_user_authorization(user_id):
@@ -398,107 +400,87 @@ class TelegramBridge:
             await self._show_project_selection(update)
             return
         
-        # Default behavior with arguments
-        target_session = self.config.session_name
-        target_directory = self.config.working_directory
-        project_status = "🔄 기본 세션 재시작"
+        project_name = args[0]
+        project_path = None
         
-        # If arguments provided, create new session
-        if args:
-            project_name = args[0]
-            
-            # Second argument is custom directory path
-            if len(args) > 1:
-                custom_dir = os.path.expanduser(args[1])
-                
-                # Check if parent directory exists and is writable
-                if os.path.exists(custom_dir):
-                    if not os.access(custom_dir, os.W_OK):
-                        await update.message.reply_text(f"❌ 디렉토리에 쓰기 권한이 없습니다: {custom_dir}")
-                        return
-                    target_directory = custom_dir
-                else:
-                    # Try to create parent directory
-                    try:
-                        os.makedirs(custom_dir, exist_ok=True)
-                        target_directory = custom_dir
-                        logger.info(f"Created parent directory: {custom_dir}")
-                    except PermissionError:
-                        await update.message.reply_text(f"❌ 디렉토리 생성 권한이 없습니다: {custom_dir}")
-                        return
-                    except Exception as e:
-                        await update.message.reply_text(f"❌ 디렉토리 생성 실패: {custom_dir}\n오류: {str(e)}")
-                        return
-            else:
-                # Default to ~/projects/<project_name>
-                home_dir = os.path.expanduser("~")
-                target_directory = os.path.join(home_dir, "projects", project_name)
-                
-                # Create directory if it doesn't exist
-                if not os.path.exists(target_directory):
-                    os.makedirs(target_directory, exist_ok=True)
-                    logger.info(f"Created project directory: {target_directory}")
-                    
-                    # Install claude-dev-kit for new projects
-                    await self._install_claude_dev_kit(target_directory, project_name, update)
-                    project_status = "🆕 새 프로젝트 생성"
-                else:
-                    # 기존 프로젝트 감지 메시지 (안전한 플레인 텍스트)
-                    await update.message.reply_text(
-                        f"📂 기존 프로젝트 감지\n\n"
-                        f"📁 경로: {target_directory}\n"
-                        f"🎯 세션: claude_{project_name}\n\n"
-                        f"💡 기존 프로젝트에 연결합니다..."
-                    )
-                    project_status = "📂 기존 프로젝트 연결"
-            
-            # Create session name with claude_ prefix
-            target_session = f"claude_{project_name}"
+        # Second argument is custom directory path
+        if len(args) > 1:
+            custom_dir = os.path.expanduser(args[1])
+            project_path = os.path.join(custom_dir, project_name)
         
-        # Check if target session exists
-        session_exists = os.system(f"tmux has-session -t {target_session}") == 0
-        
-        if not session_exists:
-            logger.info(f"사용자 요청으로 {target_session} 세션을 시작합니다...")
-            # Start tmux session in the target directory
-            os.system(f"cd {target_directory} && tmux new-session -d -s {target_session}")
-            os.system(f"tmux send-keys -t {target_session} -l 'claude'")
-            os.system(f"tmux send-keys -t {target_session} Enter")
-            
-            # Initialize new session for compatibility
-            await self._initialize_new_session(target_session, update)
-            status_msg = f"🚀 {target_session} 세션을 시작했습니다!"
-            
-            # Auto-switch to new session if it's different from current
-            if target_session != self.config.session_name:
-                await self._auto_switch_to_session(target_session, update)
-        else:
-            status_msg = f"✅ {target_session} 세션이 이미 실행 중입니다."
-            
-            # Auto-switch to existing session if it's different from current
-            if target_session != self.config.session_name:
-                await self._auto_switch_to_session(target_session, update)
-        
-        # Use standardized keyboard
-        reply_markup = self.get_main_keyboard()
-        
-        welcome_msg = f"""🤖 Claude-Telegram Bridge
-
-{status_msg}
-{project_status}
-
-📁 작업 디렉토리: {target_directory}
-🎯 세션 이름: {target_session}
-
-제어판을 사용하여 Claude를 제어하세요:"""
-        
-        await update.message.reply_text(
-            welcome_msg,
-            reply_markup=reply_markup
+        # Show project creation progress
+        progress_msg = await update.message.reply_text(
+            f"🚀 프로젝트 생성 중...\n\n"
+            f"📁 프로젝트: {project_name}\n"
+            f"📦 Git 저장소 초기화\n"
+            f"🎯 tmux 세션 생성\n"
+            f"🤖 Claude Code 시작"
         )
         
-        # Auto-activate remote control for better UX
-        await self._auto_activate_remote(update)
+        try:
+            # Use unified ProjectCreator
+            logger.info(f"Creating project using ProjectCreator: {project_name}")
+            result = ProjectCreator.create_project_simple(
+                project_name=project_name,
+                project_path=project_path,
+                initialize_git=True,
+                install_dev_kit=True
+            )
+            
+            if result['status'] == 'success':
+                target_session = result['session_name']
+                target_directory = result['project_path']
+                
+                # Auto-switch to new session if it's different from current
+                if target_session != self.config.session_name:
+                    await self._auto_switch_to_session(target_session, update)
+                
+                # Success status indicators
+                git_status = "📦 Git 저장소 초기화됨" if result.get('git_initialized') else "⚠️ Git 초기화 건너뜀"
+                session_status = "🎯 세션 생성됨" if result.get('session_created') else "✅ 기존 세션 사용"
+                
+                success_msg = f"""✅ 프로젝트 생성 완료!
+
+📁 프로젝트: {project_name}
+📂 경로: {target_directory}
+🎯 세션: {target_session}
+{git_status}
+{session_status}
+
+🎉 모든 기능이 준비되었습니다!"""
+                
+                # Use standardized keyboard
+                reply_markup = self.get_main_keyboard()
+                
+                await progress_msg.edit_text(
+                    success_msg,
+                    reply_markup=reply_markup
+                )
+                
+                # Auto-activate remote control for better UX
+                await self._auto_activate_remote(update)
+                
+            else:
+                error_msg = f"""❌ 프로젝트 생성 실패
+
+오류: {result.get('error', 'Unknown error')}
+
+💡 다시 시도하거나 관리자에게 문의하세요."""
+                
+                await progress_msg.edit_text(error_msg)
+                logger.error(f"Project creation failed: {result}")
+                
+        except Exception as e:
+            error_msg = f"""❌ 프로젝트 생성 중 오류 발생
+
+오류: {str(e)}
+
+💡 다시 시도하거나 관리자에게 문의하세요."""
+            
+            await progress_msg.edit_text(error_msg)
+            logger.error(f"ProjectCreator exception: {e}")
+            import traceback
+            traceback.print_exc()
     
     async def _auto_activate_remote(self, update):
         """Auto-activate prompt macro remote control"""
@@ -543,7 +525,8 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 • `/log [lines]` - 현재 Claude 화면 확인 (기본 50줄, 최대 2000줄)
 • `/log50`, `/log100`, `/log150`, `/log200`, `/log300` - 빠른 로그 조회
 • `/stop` - Claude 작업 중단 (ESC 키 전송)
-• `/erase` - 현재 입력 지우기 (Ctrl+C 전송) 🆕
+• `/erase` - 현재 입력 지우기 (Ctrl+C 전송)
+• `/restart` - Claude 세션 재시작 (대화 연속성 보장) 🆕
 • `/clear` - 화면 정리 (Ctrl+L 전송) 🆕
 • `/sessions` - 활성 세션 목록 보기 및 전환
 • `/remote` - 세션 리모컨 켜기/끄기 (화면 하단 고정)
@@ -553,6 +536,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 • 알림에 Reply + `/log` → 해당 세션의 로그 표시
 • 알림에 Reply + `/session` → 해당 세션으로 바로 전환
 • 알림에 Reply + `/erase` → 해당 세션의 입력 지우기
+• 알림에 Reply + `/restart` → 해당 세션 재시작 (컨텍스트 보존)
 • 알림에 Reply + `/clear` → 해당 세션의 화면 정리
 
 **Claude 슬래시 명령어 전달:**
@@ -839,6 +823,100 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         except Exception as e:
             logger.error(f"입력 지우기 중 오류: {str(e)}")
             await update.message.reply_text("❌ 내부 오류가 발생했습니다.")
+    
+    async def restart_command(self, update, context):
+        """Restart Claude Code session with conversation continuity"""
+        user_id = update.effective_user.id
+        
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+        
+        # Check for reply-based session targeting
+        target_session = self.config.session_name
+        if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
+            original_text = update.message.reply_to_message.text
+            reply_session = self.extract_session_from_message(original_text)
+            if reply_session:
+                session_exists = os.system(f"tmux has-session -t {reply_session}") == 0
+                if session_exists:
+                    target_session = reply_session
+                    logger.info(f"📍 Reply 기반 restart: {target_session}")
+        
+        # Check if target session exists
+        session_exists = os.system(f"tmux has-session -t {target_session}") == 0
+        if not session_exists:
+            await update.message.reply_text(
+                f"❌ 세션 `{target_session}`을 찾을 수 없습니다.\n"
+                f"먼저 `/start` 또는 `/new-project`로 세션을 생성해주세요."
+            )
+            return
+        
+        try:
+            # Show restart progress message
+            session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+            progress_msg = await update.message.reply_text(
+                f"🔄 `{session_display}` 세션 재시작 중...\n\n"
+                f"📝 기존 대화 컨텍스트 보존\n"
+                f"⚙️ 슬래시 커맨드 변경사항 반영\n"
+                f"🔄 Claude Code 재시작 진행..."
+            )
+            
+            # Step 1: Gracefully exit Claude Code
+            logger.info(f"Gracefully exiting Claude Code in session: {target_session}")
+            exit_result = os.system(f"tmux send-keys -t {target_session} 'exit' Enter")
+            
+            if exit_result != 0:
+                logger.warning(f"Exit command failed, trying Ctrl+C: {target_session}")
+                os.system(f"tmux send-keys -t {target_session} C-c")
+            
+            # Step 2: Wait for Claude Code to fully exit
+            await asyncio.sleep(3)
+            
+            # Step 3: Resume with conversation continuity
+            logger.info(f"Resuming Claude Code with --continue: {target_session}")
+            resume_result = os.system(f"tmux send-keys -t {target_session} 'claude --continue' Enter")
+            
+            if resume_result == 0:
+                # Wait a moment for Claude to start
+                await asyncio.sleep(2)
+                
+                # Success message with enhanced features
+                await progress_msg.edit_text(
+                    f"✅ `{session_display}` 세션 재시작 완료!\n\n"
+                    f"🎯 **기존 대화 컨텍스트 복원됨**\n"
+                    f"📄 이전 작업 내역 및 파일 상태 보존\n"
+                    f"⚡ 새로운 슬래시 커맨드 반영\n"
+                    f"🚀 세션 연속성 보장\n\n"
+                    f"💡 이제 변경된 기능을 바로 사용할 수 있습니다!"
+                )
+                logger.info(f"Successfully restarted Claude session with continuity: {target_session}")
+            else:
+                # Fallback to regular restart
+                logger.warning(f"Resume failed, falling back to regular restart: {target_session}")
+                fallback_result = os.system(f"tmux send-keys -t {target_session} 'claude' Enter")
+                
+                if fallback_result == 0:
+                    await progress_msg.edit_text(
+                        f"⚠️ `{session_display}` 세션 재시작 완료 (기본 모드)\n\n"
+                        f"🔄 Claude Code가 새로 시작되었습니다\n"
+                        f"⚡ 슬래시 커맨드 변경사항 반영\n"
+                        f"📝 새로운 세션으로 초기화됨\n\n"
+                        f"💡 기존 대화를 계속하려면 이전 작업 내역을 다시 알려주세요."
+                    )
+                else:
+                    await progress_msg.edit_text(
+                        f"❌ `{session_display}` 세션 재시작 실패\n\n"
+                        f"🔧 수동으로 `claude` 명령어를 입력해주세요\n"
+                        f"또는 `/start`로 새 세션을 생성하세요."
+                    )
+                    
+        except Exception as e:
+            logger.error(f"Claude 재시작 중 오류: {str(e)}")
+            await update.message.reply_text(
+                f"❌ 세션 재시작 중 오류가 발생했습니다.\n"
+                f"수동으로 `claude` 명령어를 실행해주세요."
+            )
     
     async def clear_command(self, update, context):
         """Clear terminal screen (send Ctrl+L)"""
@@ -1247,7 +1325,8 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 • `/log [lines]` - 현재 Claude 화면 확인 (기본 50줄, 최대 2000줄)
 • `/log50`, `/log100`, `/log150`, `/log200`, `/log300` - 빠른 로그 조회
 • `/stop` - Claude 작업 중단 (ESC 키 전송)
-• `/erase` - 현재 입력 지우기 (Ctrl+C 전송) 🆕
+• `/erase` - 현재 입력 지우기 (Ctrl+C 전송)
+• `/restart` - Claude 세션 재시작 (대화 연속성 보장) 🆕
 • `/clear` - 화면 정리 (Ctrl+L 전송) 🆕
 • `/sessions` - 활성 세션 목록 보기 및 전환
 • `/remote` - 세션 리모컨 켜기/끄기 (화면 하단 고정)
@@ -1257,6 +1336,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 • 알림에 Reply + `/log` → 해당 세션의 로그 표시
 • 알림에 Reply + `/session` → 해당 세션으로 바로 전환
 • 알림에 Reply + `/erase` → 해당 세션의 입력 지우기
+• 알림에 Reply + `/restart` → 해당 세션 재시작 (컨텍스트 보존)
 • 알림에 Reply + `/clear` → 해당 세션의 화면 정리
 
 **Claude 명령어:**
@@ -1296,6 +1376,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         # Command handlers (known bot commands)
         self.app.add_handler(CommandHandler("status", self.status_command))
         self.app.add_handler(CommandHandler("start", self.start_claude_command))
+        self.app.add_handler(CommandHandler("new-project", self.start_claude_command))  # Primary command
         self.app.add_handler(CommandHandler("help", self.help_command))
         self.app.add_handler(CommandHandler("log", self.log_command))
         self.app.add_handler(CommandHandler("log50", self.log50_command))
@@ -1305,6 +1386,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         self.app.add_handler(CommandHandler("log300", self.log300_command))
         self.app.add_handler(CommandHandler("stop", self.stop_command))
         self.app.add_handler(CommandHandler("erase", self.erase_command))
+        self.app.add_handler(CommandHandler("restart", self.restart_command))
         self.app.add_handler(CommandHandler("sessions", self.sessions_command))
         self.app.add_handler(CommandHandler("board", self.board_command))
         self.app.add_handler(CommandHandler("remote", self.remote_command))
@@ -1517,22 +1599,25 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 
 📝 **명령어 사용법**:
 ```
-/start 프로젝트명
+/new-project 프로젝트명
 ```
 
 📁 **예시**:
-• `/start my_web_app` → `~/projects/my_web_app`
-• `/start ai_chatbot` → `~/projects/ai_chatbot`
-• `/start data_analysis` → `~/projects/data_analysis`
+• `/new-project my_web_app` → `~/projects/my_web_app`
+• `/new-project ai_chatbot` → `~/projects/ai_chatbot`
+• `/new-project data_analysis` → `~/projects/data_analysis`
 
 🎯 **자동 설치 내용**:
 • 📝 **CLAUDE.md** - 프로젝트 가이드
-• 🚀 **main_app.py** - 에플리케이션 시작점
+• 🚀 **main_app.py** - 애플리케이션 시작점
 • 📁 **src/, docs/, tests/** - 완전한 프로젝트 구조
 • 🔧 **개발 워크플로우 템플릿**
+• 📦 **Git 저장소** - 자동 초기화
+• 🛠️ **claude-dev-kit** - 원격 설치
 
 💬 **지금 바로 시작하세요!**
-`/start 원하는프로젝트명` 입력하면 끝!"""
+`/new-project 원하는프로젝트명` 입력하면 끝!
+⚠️ **호환성**: `/start` 명령어도 계속 사용 가능합니다."""
             
             await query.edit_message_text(
                 guide_msg,
@@ -1559,7 +1644,8 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         
 📂 기존 프로젝트를 열거나 새 프로젝트를 만드세요.
 
-💡 **팁**: 직접 입력하려면 `/start 프로젝트명` 형식으로 입력하세요."""
+💡 **팁**: 직접 입력하려면 `/new-project 프로젝트명` 형식으로 입력하세요.
+⚠️ **호환성**: `/start` 명령어도 계속 사용 가능합니다."""
         
         await update.message.reply_text(
             message,
@@ -1601,10 +1687,11 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                 await query.edit_message_text(
                     "✏️ **수동 입력 모드**\n\n"
                     "다음 형식으로 입력하세요:\n"
-                    "`/start 프로젝트명 [경로]`\n\n"
+                    "`/new-project 프로젝트명 [경로]`\n\n"
                     "예시:\n"
-                    "• `/start my_project`\n"
-                    "• `/start web_app ~/work`",
+                    "• `/new-project my_project`\n"
+                    "• `/new-project web_app ~/work`\n"
+                    "• `/start my_project` (호환성)",
                     parse_mode='Markdown'
                 )
                 
@@ -1746,70 +1833,6 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         
         return False
     
-    async def _install_claude_dev_kit(self, target_directory: str, project_name: str, update) -> bool:
-        """Install claude-dev-kit in new project directory"""
-        try:
-            install_msg = await update.message.reply_text(
-                f"🛠️ Claude Dev Kit 설치 중...\n\n"
-                f"📁 디렉토리: {target_directory}\n"
-                f"💭 프로젝트: {project_name}"
-            )
-            
-            # Execute claude-dev-kit installation script
-            import subprocess
-            
-            # Change to target directory and run installation
-            install_command = (
-                f"cd {target_directory} && "
-                f"curl -sSL https://raw.githubusercontent.com/kyuwon-shim-ARL/claude-dev-kit/main/install.sh | "
-                f"bash -s {project_name} 'Claude-managed project with dev-ops automation'"
-            )
-            
-            result = subprocess.run(
-                install_command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
-            if result.returncode == 0:
-                await install_msg.edit_text(
-                    f"✅ Claude Dev Kit 설치 완료!\n\n"
-                    f"🎯 프로젝트: {project_name}\n"
-                    f"📁 경로: {target_directory}\n\n"
-                    f"📝 생성된 파일들:\n"
-                    f"• CLAUDE.md - 프로젝트 가이드\n"
-                    f"• main_app.py - 애플리케이션 엔트리포인트\n"
-                    f"• src/, docs/, tests/ - 프로젝트 구조\n\n"
-                    f"🚀 Claude 세션을 시작합니다..."
-                )
-                logger.info(f"Successfully installed claude-dev-kit in {target_directory}")
-                return True
-            else:
-                error_output = result.stderr[:200] if result.stderr else "Unknown error"
-                await install_msg.edit_text(
-                    f"⚠️ Claude Dev Kit 설치 실패\n\n"
-                    f"❌ 오류: {error_output}\n\n"
-                    f"💭 기본 프로젝트로 계속합니다..."
-                )
-                logger.warning(f"Failed to install claude-dev-kit: {result.stderr}")
-                return False
-                
-        except subprocess.TimeoutExpired:
-            await install_msg.edit_text(
-                f"⏱️ 설치 시간초과\n\n"
-                f"⚠️ Claude Dev Kit 설치가 30초를 초과했습니다.\n"
-                f"💭 기본 프로젝트로 계속합니다..."
-            )
-            logger.warning("Claude dev-kit installation timed out")
-            return False
-        except Exception as e:
-            # 안전한 에러 메시지 전송 (마크다운 파싱 에러 방지)
-            error_text = f"❌ 예상치 못한 오류\n\n🚫 오류: {str(e)[:100]}\n💭 기본 프로젝트로 계속합니다..."
-            await install_msg.edit_text(error_text)
-            logger.error(f"Unexpected error during claude-dev-kit installation: {str(e)}")
-            return False
     
     async def _restart_monitoring(self):
         """Restart monitoring system for new session"""

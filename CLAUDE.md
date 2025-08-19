@@ -40,12 +40,14 @@ LOG_LEVEL=INFO
 ### Telegram Bot Commands (사용 빈도순)
 
 - `/sessions` - 🔄 활성 세션 목록 보기 및 전환
+- `/new-project` - 🆕 새 Claude 프로젝트 생성 (claude-dev-kit 설치)
 - `/board` - 🎯 세션 보드 (그리드 뷰)  
+- `/restart` - 🔄 Claude 세션 재시작 (대화 연속성 보장)
 - `/stop` - ⛔ Claude 작업 중단 (ESC 키 전송)
 - `/erase` - 🧹 현재 입력 지우기 (Ctrl+C 전송)
 - `/status` - 📊 봇 및 tmux 세션 상태 확인
 - `/log [줄수]` - 📺 Claude 화면 내용 보기 (기본: 50줄)
-- `/start` - 🚀 Claude 세션 시작
+- `/start` - 🚀 Claude 세션 시작 (/new-project 호환)
 - `/help` - ❓ 도움말 보기
 
 ### Workflow Macros
@@ -58,17 +60,23 @@ LOG_LEVEL=INFO
 
 ### Usage Patterns
 
-1. **Session Management**:
+1. **Project Creation**:
+   ```
+   /new-project my-app → claude-dev-kit installation → Git setup → tmux session
+   CLI: claude-ops new-project my-app (identical functionality)
+   ```
+
+2. **Session Management**:
    ```
    /sessions → select session → work in Claude → monitor via Telegram
    ```
 
-2. **Remote Control**:
+3. **Remote Control**:
    ```
    Reply to session message → send commands directly to that session
    ```
 
-3. **Workflow Automation**:
+4. **Workflow Automation**:
    ```
    /remote → @기획 → type additional context → send → auto-expands to full prompt
    ```
@@ -92,6 +100,7 @@ LOG_LEVEL=INFO
 
 - **`claude_ops/telegram/bot.py`** - Main Telegram bot implementation
 - **`claude_ops/session_manager.py`** - tmux session management
+- **`claude_ops/project_creator.py`** - Unified project creation module
 - **`claude_ops/hook_manager.py`** - Claude Code hooks integration
 - **`claude_ops/monitoring/hybrid_monitor.py`** - Hybrid monitoring system
 - **`claude_ops/utils/session_state.py`** - Session state detection
@@ -126,12 +135,19 @@ LOG_LEVEL=INFO
 
 ## Key Features
 
-### 1. Reply-Based Session Targeting
+### 1. Unified Project Creation (NEW!)
+- **CLI & Telegram Identical**: `claude-ops new-project` ↔ `/new-project`
+- **Remote claude-dev-kit**: Automatic installation from trusted repository
+- **Complete Setup**: Git repo, comprehensive .gitignore, project structure
+- **Reliability**: Fallback to local structure if remote installation fails
+- **Consistency**: Both methods produce identical results
+
+### 2. Reply-Based Session Targeting
 - Reply to any session message to send commands directly to that session
 - Automatic session detection from message context
 - No need to manually switch sessions
 
-### 2. Macro Expansion System
+### 3. Macro Expansion System
 - Type `@기획` and additional text
 - System automatically expands to full structured prompt
 - Supports combined workflows: `@기획 today we need to...`
@@ -147,7 +163,14 @@ LOG_LEVEL=INFO
 - Detects when Claude is waiting for input vs actively working
 - Smart notifications only when action needed
 
-### 5. Multi-Session Management
+### 5. Session Continuity & Restart (NEW!)
+- **`/restart`**: Graceful Claude Code restart with conversation preservation
+- **Resume Technology**: Uses `claude --continue` to maintain full context
+- **Fallback Safety**: Automatic fallback to regular restart if resume fails
+- **Reply-Based**: Target specific sessions by replying to session messages
+- **Perfect for**: Applying slash command changes without losing work context
+
+### 6. Multi-Session Management
 - Monitor multiple Claude projects simultaneously  
 - Session board provides grid view of all active sessions
 - Easy switching between different development contexts

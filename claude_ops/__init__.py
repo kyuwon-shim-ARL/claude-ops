@@ -29,6 +29,7 @@ from .telegram import TelegramBridge, SmartNotifier
 from .monitoring import MultiSessionMonitor, HybridMonitor
 from .config import ClaudeOpsConfig
 from .session_manager import SessionManager, session_manager
+from .project_creator import ProjectCreator
 
 __all__ = [
     "TelegramBridge",
@@ -38,6 +39,7 @@ __all__ = [
     "ClaudeOpsConfig",
     "SessionManager",
     "session_manager",
+    "ProjectCreator",
     "__version__",
     "__author__",
     "__description__",

@@ -2,8 +2,8 @@
   "hook_system": {},
   "polling_system": {},
   "comparison": {
-    "timestamp": "2025-08-19T22:29:42.770825",
-    "comparison_period": "0:00:00.004884",
+    "timestamp": "2025-08-19T23:10:28.717881",
+    "comparison_period": "0:00:00.004754",
     "response_time": {
       "hook_avg_ms": 0,
       "polling_avg_ms": 0,
@@ -45,5 +45,5 @@
       "polling_uptime": "Independent process"
     }
   },
-  "last_updated": "2025-08-19T22:29:42.770848"
+  "last_updated": "2025-08-19T23:10:28.717900"
 }
