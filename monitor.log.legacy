@@ -1,0 +1,27 @@
+<frozen runpy>:128: RuntimeWarning: 'claude_ops.telegram.monitor' found in sys.modules after import of package 'claude_ops.telegram', but prior to execution of 'claude_ops.telegram.monitor'; this may result in unpredictable behaviour
+2025-08-19 07:57:06,124 - __main__ - INFO - Claude 상태 모니터링 시작 (세션: claude_claude-ops)
+2025-08-19 07:57:06,124 - __main__ - INFO - 체크 간격: 3초
+2025-08-19 09:04:16,418 - __main__ - INFO - 상태 변화: working → idle
+2025-08-19 09:04:16,418 - __main__ - INFO - ✅ Claude 작업 완료 감지 - 알림 전송
+2025-08-19 09:04:17,501 - claude_ops.telegram.notifier - INFO - Telegram notification sent successfully
+2025-08-19 09:21:02,112 - __main__ - INFO - 상태 변화: idle → working
+2025-08-19 09:24:35,691 - __main__ - INFO - 상태 변화: working → idle
+2025-08-19 09:24:35,691 - __main__ - INFO - ✅ Claude 작업 완료 감지 - 알림 전송
+2025-08-19 09:24:36,737 - claude_ops.telegram.notifier - INFO - Telegram notification sent successfully
+2025-08-19 09:29:40,566 - __main__ - INFO - 상태 변화: idle → working
+2025-08-19 09:29:43,573 - __main__ - INFO - 상태 변화: working → idle
+2025-08-19 09:29:43,573 - __main__ - INFO - ✅ Claude 작업 완료 감지 - 알림 전송
+2025-08-19 09:29:44,561 - claude_ops.telegram.notifier - INFO - Telegram notification sent successfully
+2025-08-19 10:06:53,130 - __main__ - INFO - 상태 변화: idle → working
+2025-08-19 10:06:56,138 - __main__ - INFO - 상태 변화: working → idle
+2025-08-19 10:06:56,138 - __main__ - INFO - ✅ Claude 작업 완료 감지 - 알림 전송
+2025-08-19 10:06:57,158 - claude_ops.telegram.notifier - INFO - Telegram notification sent successfully
+2025-08-19 10:29:30,442 - __main__ - INFO - 상태 변화: idle → working
+2025-08-19 10:29:33,449 - __main__ - INFO - 상태 변화: working → idle
+2025-08-19 10:29:33,449 - __main__ - INFO - ✅ Claude 작업 완료 감지 - 알림 전송
+2025-08-19 10:29:34,448 - claude_ops.telegram.notifier - INFO - Telegram notification sent successfully
+2025-08-19 10:31:40,759 - __main__ - INFO - 상태 변화: idle → working
+2025-08-19 10:32:25,870 - __main__ - INFO - 상태 변화: working → idle
+2025-08-19 10:32:25,870 - __main__ - INFO - ✅ Claude 작업 완료 감지 - 알림 전송
+2025-08-19 10:32:26,867 - claude_ops.telegram.notifier - INFO - Telegram notification sent successfully
+2025-08-19 10:32:29,874 - __main__ - INFO - 상태 변화: idle → working

@@ -5,7 +5,7 @@ Provides Telegram bot integration for Claude Code monitoring and control.
 """
 
 from .bot import TelegramBridge
-from .monitor import TelegramMonitor  
+from ..monitoring.monitor import TelegramMonitor  
 from .notifier import SmartNotifier
 
 __all__ = [

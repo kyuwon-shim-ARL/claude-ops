@@ -15,6 +15,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, Rep
 
 from ..config import ClaudeOpsConfig
 from ..prompt_loader import ClaudeDevKitPrompts
+from .project_templates import ProjectTemplateManager
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,9 @@ class TelegramBridge:
         # Initialize claude-dev-kit prompt loader
         logger.info("🚀 Initializing claude-dev-kit prompt loader...")
         self.prompts = ClaudeDevKitPrompts()
+        
+        # Initialize project template manager
+        self.project_manager = ProjectTemplateManager()
         
     def validate_input(self, user_input: str) -> tuple[bool, str]:
         """Validate and filter dangerous commands"""
@@ -379,7 +383,7 @@ class TelegramBridge:
         await update.message.reply_text(status_message, parse_mode='Markdown')
     
     async def start_claude_command(self, update, context):
-        """Start Claude session with auto menu display"""
+        """Start Claude session with interactive project selection"""
         user_id = update.effective_user.id
         
         if not self.check_user_authorization(user_id):
@@ -389,7 +393,12 @@ class TelegramBridge:
         # Parse command arguments for project path support
         args = context.args if context.args else []
         
-        # Default behavior - use current session
+        # If no arguments, show interactive project selection
+        if not args:
+            await self._show_project_selection(update)
+            return
+        
+        # Default behavior with arguments
         target_session = self.config.session_name
         target_directory = self.config.working_directory
         project_status = "🔄 기본 세션 재시작"
@@ -401,11 +410,25 @@ class TelegramBridge:
             # Second argument is custom directory path
             if len(args) > 1:
                 custom_dir = os.path.expanduser(args[1])
+                
+                # Check if parent directory exists and is writable
                 if os.path.exists(custom_dir):
+                    if not os.access(custom_dir, os.W_OK):
+                        await update.message.reply_text(f"❌ 디렉토리에 쓰기 권한이 없습니다: {custom_dir}")
+                        return
                     target_directory = custom_dir
                 else:
-                    await update.message.reply_text(f"❌ 디렉토리를 찾을 수 없습니다: {custom_dir}")
-                    return
+                    # Try to create parent directory
+                    try:
+                        os.makedirs(custom_dir, exist_ok=True)
+                        target_directory = custom_dir
+                        logger.info(f"Created parent directory: {custom_dir}")
+                    except PermissionError:
+                        await update.message.reply_text(f"❌ 디렉토리 생성 권한이 없습니다: {custom_dir}")
+                        return
+                    except Exception as e:
+                        await update.message.reply_text(f"❌ 디렉토리 생성 실패: {custom_dir}\n오류: {str(e)}")
+                        return
             else:
                 # Default to ~/projects/<project_name>
                 home_dir = os.path.expanduser("~")
@@ -1128,6 +1151,8 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             line_count = int(parts[0].split("_")[-1])  # Extract number from quick_log_150
             session_name = parts[1]
             await self._quick_log_callback(query, context, line_count, session_name)
+        elif callback_data.startswith("project_"):
+            await self._handle_project_callback(query, context)
         elif callback_data == "back_to_menu":
             await self._back_to_menu_callback(query, context)
         elif callback_data == "back_to_sessions":
@@ -1525,6 +1550,71 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
     async def _back_to_menu_callback(self, query, context):
         """Back to one-click session menu (no longer needed - redirect to session grid)"""
         await self._show_session_action_grid(query.edit_message_text, query)
+    
+    async def _show_project_selection(self, update):
+        """Show interactive project selection menu"""
+        keyboard = self.project_manager.get_project_selection_keyboard()
+        
+        message = """🚀 **프로젝트 선택**
+        
+📂 기존 프로젝트를 열거나 새 프로젝트를 만드세요.
+
+💡 **팁**: 직접 입력하려면 `/start 프로젝트명` 형식으로 입력하세요."""
+        
+        await update.message.reply_text(
+            message,
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+    
+    async def _handle_project_callback(self, query, context):
+        """Handle project-related callbacks"""
+        callback_data = query.data
+        
+        try:
+            if callback_data.startswith("project_open_"):
+                # Open existing project
+                project_name = callback_data.replace("project_open_", "")
+                await query.edit_message_text(f"🔄 프로젝트 열기: {project_name}...")
+                
+                # Use existing start command logic
+                context.args = [project_name]
+                await self.start_claude_command(query.message, context)
+                
+            elif callback_data.startswith("project_template_"):
+                # Show template selection
+                template_name = callback_data.replace("project_template_", "")
+                
+                # Store template in context for later use
+                context.user_data['selected_template'] = template_name
+                
+                prompt = self.project_manager.get_project_name_prompt(template_name)
+                await query.edit_message_text(
+                    prompt + "\n\n💬 프로젝트 이름을 입력하세요:",
+                    parse_mode='Markdown'
+                )
+                
+                # Set flag to expect project name input
+                context.user_data['awaiting_project_name'] = True
+                
+            elif callback_data == "project_manual_input":
+                await query.edit_message_text(
+                    "✏️ **수동 입력 모드**\n\n"
+                    "다음 형식으로 입력하세요:\n"
+                    "`/start 프로젝트명 [경로]`\n\n"
+                    "예시:\n"
+                    "• `/start my_project`\n"
+                    "• `/start web_app ~/work`",
+                    parse_mode='Markdown'
+                )
+                
+            elif callback_data in ["project_recent_header", "project_new_header"]:
+                # These are just headers, don't do anything
+                await query.answer()
+                
+        except Exception as e:
+            logger.error(f"Project callback error: {e}")
+            await query.edit_message_text("❌ 프로젝트 처리 중 오류가 발생했습니다.")
     
     async def _initialize_new_session(self, session_name: str, update) -> bool:
         """Initialize new Claude session with smart detection and setup"""

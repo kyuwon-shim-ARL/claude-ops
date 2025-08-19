@@ -1,0 +1,13 @@
+{
+  "mode": "hybrid",
+  "primary": "hooks",
+  "fallback": "polling",
+  "fallback_trigger_delay": 10,
+  "polling_interval": 5,
+  "hook_timeout": 30,
+  "enabled_hooks": [
+    "MainAgentStop",
+    "SubagentStop"
+  ],
+  "fallback_sessions": "all"
+}

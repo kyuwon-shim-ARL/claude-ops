@@ -25,13 +25,15 @@ __description__ = "Telegram-Claude Bridge System"
 __url__ = "https://github.com/kyuwon-shim-ARL/claude-ops"
 
 # Import main components
-from .telegram import TelegramBridge, TelegramMonitor, SmartNotifier
+from .telegram import TelegramBridge, SmartNotifier
+from .monitoring import MultiSessionMonitor, HybridMonitor
 from .config import ClaudeOpsConfig
 from .session_manager import SessionManager, session_manager
 
 __all__ = [
     "TelegramBridge",
-    "TelegramMonitor", 
+    "MultiSessionMonitor",
+    "HybridMonitor", 
     "SmartNotifier",
     "ClaudeOpsConfig",
     "SessionManager",

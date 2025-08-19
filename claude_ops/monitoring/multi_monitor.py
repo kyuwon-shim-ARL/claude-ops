@@ -16,9 +16,9 @@ from pathlib import Path
 from ..config import ClaudeOpsConfig
 from ..session_manager import session_manager
 from ..utils.session_state import SessionStateAnalyzer, SessionState
-from .notifier import SmartNotifier
-from .keyboard_handler import keyboard_handler
-from .message_queue import message_queue
+from ..telegram.notifier import SmartNotifier
+from ..telegram.keyboard_handler import keyboard_handler
+from ..telegram.message_queue import message_queue
 
 logger = logging.getLogger(__name__)
 

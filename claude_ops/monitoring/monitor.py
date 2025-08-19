@@ -10,7 +10,7 @@ import logging
 import subprocess
 from typing import Optional
 from ..config import ClaudeOpsConfig
-from .notifier import SmartNotifier
+from ..telegram.notifier import SmartNotifier
 
 logger = logging.getLogger(__name__)
 
