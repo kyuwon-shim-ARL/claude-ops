@@ -369,7 +369,7 @@ class MultiSessionMonitor:
 def main():
     """Main entry point for multi-session monitoring with Telegram bot"""
     import threading
-    from .bot import TelegramBridge
+    from ..telegram.bot import TelegramBridge
     
     try:
         config = ClaudeOpsConfig()

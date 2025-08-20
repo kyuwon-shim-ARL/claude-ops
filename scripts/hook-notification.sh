@@ -22,7 +22,15 @@ HOOK_DATA=$(timeout 5s cat 2>/dev/null || echo "No hook data")
 echo "Hook data: $HOOK_DATA" >> "$CLAUDE_OPS_DIR/hook.log"
 
 # Extract session information from environment or hook data
-SESSION_NAME="${CLAUDE_SESSION_NAME:-claude_unknown}"
+# Try multiple methods to get session name
+if [ -n "$CLAUDE_SESSION_NAME" ]; then
+    SESSION_NAME="$CLAUDE_SESSION_NAME"
+elif [ -n "$TMUX" ]; then
+    # Extract session name from tmux environment
+    SESSION_NAME=$(tmux display-message -p '#S' 2>/dev/null || echo "claude_unknown")
+else
+    SESSION_NAME="claude_unknown"
+fi
 WORKING_DIR="${PWD:-unknown}"
 
 # Load environment variables for Telegram
@@ -49,29 +57,25 @@ import sys
 sys.path.insert(0, '.')
 from claude_ops.telegram.notifier import SmartNotifier
 from claude_ops.config import ClaudeOpsConfig
-from claude_ops.session_manager import session_manager
+from claude_ops.utils.session_state import is_session_working, get_session_working_info
 
 try:
-    # Get current active session or use provided session name
-    current_session = session_manager.get_active_session()
-    if not current_session or current_session == 'claude_claude-ops':
-        # Try to detect which session might have completed work
-        all_sessions = session_manager.get_all_claude_sessions()
-        if all_sessions:
-            current_session = all_sessions[0]  # Use first available session
+    # Check if session is actually idle (completed work)
+    session_name = '$SESSION_NAME'
+    is_working = is_session_working(session_name)
     
-    # Temporarily switch to detected session for notification context
-    if current_session:
-        session_manager.switch_session(current_session)
-    
-    config = ClaudeOpsConfig()
-    notifier = SmartNotifier(config)
-    success = notifier.send_work_completion_notification()
-    
-    if success:
-        print(f'Hook notification sent for session: {current_session}')
+    # Only send notification if session has transitioned from working to idle
+    if not is_working:
+        config = ClaudeOpsConfig()
+        notifier = SmartNotifier(config)
+        success = notifier.send_work_completion_notification()
+        
+        if success:
+            print(f'Hook notification sent for session: {session_name} (work completed)')
+        else:
+            print(f'Hook notification skipped for session: {session_name} (no work to report)')
     else:
-        print(f'Hook notification skipped for session: {current_session}')
+        print(f'Hook notification skipped for session: {session_name} (still working)')
         
 except Exception as e:
     print(f'Hook notification error: {e}')
