@@ -16,7 +16,7 @@ Claude-Ops is a Telegram bot that bridges Claude Code sessions with Telegram for
 
 - **Session Management**: Monitor multiple Claude Code sessions via tmux
 - **Remote Control**: Send commands and prompts to specific sessions via Telegram
-- **Workflow Macros**: Pre-defined prompts for structured development workflows (@기획, @구현, @안정화, @배포)
+- **Workflow Commands**: Structured development workflow as slash command (/fullcycle)
 - **Smart Notifications**: Automatic alerts when Claude sessions complete tasks or encounter issues
 
 ## Environment Configuration
@@ -50,13 +50,14 @@ LOG_LEVEL=INFO
 - `/start` - 🚀 Claude 세션 시작 (/new-project 호환)
 - `/help` - ❓ 도움말 보기
 
-### Workflow Macros
+### Workflow Commands
 
-- `/remote` - 프롬프트 매크로 리모컨 활성화
-- `@기획` - 구조적 탐색 및 계획 수립 프롬프트
-- `@구현` - DRY 원칙 기반 체계적 구현 프롬프트  
-- `@안정화` - 구조적 지속가능성 검증 프롬프트
-- `@배포` - 최종 검증 및 배포 프롬프트
+- `/fullcycle` - 🔄 전체 개발 워크플로우 실행
+  - 기획: 구조적 탐색 및 계획 수립
+  - 구현: DRY 원칙 기반 체계적 구현  
+  - 안정화: 구조적 지속가능성 검증
+  - 배포: 최종 검증 및 배포
+- `/remote` - 워크플로우 명령어 안내
 
 ### Usage Patterns
 
@@ -78,7 +79,7 @@ LOG_LEVEL=INFO
 
 4. **Workflow Automation**:
    ```
-   /remote → @기획 → type additional context → send → auto-expands to full prompt
+   /fullcycle → complete development workflow sent to Claude session
    ```
 
 ## Architecture
@@ -147,10 +148,10 @@ LOG_LEVEL=INFO
 - Automatic session detection from message context
 - No need to manually switch sessions
 
-### 3. Macro Expansion System
-- Type `@기획` and additional text
-- System automatically expands to full structured prompt
-- Supports combined workflows: `@기획 today we need to...`
+### 3. Workflow Command System
+- Use `/fullcycle` slash command for complete development workflow
+- Integrated 4-stage process: planning → implementation → stabilization → deployment
+- Reply-based session targeting for multi-project workflows
 
 ### 3. Hybrid Monitoring System (NEW!)
 - **Primary**: Claude Code built-in hooks (immediate, 0ms response)

@@ -1,0 +1,36 @@
+# Build artifacts
+dist/
+build/
+*.egg-info/
+__pycache__/
+*.pyc
+
+# Dependencies
+node_modules/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Logs
+*.log
+
+# Environment
+.env
+
+# Testing
+.coverage
+.pytest_cache/
+
+# Backups
+.backups/
+
+# Temporary
+*.tmp
+*.bak
+tmp/

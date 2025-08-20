@@ -15,7 +15,6 @@ from telegram.ext import Application, MessageHandler, CommandHandler, CallbackQu
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
 
 from ..config import ClaudeOpsConfig
-from ..prompt_loader import ClaudeDevKitPrompts
 from .project_templates import ProjectTemplateManager
 from ..project_creator import ProjectCreator
 
@@ -25,13 +24,7 @@ logger = logging.getLogger(__name__)
 class TelegramBridge:
     """Claude Telegram Bot with claude-dev-kit prompt integration"""
     
-    # Workflow shortcuts for combined prompts
-    WORKFLOW_SHORTCUTS = {
-        "@전체사이클": "기획&구현&안정화&배포",
-        "@개발완료": "구현&안정화",
-        "@품질보증": "안정화&배포", 
-        "@기획구현": "기획&구현"
-    }
+    # Legacy workflow shortcuts removed - use /fullcycle command instead
     
     def __init__(self, config: Optional[ClaudeOpsConfig] = None):
         """
@@ -42,10 +35,6 @@ class TelegramBridge:
         """
         self.config = config or ClaudeOpsConfig()
         self.app: Optional[Application] = None
-        
-        # Initialize claude-dev-kit prompt loader
-        logger.info("🚀 Initializing claude-dev-kit prompt loader...")
-        self.prompts = ClaudeDevKitPrompts()
         
         # Initialize project template manager
         self.project_manager = ProjectTemplateManager()
@@ -189,50 +178,6 @@ class TelegramBridge:
         
         return None, False
     
-    def expand_macro_keywords(self, text: str) -> str:
-        """Expand @keywords and combined workflows using claude-dev-kit prompts"""
-        expanded_text = text
-        
-        # First, expand workflow shortcuts
-        for shortcut, expansion in self.WORKFLOW_SHORTCUTS.items():
-            if shortcut in expanded_text:
-                expanded_text = expanded_text.replace(shortcut, expansion)
-                logger.info(f"🔄 Expanded workflow shortcut: {shortcut} → {expansion}")
-        
-        # Handle combined workflows (e.g., "기획&구현&안정화&배포")
-        combined_pattern = r'\b([가-힣]+(?:&[가-힣]+)+)\b'
-        combined_matches = re.findall(combined_pattern, expanded_text)
-        
-        for combined_match in combined_matches:
-            keywords = combined_match.split("&")
-            combined_prompt = ""
-            
-            for keyword in keywords:
-                macro_key = f"@{keyword.strip()}"
-                prompt = self.prompts.get_prompt(macro_key)
-                if not prompt.startswith("프롬프트"):  # Check if prompt was found
-                    combined_prompt += prompt + "\n\n" + "="*50 + "\n\n"
-            
-            if combined_prompt:
-                # Remove the last separator
-                combined_prompt = combined_prompt.rstrip("\n\n" + "="*50 + "\n\n")
-                expanded_text = expanded_text.replace(combined_match, combined_prompt)
-                logger.info(f"🎯 Expanded combined workflow: {combined_match}")
-        
-        # Handle individual @keywords
-        macro_pattern = r'@([가-힣]+(?:[가-힣]+)*)'
-        def replace_macro(match):
-            keyword = match.group(1)
-            macro_key = f"@{keyword}"
-            prompt = self.prompts.get_prompt(macro_key)
-            if not prompt.startswith("프롬프트"):  # Check if prompt was found
-                logger.info(f"🎯 Expanded macro: {macro_key}")
-                return prompt
-            return match.group(0)  # Return original if not found
-        
-        expanded_text = re.sub(macro_pattern, replace_macro, expanded_text)
-        
-        return expanded_text
 
     async def forward_to_claude(self, update, context):
         """Forward user input to Claude tmux session with reply-based targeting"""
@@ -247,15 +192,7 @@ class TelegramBridge:
             await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
             return
         
-        # Expand @keywords to full prompts
-        expanded_input = self.expand_macro_keywords(user_input)
-        if expanded_input != user_input:
-            logger.info(f"🎯 매크로 확장됨: {user_input[:50]}... → 전체 프롬프트")
-            user_input = expanded_input
         
-        # Handle Reply Keyboard remote control buttons
-        if await self._handle_remote_button(update, user_input):
-            return
         
         # Handle slash commands that should be sent to Claude
         if user_input.startswith('/') and not user_input.startswith('//'):
@@ -400,7 +337,38 @@ class TelegramBridge:
             await self._show_project_selection(update)
             return
         
-        project_name = args[0]
+        # Check for help flags and invalid project names
+        first_arg = args[0]
+        if first_arg in ['--help', '-h', 'help']:
+            await update.message.reply_text(
+                "🚀 **새 프로젝트 생성 도움말**\n\n"
+                "📝 **사용법:**\n"
+                "• `/new_project` - 대화형 프로젝트 선택\n"
+                "• `/new_project [프로젝트명]` - 간단한 프로젝트 생성\n"
+                "• `/new_project [프로젝트명] [경로]` - 사용자 지정 경로에 생성\n\n"
+                "📁 **예시:**\n"
+                "• `/new_project my-app` - ~/my-app 생성\n"
+                "• `/new_project api-server ~/work` - ~/work/api-server 생성\n\n"
+                "💡 **프로젝트명 규칙:**\n"
+                "• 영문, 숫자, 하이픈(-), 언더스코어(_)만 사용\n"
+                "• 공백이나 특수문자는 사용할 수 없습니다"
+            )
+            return
+        
+        # Validate project name
+        import re
+        if not re.match(r'^[a-zA-Z0-9_-]+$', first_arg):
+            await update.message.reply_text(
+                f"❌ **잘못된 프로젝트명**: `{first_arg}`\n\n"
+                "📋 **프로젝트명 규칙:**\n"
+                "• 영문, 숫자, 하이픈(-), 언더스코어(_)만 사용 가능\n"
+                "• 공백이나 특수문자는 사용할 수 없습니다\n\n"
+                "💡 **올바른 예시:** `my-app`, `api_server`, `webapp2024`\n"
+                "❌ **잘못된 예시:** `my app`, `--help`, `@project`"
+            )
+            return
+            
+        project_name = first_arg
         project_path = None
         
         # Second argument is custom directory path
@@ -483,22 +451,20 @@ class TelegramBridge:
             traceback.print_exc()
     
     async def _auto_activate_remote(self, update):
-        """Auto-activate prompt macro remote control"""
+        """Auto-activate workflow remote control"""
         try:
-            reply_markup = self.get_prompt_macro_keyboard()
             await update.message.reply_text(
-                "🎛️ 프롬프트 매크로 리모컨이 활성화되었습니다.\n\n"
-                "🔗 통합 워크플로우 (우선순위):\n"
-                "• 전체: 기획&구현&안정화&배포\n"
-                "• 개발: 기획&구현&안정화\n"
-                "• 마무리: 안정화&배포\n"
-                "• 실행: 구현&안정화&배포\n\n"
-                "⚡ 개별 매크로:\n"
-                "• @기획: 구조적 탐색 및 계획 수립\n"
-                "• @구현: DRY 원칙 기반 체계적 구현\n"
-                "• @안정화: 구조적 지속가능성 검증\n"
-                "• @배포: 최종 검증 및 배포",
-                reply_markup=reply_markup
+                "🎛️ 워크플로우 명령어가 준비되었습니다.\n\n"
+                "🚀 **새로운 슬래시 커맨드:**\n"
+                "• `/fullcycle` - 전체 개발 워크플로우 실행\n\n"
+                "💡 **사용법:**\n"
+                "1. `/fullcycle` 명령어 입력\n"
+                "2. 또는 세션 메시지에 Reply로 `/fullcycle` 전송\n\n"
+                "📝 **포함 단계:**\n"
+                "• 기획: 구조적 탐색 및 계획 수립\n"
+                "• 구현: DRY 원칙 기반 체계적 구현\n"
+                "• 안정화: 구조적 지속가능성 검증\n"
+                "• 배포: 최종 검증 및 배포"
             )
         except Exception as e:
             logger.error(f"Auto remote activation error: {str(e)}")
@@ -512,50 +478,33 @@ class TelegramBridge:
             await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
             return
             
-        help_text = """
-🤖 **Telegram-Claude Bridge 봇**
+        help_text = """🤖 Claude-Ops Telegram Bot
 
-Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
+📝 주요 명령어:
+• /new_project - 새 프로젝트 생성
+• /sessions - 세션 목록 보기
+• /log - Claude 화면 확인
+• /status - 봇 상태 확인
 
-**텔레그램 봇 명령어:**
-• `/start` - 현재 세션 시작/재시작
-• `/start project_name` - ~/projects/project_name에서 claude_project_name 세션 시작
-• `/start project_name /custom/path` - 지정 경로에서 claude_project_name 세션 시작
-• `/status` - 봇 및 tmux 세션 상태 확인
-• `/log [lines]` - 현재 Claude 화면 확인 (기본 50줄, 최대 2000줄)
-• `/log50`, `/log100`, `/log150`, `/log200`, `/log300` - 빠른 로그 조회
-• `/stop` - Claude 작업 중단 (ESC 키 전송)
-• `/erase` - 현재 입력 지우기 (Ctrl+C 전송)
-• `/restart` - Claude 세션 재시작 (대화 연속성 보장) 🆕
-• `/clear` - 화면 정리 (Ctrl+L 전송) 🆕
-• `/sessions` - 활성 세션 목록 보기 및 전환
-• `/remote` - 세션 리모컨 켜기/끄기 (화면 하단 고정)
-• `/help` - 이 도움말 보기
+🚀 워크플로우 명령어:
+• /fullcycle - 전체 개발 워크플로우
+• /plan - 기획 단계
+• /implement - 구현 단계
+• /stabilize - 안정화 단계
+• /deploy - 배포 단계
 
-**Reply 기반 세션 제어:** 🆕
-• 알림에 Reply + `/log` → 해당 세션의 로그 표시
-• 알림에 Reply + `/session` → 해당 세션으로 바로 전환
-• 알림에 Reply + `/erase` → 해당 세션의 입력 지우기
-• 알림에 Reply + `/restart` → 해당 세션 재시작 (컨텍스트 보존)
-• 알림에 Reply + `/clear` → 해당 세션의 화면 정리
+🎮 세션 제어:
+• /stop - 작업 중단
+• /restart - 세션 재시작
+• /erase - 입력 지우기
 
-**Claude 슬래시 명령어 전달:**
-• `//export` - Claude에게 /export 명령어 바로 전달
-• `//task-start TID-xxx` - Claude에게 /task-start 명령어 바로 전달
-• `/export` → 확인 메시지 → Reply로 `yes` - 단계별 안전 전송
+💡 빠른 시작:
+1. /new_project my_app 으로 프로젝트 생성
+2. 텍스트 메시지로 Claude와 대화
+3. /log 로 Claude 화면 확인
+4. /fullcycle 로 개발 워크플로우 실행
 
-**사용법:**
-• 일반 텍스트 메시지를 보내면 Claude Code에 전달됩니다
-• 알림 메시지에 Reply하면 해당 세션으로 정확히 전송됩니다
-• Claude 작업 완료 시 자동 알림을 받습니다
-• 위험한 명령어는 자동으로 차단됩니다
-• 최대 500자까지 입력 가능합니다
-
-**보안:**
-• 인증된 사용자만 사용 가능
-• 입력값 검증 및 필터링 적용
-• 모든 활동이 로그에 기록됩니다
-        """
+❓ 메시지에 Reply하면 해당 세션으로 명령 전송"""
         
         await update.message.reply_text(help_text, parse_mode='Markdown')
     
@@ -848,7 +797,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         if not session_exists:
             await update.message.reply_text(
                 f"❌ 세션 `{target_session}`을 찾을 수 없습니다.\n"
-                f"먼저 `/start` 또는 `/new-project`로 세션을 생성해주세요."
+                f"먼저 `/new_project`로 세션을 생성해주세요."
             )
             return
         
@@ -908,7 +857,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                     await progress_msg.edit_text(
                         f"❌ `{session_display}` 세션 재시작 실패\n\n"
                         f"🔧 수동으로 `claude` 명령어를 입력해주세요\n"
-                        f"또는 `/start`로 새 세션을 생성하세요."
+                        f"또는 `/new_project`로 새 세션을 생성하세요."
                     )
                     
         except Exception as e:
@@ -964,7 +913,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         await self._show_session_action_grid(update.message.reply_text, None)
     
     async def remote_command(self, update, context):
-        """Toggle prompt macro remote control keyboard"""
+        """Show workflow command information"""
         user_id = update.effective_user.id
         
         if not self.check_user_authorization(user_id):
@@ -975,31 +924,20 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         # For simplicity, we'll toggle: if /remote, activate; if /remote off, deactivate
         args = context.args if context.args else []
         
-        if args and args[0].lower() in ['off', 'hide', '끄기']:
-            # Deactivate remote control
-            await update.message.reply_text(
-                "🎛️ 프롬프트 매크로 리모컨이 비활성화되었습니다.",
-                reply_markup=ReplyKeyboardRemove()
-            )
-        else:
-            # Activate remote control
-            remote_keyboard = self.get_prompt_macro_keyboard()
-            
-            await update.message.reply_text(
-                "🎛️ 프롬프트 매크로 리모컨 활성화!\n\n"
-                "🔗 통합 워크플로우 (우선순위):\n"
-                "• 전체: 기획&구현&안정화&배포\n"
-                "• 개발: 기획&구현&안정화\n"
-                "• 마무리: 안정화&배포\n"
-                "• 실행: 구현&안정화&배포\n\n"
-                "⚡ 개별 매크로:\n"
-                "• @기획: 구조적 탐색 및 계획 수립\n"
-                "• @구현: DRY 원칙 기반 체계적 구현\n"
-                "• @안정화: 구조적 지속가능성 검증\n"
-                "• @배포: 최종 검증 및 배포\n\n"
-                "💡 끄려면: /remote off",
-                reply_markup=remote_keyboard
-            )
+        # The old macro system has been replaced with the /fullcycle command
+        await update.message.reply_text(
+            "🎛️ **워크플로우 명령어 안내**\n\n"
+            "🚀 **새로운 슬래시 커맨드:**\n"
+            "• `/fullcycle` - 전체 개발 워크플로우 실행\n\n"
+            "📝 **포함 단계:**\n"
+            "• 기획: 구조적 탐색 및 계획 수립\n"
+            "• 구현: DRY 원칙 기반 체계적 구현\n"
+            "• 안정화: 구조적 지속가능성 검증\n"
+            "• 배포: 최종 검증 및 배포\n\n"
+            "💡 **사용법:**\n"
+            "1. `/fullcycle` 명령어 입력\n"
+            "2. 또는 세션 메시지에 Reply로 `/fullcycle` 전송"
+        )
     
     
     async def sessions_command(self, update, context):
@@ -1115,38 +1053,6 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         ]
         return InlineKeyboardMarkup(keyboard)
     
-    def get_prompt_macro_keyboard(self):
-        """Get prompt macro keyboard for development workflows (ReplyKeyboard)"""
-        
-        keyboard = [
-            # Combined workflow prompts (most frequently used - moved to top)
-            [
-                KeyboardButton("기획&구현&안정화&배포")
-            ],
-            [
-                KeyboardButton("기획&구현&안정화"),
-                KeyboardButton("안정화&배포")
-            ],
-            [
-                KeyboardButton("구현&안정화&배포")
-            ],
-            
-            # Single keyword prompts (2x2 grid - moved to bottom)
-            [
-                KeyboardButton("@기획"),
-                KeyboardButton("@구현")
-            ],
-            [
-                KeyboardButton("@안정화"),
-                KeyboardButton("@배포")
-            ]
-        ]
-        
-        return ReplyKeyboardMarkup(
-            keyboard,
-            resize_keyboard=True,
-            one_time_keyboard=False
-        )
     
     
     
@@ -1315,58 +1221,67 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 
     async def _help_callback(self, query, context):
         """Help callback"""
-        help_text = """
-🤖 **Telegram-Claude Bridge 봇**
+        help_text = """🤖 Claude-Ops Telegram Bot
 
-Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
+📝 주요 명령어:
+• /new_project - 새 프로젝트 생성
+• /sessions - 세션 목록 보기
+• /log - Claude 화면 확인
+• /status - 봇 상태 확인
 
-**봇 명령어:**
-• `/start` - 현재 세션 시작/재시작
-• `/start project_name` - ~/projects/project_name에서 claude_project_name 세션 시작
-• `/start project_name /custom/path` - 지정 경로에서 claude_project_name 세션 시작
-• `/status` - 봇 및 tmux 세션 상태 확인
-• `/log [lines]` - 현재 Claude 화면 확인 (기본 50줄, 최대 2000줄)
-• `/log50`, `/log100`, `/log150`, `/log200`, `/log300` - 빠른 로그 조회
-• `/stop` - Claude 작업 중단 (ESC 키 전송)
-• `/erase` - 현재 입력 지우기 (Ctrl+C 전송)
-• `/restart` - Claude 세션 재시작 (대화 연속성 보장) 🆕
-• `/clear` - 화면 정리 (Ctrl+L 전송) 🆕
-• `/sessions` - 활성 세션 목록 보기 및 전환
-• `/remote` - 세션 리모컨 켜기/끄기 (화면 하단 고정)
-• `/help` - 이 도움말 보기
+🚀 워크플로우 명령어:
+• /fullcycle - 전체 개발 워크플로우
+• /plan - 기획 단계
+• /implement - 구현 단계
+• /stabilize - 안정화 단계
+• /deploy - 배포 단계
 
-**Reply 기반 세션 제어:** 🆕
-• 알림에 Reply + `/log` → 해당 세션의 로그 표시
-• 알림에 Reply + `/session` → 해당 세션으로 바로 전환
-• 알림에 Reply + `/erase` → 해당 세션의 입력 지우기
-• 알림에 Reply + `/restart` → 해당 세션 재시작 (컨텍스트 보존)
-• 알림에 Reply + `/clear` → 해당 세션의 화면 정리
+🎮 세션 제어:
+• /stop - 작업 중단
+• /restart - 세션 재시작
+• /erase - 입력 지우기
 
-**Claude 명령어:**
-• 일반 텍스트 메시지 → Claude Code에 직접 전달
-• **슬래시 명령어** (`/project-plan`, `/task-start` 등) → Claude Code에 직접 전달
-• 알려지지 않은 `/command` → Claude Code에 자동 전달
+💡 빠른 시작:
+1. /new_project my_app 으로 프로젝트 생성
+2. 텍스트 메시지로 Claude와 대화
+3. /log 로 Claude 화면 확인
+4. /fullcycle 로 개발 워크플로우 실행
 
-**사용법:**
-• 텔레그램 알림에 Reply로 답장 → 해당 세션에 정확히 전달
-• Claude 작업 완료 시 hook을 통해 자동 알림 수신
-• 위험한 명령어는 자동으로 차단됩니다
-• 최대 500자까지 입력 가능
-
-**보안:**
-• 인증된 사용자만 사용 가능
-• 입력값 검증 및 필터링 적용
-• 모든 활동이 로그에 기록됩니다
-        """
+❓ 메시지에 Reply하면 해당 세션으로 명령 전송"""
         
         await query.edit_message_text(help_text, parse_mode='Markdown')
     
     async def unknown_command_handler(self, update, context):
-        """Handle unknown commands by forwarding to Claude"""
+        """Handle unknown commands - check for Korean workflow commands first"""
         user_id = update.effective_user.id
         command_text = update.message.text
         
         logger.info(f"Unknown command received: {command_text}")
+        
+        # Check for Korean workflow commands
+        korean_commands = {
+            "/기획": ("기획", "@기획"),
+            "/구현": ("구현", "@구현"), 
+            "/안정화": ("안정화", "@안정화"),
+            "/배포": ("배포", "@배포"),
+            "/전체사이클": None  # Will handle fullcycle
+        }
+        
+        if command_text.split()[0] in korean_commands:
+            command = command_text.split()[0]
+            args = command_text.split()[1:] if len(command_text.split()) > 1 else []
+            
+            if command == "/전체사이클":
+                # Execute fullcycle workflow
+                context.args = args
+                await self.full_cycle_command(update, context)
+                return
+            else:
+                # Execute individual workflow
+                stage_name, prompt_key = korean_commands[command]
+                context.args = args
+                await self._send_individual_workflow(update, context, stage_name, prompt_key)
+                return
         
         # Forward unknown commands to Claude with a prefix explanation
         await self.forward_to_claude(update, context)
@@ -1378,7 +1293,6 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             
         # Command handlers (known bot commands)
         self.app.add_handler(CommandHandler("status", self.status_command))
-        self.app.add_handler(CommandHandler("start", self.start_claude_command))
         self.app.add_handler(CommandHandler("new_project", self.start_claude_command))  # Primary command
         self.app.add_handler(CommandHandler("help", self.help_command))
         self.app.add_handler(CommandHandler("log", self.log_command))
@@ -1420,8 +1334,12 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             BotCommand("erase", "🧹 현재 입력 지우기 (Ctrl+C 전송)"),
             BotCommand("status", "📊 봇 및 tmux 세션 상태 확인"),
             BotCommand("log", "📺 현재 Claude 화면 실시간 확인"),
-            BotCommand("start", "🚀 Claude 세션 시작 (옵션: project_name [path])"),
-            BotCommand("help", "❓ 도움말 보기")
+            BotCommand("help", "❓ 도움말 보기"),
+            BotCommand("fullcycle", "🔄 전체 개발 워크플로우 실행"),
+            BotCommand("plan", "🎯 기획 워크플로우"),
+            BotCommand("implement", "⚙️ 구현 워크플로우"),
+            BotCommand("stabilize", "🛡️ 안정화 워크플로우"),
+            BotCommand("deploy", "🚀 배포 워크플로우")
         ]
         
         await self.app.bot.set_my_commands(commands)
@@ -1438,7 +1356,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             if not sessions:
                 await query.edit_message_text(
                     "🔄 **세션 목록**\n\n❌ 활성 Claude 세션이 없습니다.\n\n"
-                    "/start 명령으로 새 세션을 시작하세요.",
+                    "/new_project 명령으로 새 세션을 시작하세요.",
                     parse_mode='Markdown'
                 )
                 return
@@ -1621,7 +1539,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 
 💬 **지금 바로 시작하세요!**
 `/new-project 원하는프로젝트명` 입력하면 끝!
-⚠️ **호환성**: `/start` 명령어도 계속 사용 가능합니다."""
+"""
             
             await query.edit_message_text(
                 guide_msg,
@@ -1649,7 +1567,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
 📂 기존 프로젝트를 열거나 새 프로젝트를 만드세요.
 
 💡 **팁**: 직접 입력하려면 `/new-project 프로젝트명` 형식으로 입력하세요.
-⚠️ **호환성**: `/start` 명령어도 계속 사용 가능합니다."""
+"""
         
         await update.message.reply_text(
             message,
@@ -1695,7 +1613,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                     "예시:\n"
                     "• `/new-project my_project`\n"
                     "• `/new-project web_app ~/work`\n"
-                    "• `/start my_project` (호환성)",
+                    "",
                     parse_mode='Markdown'
                 )
                 
@@ -1899,7 +1817,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             
             if not sessions:
                 await reply_func(
-                    "❌ **세션 없음**\n\nClaude 세션을 찾을 수 없습니다.\n\n/start 명령으로 새 세션을 시작하세요.",
+                    "❌ **세션 없음**\n\nClaude 세션을 찾을 수 없습니다.\n\n/new_project 명령으로 새 세션을 시작하세요.",
                     parse_mode='Markdown'
                 )
                 return
@@ -2462,60 +2380,6 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             logger.error(f"빠른 로그 조회 중 오류: {str(e)}")
             await query.edit_message_text("❌ 내부 오류가 발생했습니다.")
     
-    async def _handle_remote_button(self, update, user_input: str) -> bool:
-        """Handle Reply Keyboard prompt macro button presses"""
-        
-        # Get available prompts from claude-dev-kit
-        available_prompts = self.prompts.get_available_prompts()
-        
-        # Handle single prompt macros - just acknowledge button press, no auto-send
-        if user_input in available_prompts:
-            await update.message.reply_text(
-                f"🎯 **{user_input} 매크로 준비됨**\n\n"
-                f"💡 **사용 방법:**\n"
-                f"1. 추가 텍스트 작성: `{user_input} 오늘 작업은...`\n"
-                f"2. 원하는 세션에 Reply로 전송\n"
-                f"3. 자동으로 전체 프롬프트로 확장됨\n\n"
-                f"또는 지금 바로 전송하려면 이 메시지에 Reply로 세션을 지정하세요."
-            )
-            return True
-        
-        # Handle workflow shortcuts
-        if user_input in self.WORKFLOW_SHORTCUTS:
-            expansion = self.WORKFLOW_SHORTCUTS[user_input]
-            await update.message.reply_text(
-                f"🔄 **워크플로우 단축어 준비됨**: {user_input}\n\n"
-                f"⚡ **확장**: {expansion}\n\n"
-                f"💡 **사용 방법:**\n"
-                f"1. 추가 텍스트 작성: `{user_input} 오늘의 목표는...`\n"
-                f"2. 원하는 세션에 Reply로 전송\n"
-                f"3. 자동으로 전체 워크플로우로 확장됨\n\n"
-                f"또는 지금 바로 전송하려면 이 메시지에 Reply로 세션을 지정하세요."
-            )
-            return True
-        
-        # Handle combined workflow prompts - just acknowledge, no auto-send
-        if "&" in user_input:
-            # Parse combined prompts like "기획&구현&안정화&배포"
-            keywords = user_input.split("&")
-            macro_names = []
-            for kw in keywords:
-                macro_key = f"@{kw.strip()}"
-                if macro_key in available_prompts:
-                    macro_names.append(macro_key)
-            
-            if macro_names:
-                await update.message.reply_text(
-                    f"🔄 **통합 워크플로우 준비됨**: {' → '.join(macro_names)}\n\n"
-                    f"💡 **사용 방법:**\n"
-                    f"1. 추가 텍스트 작성: `{user_input} 오늘의 목표는...`\n"
-                    f"2. 원하는 세션에 Reply로 전송\n"
-                    f"3. 자동으로 전체 워크플로우로 확장됨\n\n"
-                    f"또는 지금 바로 전송하려면 이 메시지에 Reply로 세션을 지정하세요."
-                )
-                return True
-        
-        return False
     
     async def _get_session_log_content(self, session_name: str, line_count: int = 50) -> str:
         """Get recent log content from session"""
@@ -2554,29 +2418,6 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             logger.error(f"Exception getting session log for {session_name}: {str(e)}")
             return "로그 조회 중 오류가 발생했습니다."
     
-    async def _get_target_session_for_macro(self, update) -> str:
-        """Get target session for macro button press (reply-based or default)"""
-        target_session = None
-        
-        # Check if this is a reply to a bot message (same logic as forward_to_claude)
-        if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
-            original_text = update.message.reply_to_message.text
-            target_session = self.extract_session_from_message(original_text)
-            
-            if target_session:
-                logger.info(f"📍 Reply 기반 매크로 세션 타겟팅: {target_session}")
-                
-                # Check if target session exists
-                session_exists = os.system(f"tmux has-session -t {target_session}") == 0
-                if session_exists:
-                    return target_session
-                else:
-                    logger.warning(f"Reply 타겟 세션 {target_session}이 존재하지 않음, 메인 세션 사용")
-        
-        # Use main session as fallback
-        target_session = self.config.session_name
-        logger.info(f"🎯 메인 세션 사용: {target_session}")
-        return target_session
     
     async def _send_to_claude_with_session(self, text: str, target_session: str) -> bool:
         """Send text to specific Claude session with improved reliability"""
@@ -2587,7 +2428,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                 logger.error(f"Target session {target_session} does not exist")
                 return False
             
-            logger.info(f"Sending macro to {target_session}: {text[:100]}...")
+            logger.info(f"Sending text to {target_session}: {text[:100]}...")
             
             # Send text to tmux session using subprocess for better control
             # Use -l flag to send literal text (handles special characters better)
@@ -2620,12 +2461,15 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                 logger.error(f"Enter send error: {result2.stderr}")
                 return False
             
-            logger.info(f"Successfully sent macro prompt with Enter to {target_session}")
+            logger.info(f"Successfully sent text with Enter to {target_session}")
             return True
                 
         except Exception as e:
-            logger.error(f"Exception while sending macro to Claude session {target_session}: {str(e)}")
+            logger.error(f"Exception while sending text to Claude session {target_session}: {str(e)}")
             return False
+    
+    # Workflow commands removed - now handled by Claude-Dev-Kit directly
+    # Users should use /기획, /구현, /안정화, /배포 directly
     
     async def _send_to_claude(self, text: str) -> bool:
         """Send text to current Claude session (legacy function - now uses _send_to_claude_with_session)"""
