@@ -1,130 +1,160 @@
-# Planning Results - Documentation Structure Analysis
+# 기획 결과 - 텔레그램 봇 UI 간소화
 
-**Created**: 2025-08-20 17:30:00
-**Workflow**: /기획 (Documentation Impact Analysis)
-**Context**: claude-dev-kit init.sh 변경사항 분석 및 문서 구조 정리
+**기획 날짜**: 2025-08-20 20:15:00
+**워크플로우**: /기획 (UI 간소화 및 사용성 개선)
+**요청자**: 사용자 직접 요청
 
-## 🎯 **PRD: Claude-Ops 문서 구조 정리 계획**
+## 🎯 **PRD: 텔레그램 봇 UI 간소화 프로젝트**
 
 ### **Executive Summary**
-claude-dev-kit의 init.sh가 업데이트되어 문서 구조가 변경됨. 현재 claude-ops 레포에서 중복되거나 충돌하는 문서들을 식별하고 정리 필요.
+Claude-Ops 텔레그램 봇의 메뉴를 13개에서 8개로 간소화하여 사용자 경험을 개선. 워크플로우 전용 버튼들과 리모컨 기능을 제거하고, 직접 슬래시 커맨드 입력 방식으로 전환.
 
-### **🔍 As-Is 분석: 현재 문서 구조**
+### **🔍 사용자 요구사항 분석**
 
-#### **이미 존재하는 파일들 (init.sh와 중복)**
-1. ✅ **project_rules.md** - 이미 존재 (Claude-Ops 특화 내용)
-2. ✅ **CLAUDE.md** - 이미 존재 (Claude-Ops 특화 내용)  
-3. ✅ **docs/CURRENT/status.md** - 이미 존재
-4. ✅ **docs/CURRENT/active-todos.md** - 이미 존재
-5. ✅ **.claudeignore** - 이미 존재
-6. ✅ **.claude/commands/** - 이미 한국어 명령어들 존재
+#### **명시적 요구사항**
+1. ❌ **제거 요청**: fullcycle, stabilize 등 워크플로우 메뉴 버튼들
+2. ❌ **제거 요청**: 리모컨에 있는 매크로 버튼들 모두
+3. 🔄 **순서 변경**: new_project → 맨 아래 (잘 안 쓰므로)
+4. 🔄 **순서 변경**: log → board 아래로
 
-#### **Claude-Ops 고유 문서들 (유지 필요)**
-1. **README.md** - 프로젝트 소개 및 설치 가이드
-2. **QUICK_START.md** - 빠른 시작 가이드
-3. **MULTI_USER_GUIDE.md** - 다중 사용자 가이드
-4. **UPDATE_STRATEGY.md** - 업데이트 전략
-5. **CHANGELOG.md** - 변경 이력
+#### **암묵적 요구사항**
+- 직접 슬래시 커맨드 입력 방식 선호
+- 자주 사용하는 기능 우선 배치
+- 깔끔하고 단순한 인터페이스 선호
 
-#### **불필요하거나 정리 대상 문서들**
-1. 🟡 **docs/CURRENT/test-report.md** - init.sh에 없음 (검토 필요)
-2. 🟡 **docs/CURRENT/planning.md** - 이 파일 (계속 사용 중)
-3. 🔴 **src/my_project/** - 예제 프로젝트 구조 (제거 가능)
-4. 🔴 **core_features/** - 빈 디렉토리 (제거 가능)
-5. 🔴 **tools/** - 빈 디렉토리 (제거 가능)
+### **📊 As-Is/To-Be/Gap 분석**
 
-### **📊 To-Be: 목표 문서 구조**
-
+#### **As-Is (현재 상태)**
 ```
-claude-ops/
-├── README.md                    # 프로젝트 소개 (유지)
-├── QUICK_START.md               # 빠른 시작 (유지)
-├── MULTI_USER_GUIDE.md          # 다중 사용자 (유지)
-├── UPDATE_STRATEGY.md           # 업데이트 전략 (유지)
-├── CHANGELOG.md                 # 변경 이력 (유지)
-├── project_rules.md             # Claude-Ops 규칙 (유지, Claude-Ops 특화)
-├── CLAUDE.md                    # Claude-Ops 가이드 (유지, Claude-Ops 특화)
-├── .claudeignore                # 무시 파일 (유지)
-├── .claude/commands/            # 한국어 명령어 (유지)
-├── docs/
-│   ├── CURRENT/                # 현재 상태 (유지)
-│   │   ├── status.md
-│   │   ├── active-todos.md
-│   │   └── planning.md
-│   ├── development/            # 개발 기록 (유지)
-│   ├── proposals/              # 제안서 (유지)
-│   └── specs/                  # 스펙 (유지, 비어있음)
-├── claude_ops/                 # 핵심 코드 (유지)
-├── scripts/                    # 스크립트 (유지)
-├── tests/                      # 테스트 (유지)
-└── examples/                   # 예제 (유지)
+메뉴 구조 (13개 항목):
+1. /sessions - 세션 목록
+2. /new_project - 프로젝트 생성  
+3. /board - 세션 보드
+4. /stop - 작업 중단
+5. /erase - 입력 지우기
+6. /status - 상태 확인
+7. /log - 화면 확인
+8. /help - 도움말
+9. /fullcycle - 전체 워크플로우 ❌
+10. /plan - 기획 워크플로우 ❌
+11. /implement - 구현 워크플로우 ❌
+12. /stabilize - 안정화 워크플로우 ❌
+13. /deploy - 배포 워크플로우 ❌
+
+추가 기능:
+- /remote 리모컨 기능 ❌
+- 자동 리모컨 활성화 ❌
+- 워크플로우 매크로 버튼들 ❌
 ```
 
-### **🔧 Gap 분석: 필요한 작업**
+#### **To-Be (목표 상태)**
+```
+간소화된 메뉴 구조 (8개 항목):
+1. /sessions - 🔄 활성 세션 목록 보기
+2. /board - 🎯 세션 보드
+3. /log - 📺 현재 Claude 화면 실시간 확인  
+4. /stop - ⛔ Claude 작업 중단
+5. /erase - 🧹 현재 입력 지우기
+6. /status - 📊 봇 및 tmux 세션 상태 확인
+7. /help - ❓ 도움말 보기
+8. /new_project - 🆕 새 Claude 프로젝트 생성
 
-#### **즉시 삭제 대상**
-1. `src/my_project/` - 예제 구조, 실제 사용 안함
-2. `core_features/` - 빈 디렉토리
-3. `tools/` - 빈 디렉토리
+제거된 기능:
+- 워크플로우 전용 버튼들 (사용자가 직접 입력)
+- 리모컨 기능 (불필요한 복잡성 제거)
+- 자동 매크로 활성화 (사용자 혼동 방지)
+```
 
-#### **보존 및 특화**
-1. **project_rules.md** - Claude-Ops 특화 내용 유지
-   - Telegram 브리지 관련 규칙
-   - 세션 관리 원칙
-   
-2. **CLAUDE.md** - Claude-Ops 특화 내용 유지
-   - Telegram 명령어 가이드
-   - 세션 관리 방법
+#### **Gap 분석**
+- **제거할 항목**: 5개 워크플로우 + 1개 리모컨 = 6개 기능
+- **순서 변경**: new_project (2→8), log (7→3)  
+- **코드 정리**: 관련 핸들러, 텍스트, 함수 제거 필요
 
-#### **init.sh 실행 시 주의사항**
-- 기존 파일들이 덮어쓰기 되지 않도록 백업 필요
-- Claude-Ops 특화 내용은 보존
-- 새로 생성되는 템플릿 파일들은 claude-dev-kit 프로젝트용
+### **🛠️ MECE 작업분해 (Work Breakdown Structure)**
 
-### **✅ Success Criteria**
+#### **1. 워크플로우 명령어 제거 (우선순위 1)**
+- 1.1 BotCommand 목록에서 5개 워크플로우 제거
+  - fullcycle, plan, implement, stabilize, deploy
+- 1.2 해당 CommandHandler 제거 
+- 1.3 관련 도움말 텍스트 정리
 
-1. **문서 구조 정리**: 불필요한 디렉토리 제거
-2. **Claude-Ops 특화 유지**: 프로젝트 고유 문서 보존
-3. **충돌 방지**: init.sh 실행 시 기존 문서 보호
-4. **명확한 역할 분리**: 
-   - Claude-Ops: 텔레그램 브리지 문서
-   - claude-dev-kit: 개발 워크플로우 문서
+#### **2. 리모컨 기능 완전 제거 (우선순위 2)**  
+- 2.1 `/remote` 명령어 핸들러 제거
+- 2.2 `_auto_activate_remote` 함수 제거
+- 2.3 리모컨 관련 모든 텍스트 제거
+- 2.4 자동 활성화 호출 제거
+
+#### **3. 메뉴 순서 재구성 (우선순위 3)**
+- 3.1 new_project를 맨 아래(8번)로 이동
+- 3.2 log를 board 바로 아래(3번)로 이동  
+- 3.3 최종 메뉴 순서 검증
+
+#### **4. 관련 텍스트 정리 (우선순위 4)**
+- 4.1 도움말 메시지 업데이트
+- 4.2 오토 액티베이션 텍스트 제거
+- 4.3 한국어 명령어 매핑 정리
+
+### **📈 기대 효과**
+
+#### **정량적 개선**
+- **메뉴 간소화**: 13개 → 8개 (38% 감소)
+- **코드 복잡성**: 워크플로우 관련 코드 제거로 유지보수성 향상
+- **사용자 학습비용**: 불필요한 기능 제거로 인지 부하 감소
+
+#### **정성적 개선**
+- **사용성**: 자주 사용하는 기능 우선 배치
+- **명확성**: 워크플로우는 직접 입력으로 명확한 의도 표현
+- **일관성**: 순수 브리지 아키텍처에 부합하는 단순함
+
+### **🎯 Success Criteria**
+
+1. **기능적 요구사항**
+   - ✅ 워크플로우 버튼 5개 완전 제거
+   - ✅ 리모컨 기능 완전 제거
+   - ✅ 메뉴 순서 요청대로 재배치
+
+2. **비기능적 요구사항**
+   - ✅ 기존 핵심 기능 정상 동작 유지
+   - ✅ 코드 품질 저하 없이 간소화
+   - ✅ 사용자 혼동 없는 매끄러운 전환
+
+3. **사용자 경험**
+   - ✅ 메뉴 접근성 향상 (간소화)
+   - ✅ 학습비용 감소 (복잡한 기능 제거)
+   - ✅ 직관적 인터페이스 제공
+
+### **⚠️ 리스크 분석**
+
+#### **잠재적 리스크**
+1. **사용자 적응**: 기존 워크플로우 버튼 사용자의 일시적 혼동
+2. **기능 발견성**: 직접 입력 방식으로 인한 기능 발견 어려움
+
+#### **완화 방안**  
+1. **도움말 강화**: 직접 슬래시 커맨드 사용법 명확히 안내
+2. **단계적 전환**: 도움말에 워크플로우 명령어 예시 포함
 
 ### **🚀 Implementation Plan**
 
-#### **Step 1: 불필요한 디렉토리 제거 (2분)**
-```bash
-rm -rf src/my_project/
-rm -rf core_features/
-rm -rf tools/
-```
+#### **Phase 1: 코드 수정 (30분)**
+- BotCommand 목록 재구성
+- CommandHandler 제거
+- 관련 함수 및 텍스트 정리
 
-#### **Step 2: 문서 백업 (선택사항)**
-init.sh 실행 전 기존 문서 백업이 필요한 경우:
-```bash
-cp project_rules.md project_rules.md.backup
-cp CLAUDE.md CLAUDE.md.backup
-```
+#### **Phase 2: 테스트 및 검증 (15분)**
+- 메뉴 구조 확인
+- 핵심 기능 정상 동작 검증
+- 도움말 정확성 확인
 
-#### **Step 3: init.sh 실행 후 병합**
-- init.sh가 생성하는 새 파일들 검토
-- Claude-Ops 특화 내용과 병합
-- 중복 제거
+#### **Phase 3: 배포 (10분)**
+- Git 커밋 및 푸시
+- 버전 업데이트 (v2.2.1)
 
 ### **💡 Key Insights**
 
-1. **역할 분리 명확화**:
-   - claude-ops: 순수 텔레그램 브리지
-   - claude-dev-kit: 개발 워크플로우 제공
-
-2. **문서 중복 최소화**:
-   - 공통 문서는 claude-dev-kit 참조
-   - Claude-Ops 고유 기능만 로컬 문서화
-
-3. **유지보수 간소화**:
-   - 불필요한 예제 구조 제거
-   - 실제 사용 문서만 유지
+1. **Less is More 원칙**: 기능 제거가 때로는 더 나은 사용자 경험을 제공
+2. **Usage-Based Design**: 사용 빈도에 따른 메뉴 배치의 중요성  
+3. **Pure Bridge Architecture**: 순수 브리지 역할에 충실한 단순함 추구
 
 ---
 
-**🎯 권장 행동**: `/구현` - 불필요한 디렉토리 제거 후 init.sh 실행
+**🎯 권장 행동**: `/구현` - 계획된 UI 간소화 즉시 실행

@@ -425,8 +425,6 @@ class TelegramBridge:
                     reply_markup=reply_markup
                 )
                 
-                # Auto-activate remote control for better UX
-                await self._auto_activate_remote(update)
                 
             else:
                 error_msg = f"""❌ 프로젝트 생성 실패
@@ -450,25 +448,6 @@ class TelegramBridge:
             import traceback
             traceback.print_exc()
     
-    async def _auto_activate_remote(self, update):
-        """Auto-activate workflow remote control"""
-        try:
-            await update.message.reply_text(
-                "🎛️ 워크플로우 명령어가 준비되었습니다.\n\n"
-                "🚀 **새로운 슬래시 커맨드:**\n"
-                "• `/fullcycle` - 전체 개발 워크플로우 실행\n\n"
-                "💡 **사용법:**\n"
-                "1. `/fullcycle` 명령어 입력\n"
-                "2. 또는 세션 메시지에 Reply로 `/fullcycle` 전송\n\n"
-                "📝 **포함 단계:**\n"
-                "• 기획: 구조적 탐색 및 계획 수립\n"
-                "• 구현: DRY 원칙 기반 체계적 구현\n"
-                "• 안정화: 구조적 지속가능성 검증\n"
-                "• 배포: 최종 검증 및 배포"
-            )
-        except Exception as e:
-            logger.error(f"Auto remote activation error: {str(e)}")
-            # Silent fail - don't disrupt main flow
     
     async def help_command(self, update, context):
         """Help command handler"""
@@ -481,28 +460,27 @@ class TelegramBridge:
         help_text = """🤖 Claude-Ops Telegram Bot
 
 📝 주요 명령어:
-• /new_project - 새 프로젝트 생성
-• /sessions - 세션 목록 보기
-• /log - Claude 화면 확인
-• /status - 봇 상태 확인
+• /sessions - 활성 세션 목록 보기
+• /board - 세션 보드 (그리드 뷰)
+• /log - Claude 화면 실시간 확인
+• /stop - Claude 작업 중단 (ESC 키 전송)
+• /erase - 현재 입력 지우기 (Ctrl+C 전송)
+• /status - 봇 및 tmux 세션 상태 확인
+• /help - 도움말 보기
+• /new_project - 새 Claude 프로젝트 생성
 
-🚀 워크플로우 명령어:
-• /fullcycle - 전체 개발 워크플로우
-• /plan - 기획 단계
-• /implement - 구현 단계
-• /stabilize - 안정화 단계
-• /deploy - 배포 단계
-
-🎮 세션 제어:
-• /stop - 작업 중단
-• /restart - 세션 재시작
-• /erase - 입력 지우기
+🚀 워크플로우 사용법:
+필요시 직접 슬래시 커맨드를 입력하세요:
+• /기획 - 구조적 기획 및 계획 수립
+• /구현 - DRY 원칙 기반 체계적 구현
+• /안정화 - 구조적 지속가능성 검증
+• /배포 - 최종 검증 및 배포
 
 💡 빠른 시작:
 1. /new_project my_app 으로 프로젝트 생성
 2. 텍스트 메시지로 Claude와 대화
 3. /log 로 Claude 화면 확인
-4. /fullcycle 로 개발 워크플로우 실행
+4. 필요시 직접 워크플로우 명령어 입력
 
 ❓ 메시지에 Reply하면 해당 세션으로 명령 전송"""
         
@@ -912,32 +890,6 @@ class TelegramBridge:
         # Show session board grid
         await self._show_session_action_grid(update.message.reply_text, None)
     
-    async def remote_command(self, update, context):
-        """Show workflow command information"""
-        user_id = update.effective_user.id
-        
-        if not self.check_user_authorization(user_id):
-            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
-            return
-        
-        # Check if reply keyboard is currently active by context or argument
-        # For simplicity, we'll toggle: if /remote, activate; if /remote off, deactivate
-        args = context.args if context.args else []
-        
-        # The old macro system has been replaced with the /fullcycle command
-        await update.message.reply_text(
-            "🎛️ **워크플로우 명령어 안내**\n\n"
-            "🚀 **새로운 슬래시 커맨드:**\n"
-            "• `/fullcycle` - 전체 개발 워크플로우 실행\n\n"
-            "📝 **포함 단계:**\n"
-            "• 기획: 구조적 탐색 및 계획 수립\n"
-            "• 구현: DRY 원칙 기반 체계적 구현\n"
-            "• 안정화: 구조적 지속가능성 검증\n"
-            "• 배포: 최종 검증 및 배포\n\n"
-            "💡 **사용법:**\n"
-            "1. `/fullcycle` 명령어 입력\n"
-            "2. 또는 세션 메시지에 Reply로 `/fullcycle` 전송"
-        )
     
     
     async def sessions_command(self, update, context):
@@ -1306,7 +1258,6 @@ class TelegramBridge:
         self.app.add_handler(CommandHandler("restart", self.restart_command))
         self.app.add_handler(CommandHandler("sessions", self.sessions_command))
         self.app.add_handler(CommandHandler("board", self.board_command))
-        self.app.add_handler(CommandHandler("remote", self.remote_command))
         
         # Callback query handler for inline buttons
         self.app.add_handler(CallbackQueryHandler(self.button_callback))
@@ -1328,18 +1279,13 @@ class TelegramBridge:
         """Setup bot command menu"""
         commands = [
             BotCommand("sessions", "🔄 활성 세션 목록 보기"),
-            BotCommand("new_project", "🆕 새 Claude 프로젝트 생성"),
             BotCommand("board", "🎯 세션 보드"),
+            BotCommand("log", "📺 현재 Claude 화면 실시간 확인"),
             BotCommand("stop", "⛔ Claude 작업 중단 (ESC 키 전송)"),
             BotCommand("erase", "🧹 현재 입력 지우기 (Ctrl+C 전송)"),
             BotCommand("status", "📊 봇 및 tmux 세션 상태 확인"),
-            BotCommand("log", "📺 현재 Claude 화면 실시간 확인"),
             BotCommand("help", "❓ 도움말 보기"),
-            BotCommand("fullcycle", "🔄 전체 개발 워크플로우 실행"),
-            BotCommand("plan", "🎯 기획 워크플로우"),
-            BotCommand("implement", "⚙️ 구현 워크플로우"),
-            BotCommand("stabilize", "🛡️ 안정화 워크플로우"),
-            BotCommand("deploy", "🚀 배포 워크플로우")
+            BotCommand("new_project", "🆕 새 Claude 프로젝트 생성")
         ]
         
         await self.app.bot.set_my_commands(commands)
