@@ -332,9 +332,19 @@ class TelegramBridge:
         # Parse command arguments for project path support
         args = context.args if context.args else []
         
-        # If no arguments, show interactive project selection
+        # If no arguments, show simple usage only
         if not args:
-            await self._show_project_selection(update)
+            await update.message.reply_text(
+                "📋 **사용법:**\n"
+                "`/new_project <프로젝트명>`\n\n"
+                "💡 **예시:**\n"
+                "• `/new_project my-app`\n"
+                "• `/new_project api-server`\n"
+                "• `/new_project webapp2024`\n\n"
+                "📝 **규칙:**\n"
+                "• 영문, 숫자, 하이픈(-), 언더스코어(_)만 사용",
+                parse_mode='Markdown'
+            )
             return
         
         # Check for help flags and invalid project names

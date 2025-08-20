@@ -93,7 +93,12 @@ class SessionStateAnalyzer:
             "esc to interrupt",           # Standard working indicator
             "Running…",                   # Background task execution
             "ctrl+b to run in background", # Background task hint
-            "tokens · esc to interrupt)", # Token counting with interrupt
+            "tokens · esc to interrupt", # Token counting with interrupt (without closing paren)
+            "tokens · esc to interrupt)", # Token counting with interrupt (with closing paren)
+            "Whirring…",                 # Claude thinking indicator
+            "is running…",               # Command execution indicator
+            "⚒",                         # Tool usage indicator
+            "⏵⏵",                        # Progress indicator
         ]
         
         # Patterns indicating user input is required
