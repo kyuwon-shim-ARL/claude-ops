@@ -6,9 +6,19 @@ description = "Telegram-Claude Bridge System for development workflow automation
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "jinja2>=3.1.6",
+    "matplotlib>=3.10.5",
+    "numpy>=2.3.2",
+    "openpyxl>=3.1.5",
+    "pandas>=2.3.1",
+    "plotly>=6.3.0",
     "python-dotenv>=1.0.0",
     "python-telegram-bot>=20.0",
+    "rdkit-pypi>=2022.9.5",
     "requests>=2.25.0",
+    "scikit-learn>=1.7.1",
+    "seaborn>=0.13.2",
+    "streamlit>=1.48.1",
 ]
 
 [dependency-groups]
