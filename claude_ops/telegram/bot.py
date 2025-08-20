@@ -1379,7 +1379,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         # Command handlers (known bot commands)
         self.app.add_handler(CommandHandler("status", self.status_command))
         self.app.add_handler(CommandHandler("start", self.start_claude_command))
-        self.app.add_handler(CommandHandler("new-project", self.start_claude_command))  # Primary command
+        self.app.add_handler(CommandHandler("new_project", self.start_claude_command))  # Primary command
         self.app.add_handler(CommandHandler("help", self.help_command))
         self.app.add_handler(CommandHandler("log", self.log_command))
         self.app.add_handler(CommandHandler("log50", self.log50_command))
@@ -1414,6 +1414,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         """Setup bot command menu"""
         commands = [
             BotCommand("sessions", "🔄 활성 세션 목록 보기"),
+            BotCommand("new_project", "🆕 새 Claude 프로젝트 생성"),
             BotCommand("board", "🎯 세션 보드"),
             BotCommand("stop", "⛔ Claude 작업 중단 (ESC 키 전송)"),
             BotCommand("erase", "🧹 현재 입력 지우기 (Ctrl+C 전송)"),
@@ -1932,10 +1933,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                 
                 keyboard.append(session_row)
             
-            # Add utility buttons
-            keyboard.append([
-                InlineKeyboardButton("🚀 새 세션", callback_data="start")
-            ])
+            # No utility buttons needed - sessions are the main content
             
             reply_markup = InlineKeyboardMarkup(keyboard)
             
