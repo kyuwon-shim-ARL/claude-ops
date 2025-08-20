@@ -2,7 +2,7 @@
 
 # Claude Code Hook: Send Telegram notification when work completes
 # This script is called by Claude Code's built-in hook system
-# Version: 2.0 - Optimized for production use
+# Version: 2.1 - Enhanced debugging and reliability
 
 set -e
 
@@ -10,12 +10,16 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLAUDE_OPS_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Log the hook trigger
-echo "$(date): Claude Code Hook triggered" >> "$CLAUDE_OPS_DIR/hook.log"
+# Enhanced logging with environment info
+echo "=== $(date): Claude Code Hook TRIGGERED ===" >> "$CLAUDE_OPS_DIR/hook.log"
+echo "PWD: $PWD" >> "$CLAUDE_OPS_DIR/hook.log"
+echo "CLAUDE_SESSION_NAME: ${CLAUDE_SESSION_NAME:-unset}" >> "$CLAUDE_OPS_DIR/hook.log"
+echo "Environment vars:" >> "$CLAUDE_OPS_DIR/hook.log"
+env | grep -E "(CLAUDE|TMUX)" >> "$CLAUDE_OPS_DIR/hook.log" 2>/dev/null || echo "No CLAUDE/TMUX vars" >> "$CLAUDE_OPS_DIR/hook.log"
 
-# Read hook data from stdin (JSON format)
-HOOK_DATA=$(cat)
-echo "$(date): Hook data: $HOOK_DATA" >> "$CLAUDE_OPS_DIR/hook.log"
+# Read hook data from stdin (JSON format) with timeout
+HOOK_DATA=$(timeout 5s cat 2>/dev/null || echo "No hook data")
+echo "Hook data: $HOOK_DATA" >> "$CLAUDE_OPS_DIR/hook.log"
 
 # Extract session information from environment or hook data
 SESSION_NAME="${CLAUDE_SESSION_NAME:-claude_unknown}"
