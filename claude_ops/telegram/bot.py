@@ -15,7 +15,6 @@ from telegram.ext import Application, MessageHandler, CommandHandler, CallbackQu
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
 
 from ..config import ClaudeOpsConfig
-from .project_templates import ProjectTemplateManager
 from ..project_creator import ProjectCreator
 
 logger = logging.getLogger(__name__)
@@ -35,9 +34,6 @@ class TelegramBridge:
         """
         self.config = config or ClaudeOpsConfig()
         self.app: Optional[Application] = None
-        
-        # Initialize project template manager
-        self.project_manager = ProjectTemplateManager()
         
     def validate_input(self, user_input: str) -> tuple[bool, str]:
         """Validate and filter dangerous commands"""
@@ -1100,8 +1096,6 @@ class TelegramBridge:
             line_count = int(parts[0].split("_")[-1])  # Extract number from quick_log_150
             session_name = parts[1]
             await self._quick_log_callback(query, context, line_count, session_name)
-        elif callback_data.startswith("project_"):
-            await self._handle_project_callback(query, context)
         elif callback_data == "back_to_menu":
             await self._back_to_menu_callback(query, context)
         elif callback_data == "back_to_sessions":
@@ -1514,72 +1508,7 @@ class TelegramBridge:
         """Back to one-click session menu (no longer needed - redirect to session grid)"""
         await self._show_session_action_grid(query.edit_message_text, query)
     
-    async def _show_project_selection(self, update):
-        """Show interactive project selection menu"""
-        keyboard = self.project_manager.get_project_selection_keyboard()
-        
-        message = """🚀 **프로젝트 선택**
-        
-📂 기존 프로젝트를 열거나 새 프로젝트를 만드세요.
-
-💡 **팁**: 직접 입력하려면 `/new-project 프로젝트명` 형식으로 입력하세요.
-"""
-        
-        await update.message.reply_text(
-            message,
-            reply_markup=keyboard,
-            parse_mode='Markdown'
-        )
     
-    async def _handle_project_callback(self, query, context):
-        """Handle project-related callbacks"""
-        callback_data = query.data
-        
-        try:
-            if callback_data.startswith("project_open_"):
-                # Open existing project
-                project_name = callback_data.replace("project_open_", "")
-                await query.edit_message_text(f"🔄 프로젝트 열기: {project_name}...")
-                
-                # Use existing start command logic
-                context.args = [project_name]
-                await self.start_claude_command(query.message, context)
-                
-            elif callback_data.startswith("project_template_"):
-                # Show template selection
-                template_name = callback_data.replace("project_template_", "")
-                
-                # Store template in context for later use
-                context.user_data['selected_template'] = template_name
-                
-                prompt = self.project_manager.get_project_name_prompt(template_name)
-                await query.edit_message_text(
-                    prompt + "\n\n💬 프로젝트 이름을 입력하세요:",
-                    parse_mode='Markdown'
-                )
-                
-                # Set flag to expect project name input
-                context.user_data['awaiting_project_name'] = True
-                
-            elif callback_data == "project_manual_input":
-                await query.edit_message_text(
-                    "✏️ **수동 입력 모드**\n\n"
-                    "다음 형식으로 입력하세요:\n"
-                    "`/new-project 프로젝트명 [경로]`\n\n"
-                    "예시:\n"
-                    "• `/new-project my_project`\n"
-                    "• `/new-project web_app ~/work`\n"
-                    "",
-                    parse_mode='Markdown'
-                )
-                
-            elif callback_data in ["project_recent_header", "project_new_header"]:
-                # These are just headers, don't do anything
-                await query.answer()
-                
-        except Exception as e:
-            logger.error(f"Project callback error: {e}")
-            await query.edit_message_text("❌ 프로젝트 처리 중 오류가 발생했습니다.")
     
     async def _initialize_new_session(self, session_name: str, update) -> bool:
         """Initialize new Claude session with smart detection and setup"""
