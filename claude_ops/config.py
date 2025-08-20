@@ -1,10 +1,9 @@
 """
 Unified Configuration Management for Claude-Ops
 
-Handles environment variables, validation, and settings for all components:
+Handles environment variables, validation, and settings for:
 - Telegram Bridge
-- Notion Workflow
-- Git Integration
+- Session Management
 - Claude Code automation
 """
 
@@ -51,42 +50,6 @@ class ClaudeOpsConfig:
             return []
         return [int(id.strip()) for id in ids_str.split(",") if id.strip()]
     
-    # Notion Configuration
-    @property
-    def notion_api_key(self) -> str:
-        """Notion API key"""
-        return os.getenv("NOTION_API_KEY", "")
-    
-    @property
-    def notion_tasks_db_id(self) -> str:
-        """Notion Tasks database ID"""
-        return os.getenv("NOTION_TASKS_DB_ID", "")
-    
-    @property
-    def notion_projects_db_id(self) -> str:
-        """Notion Projects database ID"""
-        return os.getenv("NOTION_PROJECTS_DB_ID", "")
-    
-    @property
-    def notion_knowledge_hub_id(self) -> str:
-        """Notion Knowledge Hub page ID"""
-        return os.getenv("NOTION_KNOWLEDGE_HUB_ID", "")
-    
-    # GitHub Configuration
-    @property
-    def github_pat(self) -> str:
-        """GitHub Personal Access Token"""
-        return os.getenv("GITHUB_PAT", "")
-    
-    @property
-    def github_repo_owner(self) -> str:
-        """GitHub repository owner"""
-        return os.getenv("GITHUB_REPO_OWNER", "")
-    
-    @property
-    def github_repo_name(self) -> str:
-        """GitHub repository name"""
-        return os.getenv("GITHUB_REPO_NAME", "")
     
     # System Configuration
     @property
@@ -148,44 +111,46 @@ class ClaudeOpsConfig:
         """Validate telegram-specific configuration"""
         return bool(self.telegram_bot_token and self.allowed_user_ids)
     
-    def validate_notion_config(self) -> bool:
-        """Validate notion-specific configuration"""
-        return bool(self.notion_api_key and self.notion_tasks_db_id)
-    
-    def validate_github_config(self) -> bool:
-        """Validate github-specific configuration"""
-        return bool(self.github_pat and self.github_repo_owner and self.github_repo_name)
     
     def get_env_template(self) -> str:
         """Return complete .env template for all features"""
-        return """# Claude-Ops Unified Configuration
+        return """# Claude-Ops Configuration
+# Copy this file to .env and fill in your actual values
 
-# Telegram Bridge Settings
+# ==============================================
+# ESSENTIAL SETTINGS (Required)
+# ==============================================
+
+# Telegram Bot Token
+# Get this from @BotFather on Telegram
 TELEGRAM_BOT_TOKEN=your_bot_token_here
+
+# Your Telegram Chat ID  
+# Get this by messaging your bot and visiting:
+# https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates
 TELEGRAM_CHAT_ID=your_chat_id_here
-ALLOWED_USER_IDS=123456789,987654321
 
-# Notion Workflow Settings
-NOTION_API_KEY=your_notion_api_key_here
-NOTION_TASKS_DB_ID=your_tasks_database_id
-NOTION_PROJECTS_DB_ID=your_projects_database_id
-NOTION_KNOWLEDGE_HUB_ID=your_knowledge_hub_page_id
+# Allowed User IDs (comma-separated)
+# These users can control the bot
+# Find your user ID from the getUpdates response above
+ALLOWED_USER_IDS=your_user_id_here
 
-# GitHub Integration Settings
-GITHUB_PAT=your_github_personal_access_token
-GITHUB_REPO_OWNER=your_github_username
-GITHUB_REPO_NAME=your_repository_name
+# ==============================================
+# OPTIONAL SETTINGS (Defaults work fine)
+# ==============================================
 
-# System Settings (Optional)
-TMUX_SESSION_PREFIX=claude
-CHECK_INTERVAL=3
-LOG_LEVEL=INFO
+# Default working directory for Claude sessions
+# If not set, uses current directory
+# CLAUDE_WORKING_DIR=/path/to/your/projects
 
-# Instructions:
-# 1. Telegram: Get bot token from @BotFather, get user ID from bot messages
-# 2. Notion: Create integration at https://www.notion.so/my-integrations
-# 3. GitHub: Create PAT at https://github.com/settings/tokens
-# 4. Replace all 'your_*_here' values with actual credentials
+# How often to check Claude status (seconds)
+# Default: 3
+# CHECK_INTERVAL=3
+
+# Logging level
+# Options: DEBUG, INFO, WARNING, ERROR
+# Default: INFO
+# LOG_LEVEL=INFO
 """
 
 

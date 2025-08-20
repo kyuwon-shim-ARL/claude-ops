@@ -1217,6 +1217,9 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
         elif callback_data.startswith("session_switch:"):
             session_name = callback_data.split(":", 1)[1]
             await self._session_switch_callback(query, context, session_name)
+        elif callback_data.startswith("session_stop:"):
+            session_name = callback_data.split(":", 1)[1]
+            await self._session_stop_callback(query, context, session_name)
         elif callback_data.startswith("session_pause:"):
             session_name = callback_data.split(":", 1)[1]
             await self._session_pause_callback(query, context, session_name)
@@ -1931,8 +1934,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
             
             # Add utility buttons
             keyboard.append([
-                InlineKeyboardButton("🚀 새 세션", callback_data="start"),
-                InlineKeyboardButton("❓ 도움말", callback_data="help")
+                InlineKeyboardButton("🚀 새 세션", callback_data="start")
             ])
             
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -2000,7 +2002,7 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                     InlineKeyboardButton("🏠 메인설정", callback_data=f"session_switch:{session_name}")
                 ],
                 [
-                    InlineKeyboardButton("⏸️ Pause", callback_data=f"session_pause:{session_name}"),
+                    InlineKeyboardButton("⏸️ Stop", callback_data=f"session_stop:{session_name}"),
                     InlineKeyboardButton("🗑️ Erase", callback_data=f"session_erase:{session_name}"),
                     InlineKeyboardButton("◀️ 뒤로", callback_data="session_actions")
                 ]
@@ -2280,6 +2282,46 @@ Claude Code 세션과 텔레그램 간 양방향 통신 브릿지입니다.
                 f"❌ **메인 세션 설정 오류**\n\n오류: {str(e)}",
                 parse_mode='Markdown'
             )
+    
+    async def _session_stop_callback(self, query, context, session_name):
+        """Send stop (ESC) to specific session"""
+        try:
+            # Check if session exists
+            session_exists = os.system(f"tmux has-session -t {session_name}") == 0
+            if not session_exists:
+                await query.edit_message_text(
+                    f"❌ **세션 없음**\n\n"
+                    f"세션 `{session_name}`이 존재하지 않습니다.",
+                    parse_mode='Markdown'
+                )
+                return
+            
+            # Send ESC key
+            result = os.system(f"tmux send-keys -t {session_name} Escape")
+            
+            if result == 0:
+                display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
+                
+                await query.edit_message_text(
+                    f"⛔ **Stop 명령 전송**\n\n"
+                    f"📍 세션: `{display_name}`\n"
+                    f"⏸️ ESC 키를 전송했습니다.\n\n"
+                    f"Claude 작업이 중단됩니다.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🔙 세션 액션으로", callback_data=f"session_grid:{session_name}")],
+                        [InlineKeyboardButton("🏠 메인 메뉴로", callback_data="back_to_menu")]
+                    ]),
+                    parse_mode='Markdown'
+                )
+                
+                logger.info(f"ESC sent to session {session_name}")
+            else:
+                await query.answer("❌ Stop 명령 전송 실패")
+                logger.error(f"Failed to send ESC to session {session_name}")
+                
+        except Exception as e:
+            logger.error(f"Stop callback error: {str(e)}")
+            await query.answer("❌ Stop 처리 중 오류 발생")
     
     async def _session_pause_callback(self, query, context, session_name):
         """Send pause (ESC) to specific session"""

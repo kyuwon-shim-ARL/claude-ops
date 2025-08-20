@@ -47,7 +47,9 @@ Thumbs.db
 
 # Logs
 *.log
+*.log.*
 logs/
+log/
 
 # Database
 *.db
@@ -57,6 +59,10 @@ logs/
 tmp/
 temp/
 .tmp/
+*.tmp
+*.bak
+*.swp
+*.swo
 
 # Documentation builds
 _build/
@@ -74,3 +80,16 @@ htmlcov/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# Project specific
+metrics.json
+hook.log
+bot.log
+monitor.log*
+*.legacy
+/data/*.json
+/data/*.db
+
+# uv
+.uv/
+uv.lock
