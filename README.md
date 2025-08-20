@@ -1,18 +1,18 @@
-# 🚀 Claude-Ops: Telegram-Claude Bridge System
+# 🚀 Claude-Ops: Pure Telegram Bridge for Claude Code
 
-**Telegram으로 Claude Code 세션 원격 제어 및 모니터링**
+**순수 텔레그램 브리지 - Claude Code 세션 원격 제어 및 모니터링**
 
 [![Setup Time](https://img.shields.io/badge/Setup-5_minutes-green)](./QUICK_START.md)
-[![Multi Project](https://img.shields.io/badge/Multi_Project-Management-blue)](#multi-project-management)
+[![Architecture](https://img.shields.io/badge/Architecture-Pure_Bridge-purple)](./CLAUDE.md)
+[![Commands](https://img.shields.io/badge/Commands-Claude_Dev_Kit-blue)](https://github.com/kyuwon-shim-ARL/claude-dev-kit)
 [![Reply Based](https://img.shields.io/badge/Telegram-Reply_Based_Targeting-green)](#telegram-reply-targeting)
-[![Auto Merge](https://img.shields.io/badge/Workflow-Fully_Automated-blue)](#자동화-기능)
 
-**Claude Code 세션을 텔레그램으로 원격 제어하는 스마트 브리지 시스템**
+**Claude-Ops는 순수 브리지 역할에 집중합니다**
 
-- 🤖 **스마트 봇 제어**: 텔레그램 봇으로 Claude 세션 원격 조작
-- 🎯 **Reply 기반 타겟팅**: Reply로 정확한 세션 선택, 혼동 방지
-- 🔄 **실시간 모니터링**: 작업 완료 시 즉시 알림 수신
-- 📱 **멀티 세션 관리**: 여러 프로젝트 동시 모니터링 및 제어
+- 🌉 **Pure Bridge**: 텔레그램과 Claude Code 간 순수 연결 다리
+- 🎯 **Session Management**: tmux 세션 관리 및 Reply 기반 타겟팅
+- 📡 **Remote Control**: 텔레그램으로 Claude 세션 원격 제어
+- 🔄 **Workflow Delegation**: 모든 워크플로우는 claude-dev-kit이 처리
 
 ## ⚡ 빠른 설정
 
@@ -44,10 +44,10 @@ python -m claude_ops.telegram.bot
 
 **텔레그램 명령어**
 ```
-/start <session-name> [directory]   # 새 Claude 세션 시작
-/sessions                           # 활성 세션 목록
-/status                            # 봇 상태 확인
-/switch <session-name>             # 기본 세션 전환
+/new_project <name>                # 새 Claude 프로젝트 생성
+/sessions                          # 활성 세션 목록
+/status                           # 봇 상태 확인
+/log [lines]                      # Claude 화면 내용 보기
 ```
 
 **수동 세션 생성 (고급 사용자)**

@@ -5,6 +5,27 @@ All notable changes to Claude-Ops will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] - 2025-08-20
+
+### 🚀 Pure Bridge Architecture Completion
+
+Complete transformation to pure Telegram bridge with all workflow commands delegated to claude-dev-kit.
+
+### ✨ Added
+- **Scale-Based Documentation**: Commands now support strategic/tactical/operational work classification
+- **Smart Session Archiving**: Intelligent document management with persistence and archiving
+- **PRD Template**: Standardized Product Requirements Document template
+
+### 🔄 Changed
+- **Pure Bridge Mode**: Removed 372+ lines of duplicate workflow command code
+- **Command Updates**: All slash commands updated with latest claude-dev-kit prompts
+- **Documentation Structure**: Aligned with claude-dev-kit ZEDS (Zero-Effort Documentation System)
+
+### 🗑️ Removed
+- **prompt_loader.py**: Eliminated unnecessary prompt loading module
+- **Workflow Commands**: Removed /fullcycle, /plan, /implement, /stabilize, /deploy duplicates
+- **Project Directories**: Removed src/, core_features/, tools/ (not needed for bridge)
+
 ## [2.0.0] - 2025-01-18
 
 ### 🎯 Major Release: Telegram-First Architecture

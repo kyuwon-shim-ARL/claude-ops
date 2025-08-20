@@ -1,7 +1,7 @@
 # Current System Status - Claude-Ops
 
-**Last Updated**: 2025-08-20 17:20:00
-**Version**: v2.1.0 (Pure Bridge Architecture)
+**Last Updated**: 2025-08-20 17:45:00
+**Version**: v2.1.1 (Pure Bridge + Updated Commands)
 
 ## 🚀 System Health
 
@@ -12,12 +12,12 @@
 - ✅ **Pure Bridge Architecture**: Workflow commands handled by Claude-Dev-Kit directly
 - ✅ **Reply-Based Targeting**: Accurate session selection via Telegram replies
 
-### Recent Fixes Completed (2025-08-20)
-1. **Authorization Error**: Fixed `is_authorized_user` → `check_user_authorization` method name mismatch
-2. **Start References**: Completely removed `/start` references, updated to `/new_project` 
-3. **Help Command**: Fixed Markdown parsing errors, improved usability
-4. **Pure Bridge Architecture**: Removed 372+ lines of duplicate workflow commands
-5. **Prompt Loader Removal**: Eliminated unnecessary prompt_loader.py module
+### Recent Updates (2025-08-20)
+1. **Pure Bridge Architecture**: Removed 372+ lines of duplicate workflow commands
+2. **Prompt Loader Removal**: Eliminated unnecessary prompt_loader.py module
+3. **Claude-Dev-Kit Integration**: Updated slash commands with scale-based documentation
+4. **Structure Cleanup**: Removed unnecessary project directories (src/, core_features/, tools/)
+5. **Documentation Alignment**: Synced with latest claude-dev-kit command structure
 
 ## 📊 Current Metrics
 
