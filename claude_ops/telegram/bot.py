@@ -1214,30 +1214,6 @@ class TelegramBridge:
         
         logger.info(f"Unknown command received: {command_text}")
         
-        # Check for Korean workflow commands
-        korean_commands = {
-            "/기획": ("기획", "@기획"),
-            "/구현": ("구현", "@구현"), 
-            "/안정화": ("안정화", "@안정화"),
-            "/배포": ("배포", "@배포"),
-            "/전체사이클": None  # Will handle fullcycle
-        }
-        
-        if command_text.split()[0] in korean_commands:
-            command = command_text.split()[0]
-            args = command_text.split()[1:] if len(command_text.split()) > 1 else []
-            
-            if command == "/전체사이클":
-                # Execute fullcycle workflow
-                context.args = args
-                await self.full_cycle_command(update, context)
-                return
-            else:
-                # Execute individual workflow
-                stage_name, prompt_key = korean_commands[command]
-                context.args = args
-                await self._send_individual_workflow(update, context, stage_name, prompt_key)
-                return
         
         # Forward unknown commands to Claude with a prefix explanation
         await self.forward_to_claude(update, context)
