@@ -57,7 +57,6 @@ LOG_LEVEL=INFO
   - 구현: DRY 원칙 기반 체계적 구현  
   - 안정화: 구조적 지속가능성 검증
   - 배포: 최종 검증 및 배포
-- `/remote` - 워크플로우 명령어 안내
 
 ### Usage Patterns
 

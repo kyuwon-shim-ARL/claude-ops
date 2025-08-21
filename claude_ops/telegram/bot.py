@@ -1291,13 +1291,6 @@ class TelegramBridge:
 • /log - Claude 화면 확인
 • /status - 봇 상태 확인
 
-🚀 워크플로우 명령어:
-• /fullcycle - 전체 개발 워크플로우
-• /plan - 기획 단계
-• /implement - 구현 단계
-• /stabilize - 안정화 단계
-• /deploy - 배포 단계
-
 🎮 세션 제어:
 • /stop - 작업 중단
 • /restart - 세션 재시작
