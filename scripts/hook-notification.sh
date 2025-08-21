@@ -2,7 +2,7 @@
 
 # Claude Code Hook: Send Telegram notification when work completes
 # This script is called by Claude Code's built-in hook system
-# Version: 2.1 - Enhanced debugging and reliability
+# Version: 2.2 - Improved state detection and force option
 
 set -e
 
@@ -10,10 +10,17 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLAUDE_OPS_DIR="$(dirname "$SCRIPT_DIR")"
 
+# Check for force option
+FORCE_SEND=false
+if [ "$1" == "--force" ]; then
+    FORCE_SEND=true
+fi
+
 # Enhanced logging with environment info
 echo "=== $(date): Claude Code Hook TRIGGERED ===" >> "$CLAUDE_OPS_DIR/hook.log"
 echo "PWD: $PWD" >> "$CLAUDE_OPS_DIR/hook.log"
 echo "CLAUDE_SESSION_NAME: ${CLAUDE_SESSION_NAME:-unset}" >> "$CLAUDE_OPS_DIR/hook.log"
+echo "Force mode: $FORCE_SEND" >> "$CLAUDE_OPS_DIR/hook.log"
 echo "Environment vars:" >> "$CLAUDE_OPS_DIR/hook.log"
 env | grep -E "(CLAUDE|TMUX)" >> "$CLAUDE_OPS_DIR/hook.log" 2>/dev/null || echo "No CLAUDE/TMUX vars" >> "$CLAUDE_OPS_DIR/hook.log"
 
@@ -21,17 +28,26 @@ env | grep -E "(CLAUDE|TMUX)" >> "$CLAUDE_OPS_DIR/hook.log" 2>/dev/null || echo 
 HOOK_DATA=$(timeout 5s cat 2>/dev/null || echo "No hook data")
 echo "Hook data: $HOOK_DATA" >> "$CLAUDE_OPS_DIR/hook.log"
 
-# Extract session information from environment or hook data
-# Try multiple methods to get session name
+# Enhanced session detection with multiple fallback methods
+# Method 1: Environment variable (if Claude Code provides it)
 if [ -n "$CLAUDE_SESSION_NAME" ]; then
     SESSION_NAME="$CLAUDE_SESSION_NAME"
+# Method 2: Extract from tmux environment
 elif [ -n "$TMUX" ]; then
-    # Extract session name from tmux environment
     SESSION_NAME=$(tmux display-message -p '#S' 2>/dev/null || echo "claude_unknown")
+# Method 3: Extract from current directory name
+elif [[ "$PWD" =~ /projects/([^/]+) ]]; then
+    SESSION_NAME="claude_${BASH_REMATCH[1]}"
+# Method 4: Default fallback
 else
-    SESSION_NAME="claude_unknown"
+    SESSION_NAME="claude_claude-ops"  # Default to main session
 fi
 WORKING_DIR="${PWD:-unknown}"
+
+# Add delay to ensure Claude has transitioned to idle state (skip if force mode)
+if [ "$FORCE_SEND" != "true" ]; then
+    sleep 2
+fi
 
 # Load environment variables for Telegram
 if [ -f "$CLAUDE_OPS_DIR/.env" ]; then
