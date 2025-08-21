@@ -323,6 +323,25 @@ Claude가 작업을 완료했습니다. 결과를 확인해보세요.
         """Send error notification"""
         return self.send_notification_sync(f"❌ **오류 발생**\n\n{error_message}", force=True)
     
+    def send_manual_notification(self, title: str, content: str, urgency: str = "normal") -> bool:
+        """
+        Send manual notification with title and content
+        
+        Args:
+            title: Notification title
+            content: Notification content
+            urgency: Urgency level (low, normal, high)
+        """
+        urgency_icons = {
+            'low': '💡',
+            'normal': '📢',
+            'high': '🚨'
+        }
+        
+        icon = urgency_icons.get(urgency, '📢')
+        message = f"{icon} **{title}**\n\n{content}"
+        return self.send_notification_sync(message, force=True)
+    
     def extract_work_context(self) -> str:
         """Extract rich context from tmux session for work completion notification"""
         try:

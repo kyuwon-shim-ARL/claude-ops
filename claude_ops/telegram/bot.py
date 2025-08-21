@@ -851,6 +851,112 @@ class TelegramBridge:
                 f"수동으로 `claude` 명령어를 실행해주세요."
             )
     
+    async def fix_terminal_command(self, update, context):
+        """Fix terminal size issues in Claude sessions"""
+        user_id = update.effective_user.id
+        
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+        
+        # Check for reply-based session targeting
+        target_session = self.config.session_name
+        if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
+            original_text = update.message.reply_to_message.text
+            reply_session = self.extract_session_from_message(original_text)
+            if reply_session:
+                session_exists = os.system(f"tmux has-session -t {reply_session}") == 0
+                if session_exists:
+                    target_session = reply_session
+                    logger.info(f"📍 Reply 기반 터미널 복구: {target_session}")
+        
+        # Parse optional arguments
+        force_respawn = False
+        if context.args:
+            if "--force" in context.args:
+                force_respawn = True
+        
+        # Check if target session exists
+        session_exists = os.system(f"tmux has-session -t {target_session}") == 0
+        if not session_exists:
+            await update.message.reply_text(
+                f"❌ 세션 `{target_session}`을 찾을 수 없습니다.\n"
+                f"먼저 `/new_project`로 세션을 생성해주세요."
+            )
+            return
+        
+        try:
+            from ..utils.terminal_health import TerminalRecovery, TerminalHealthChecker
+            
+            # Show progress message
+            session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+            progress_msg = await update.message.reply_text(
+                f"🔧 `{session_display}` 터미널 진단 중...\n\n"
+                f"🔍 터미널 크기 및 출력 분석\n"
+                f"⚙️ 복구 방법 결정\n"
+                f"🔄 복구 진행 중..."
+            )
+            
+            # Perform diagnosis and recovery
+            result = TerminalRecovery.fix_terminal(target_session, force_respawn=force_respawn)
+            
+            if result['success']:
+                health = result['health']
+                recovery_method = result.get('recovery_method', 'diagnosis_only')
+                
+                # Create detailed success message
+                success_msg = f"✅ `{session_display}` 터미널 복구 완료!\n\n"
+                
+                if recovery_method == 'soft_reset':
+                    success_msg += "🔧 **복구 방법**: Soft Reset\n"
+                    success_msg += "⚡ 작업 중단 없이 터미널 크기 재설정\n"
+                    success_msg += "📐 새 크기: `165x73`\n\n"
+                elif recovery_method == 'respawn_pane':
+                    success_msg += "🔧 **복구 방법**: Pane Respawn\n"
+                    success_msg += "🔄 패널 재생성 및 Claude 재시작\n"
+                    success_msg += "📐 새 크기: `165x73`\n\n"
+                else:
+                    success_msg += "🔧 **복구 방법**: 진단만 수행\n"
+                
+                success_msg += f"📊 **현재 상태**: {health.actual_width}x{health.actual_height}\n"
+                success_msg += "💡 터미널이 정상적으로 작동합니다"
+                
+                await progress_msg.edit_text(success_msg)
+                logger.info(f"Successfully fixed terminal for {target_session}")
+                
+            else:
+                # Show diagnostic information
+                health = result['health']
+                issues = health.issues if health.issues else ["알 수 없는 문제"]
+                
+                failure_msg = f"❌ `{session_display}` 터미널 복구 실패\n\n"
+                failure_msg += f"🔍 **감지된 문제들**:\n"
+                for issue in issues:
+                    failure_msg += f"  • {issue}\n"
+                
+                failure_msg += f"\n📊 **현재 상태**: {health.actual_width or '?'}x{health.actual_height or '?'}\n"
+                failure_msg += f"🎯 **목표 크기**: {health.expected_width}x{health.expected_height}\n\n"
+                
+                failure_msg += "🔧 **수동 복구 방법**:\n"
+                failure_msg += f"1. `/fix_terminal --force` (강제 패널 재생성)\n"
+                failure_msg += f"2. 또는 `/restart` (Claude 재시작)\n"
+                
+                if health.screen_sample:
+                    failure_msg += f"\n📺 **화면 샘플**:\n```\n{health.screen_sample[:200]}...\n```"
+                
+                await progress_msg.edit_text(failure_msg, parse_mode='Markdown')
+                
+        except ImportError:
+            await progress_msg.edit_text(
+                "❌ 터미널 복구 모듈을 찾을 수 없습니다.\n"
+                "시스템 업데이트가 필요할 수 있습니다."
+            )
+        except Exception as e:
+            logger.error(f"터미널 복구 중 오류: {str(e)}")
+            await progress_msg.edit_text(
+                f"❌ 터미널 복구 중 오류가 발생했습니다:\n{str(e)}"
+            )
+    
     async def clear_command(self, update, context):
         """Clear terminal screen (send Ctrl+L)"""
         user_id = update.effective_user.id
@@ -1238,6 +1344,7 @@ class TelegramBridge:
         self.app.add_handler(CommandHandler("restart", self.restart_command))
         self.app.add_handler(CommandHandler("sessions", self.sessions_command))
         self.app.add_handler(CommandHandler("board", self.board_command))
+        self.app.add_handler(CommandHandler("fix_terminal", self.fix_terminal_command))
         
         # Callback query handler for inline buttons
         self.app.add_handler(CallbackQueryHandler(self.button_callback))
@@ -1263,6 +1370,7 @@ class TelegramBridge:
             BotCommand("log", "📺 현재 Claude 화면 실시간 확인"),
             BotCommand("stop", "⛔ Claude 작업 중단 (ESC 키 전송)"),
             BotCommand("erase", "🧹 현재 입력 지우기 (Ctrl+C 전송)"),
+            BotCommand("fix_terminal", "🔧 터미널 크기 문제 자동 진단 및 복구"),
             BotCommand("status", "📊 봇 및 tmux 세션 상태 확인"),
             BotCommand("help", "❓ 도움말 보기"),
             BotCommand("new_project", "🆕 새 Claude 프로젝트 생성")
