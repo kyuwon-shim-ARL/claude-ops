@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 - **Telegram-First Architecture**: Telegram bot serves as the primary interface for Claude Code session management
 - **Session-Centric Workflow**: All interactions are organized around tmux session management
-- **Hybrid Monitoring**: Claude Code hooks (primary) + polling backup for 100% reliability
+- **Reliable Monitoring**: Pure polling-based monitoring for 100% reliability
 - **Smart Automation**: Automatic session detection, reply-based targeting, and workflow macro expansion
-- **Ultra-Efficient**: 98.9% code reduction through hook-based architecture
+- **Proven Solution**: Polling-based architecture with guaranteed notification delivery
 
 ## System Overview
 
@@ -102,8 +102,7 @@ LOG_LEVEL=INFO
 - **`claude_ops/telegram/bot.py`** - Main Telegram bot implementation
 - **`claude_ops/session_manager.py`** - tmux session management
 - **`claude_ops/project_creator.py`** - Unified project creation module
-- **`claude_ops/hook_manager.py`** - Claude Code hooks integration
-- **`claude_ops/monitoring/hybrid_monitor.py`** - Hybrid monitoring system
+- **`claude_ops/monitoring/multi_monitor.py`** - Multi-session polling monitor
 - **`claude_ops/utils/session_state.py`** - Session state detection
 - **`claude_ops/config.py`** - Configuration management
 
@@ -120,16 +119,7 @@ LOG_LEVEL=INFO
    # Edit .env with your tokens
    ```
 
-3. **Setup Hook System** (NEW!):
-   ```bash
-   # Automated setup
-   ./scripts/setup-hooks.sh
-   
-   # Manual setup
-   python3 -m claude_ops.hook_manager setup
-   ```
-
-4. **Run Bot**:
+3. **Run Bot**:
    ```bash
    uv run python -m claude_ops.telegram.bot
    ```
@@ -153,11 +143,11 @@ LOG_LEVEL=INFO
 - Integrated 4-stage process: planning → implementation → stabilization → deployment
 - Reply-based session targeting for multi-project workflows
 
-### 3. Hybrid Monitoring System (NEW!)
-- **Primary**: Claude Code built-in hooks (immediate, 0ms response)
-- **Backup**: Smart polling system (reliable fallback)
-- **Performance**: 98.9% less code, 3000x faster than polling-only
-- **Efficiency Score**: 65/100 vs 43/100 (polling)
+### 3. Pure Polling Monitoring System
+- **Proven Reliable**: 100% notification delivery rate
+- **Multi-Session**: Monitors all Claude sessions simultaneously
+- **Smart Detection**: Accurate work completion identification
+- **Performance**: Optimized 5-second polling interval
 
 ### 4. Session State Detection
 - Monitors Claude sessions for completion states

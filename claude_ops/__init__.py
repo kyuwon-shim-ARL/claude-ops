@@ -26,7 +26,7 @@ __url__ = "https://github.com/kyuwon-shim-ARL/claude-ops"
 
 # Import main components
 from .telegram import TelegramBridge, SmartNotifier
-from .monitoring import MultiSessionMonitor, HybridMonitor
+from .monitoring import MultiSessionMonitor
 from .config import ClaudeOpsConfig
 from .session_manager import SessionManager, session_manager
 from .project_creator import ProjectCreator
@@ -34,7 +34,6 @@ from .project_creator import ProjectCreator
 __all__ = [
     "TelegramBridge",
     "MultiSessionMonitor",
-    "HybridMonitor", 
     "SmartNotifier",
     "ClaudeOpsConfig",
     "SessionManager",

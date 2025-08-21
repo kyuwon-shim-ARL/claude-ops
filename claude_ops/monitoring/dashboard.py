@@ -12,7 +12,6 @@ from pathlib import Path
 
 from ..config import ClaudeOpsConfig
 from ..session_manager import session_manager
-from ..hook_manager import HookManager
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +21,7 @@ class PerformanceDashboard:
     
     def __init__(self, config: ClaudeOpsConfig = None):
         self.config = config or ClaudeOpsConfig()
-        self.hook_manager = HookManager(self.config)
+        # Hook manager removed - using pure polling
         
         # Metrics storage
         self.metrics_file = Path(__file__).parent.parent.parent / "metrics.json"
