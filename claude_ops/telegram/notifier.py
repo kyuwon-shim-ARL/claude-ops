@@ -378,8 +378,10 @@ Claude가 작업을 완료했습니다. 결과를 확인해보세요.
             # Get lines from last bullet point to end
             content_lines = lines[start_index:]
             
-            # Remove bounding box characters only
+            # Remove bounding box characters and intelligently merge wrapped lines
             cleaned_lines = []
+            prev_line = ""
+            
             for line in content_lines:
                 # Remove all bounding box characters including horizontal lines
                 cleaned_line = line
@@ -388,12 +390,62 @@ Claude가 작업을 완료했습니다. 결과를 확인해보세요.
                 for char in ['╭', '╮', '╯', '╰', '│', '├', '└', '┌', '┐', '┘', '┴', '┬', '┤', '┼', '─', '━', '═', '▀', '▄', '█']:
                     cleaned_line = cleaned_line.replace(char, '')
                 
-                # Skip lines that are only horizontal lines (like ───────)
-                if cleaned_line.strip() and not all(c in '─━═▀▄█ ' for c in cleaned_line):
-                    cleaned_lines.append(cleaned_line)
-                elif not cleaned_line.strip():
-                    # Keep empty lines for formatting
-                    cleaned_lines.append(cleaned_line)
+                # Skip lines that are only horizontal lines
+                if all(c in '─━═▀▄█ ' for c in cleaned_line):
+                    continue
+                
+                # Smart line merging logic
+                if cleaned_line.strip():
+                    # Check if this line should start a new paragraph
+                    is_new_paragraph = (
+                        # Bullet points and list items
+                        cleaned_line.startswith('●') or 
+                        cleaned_line.startswith('•') or 
+                        cleaned_line.startswith('  ⎿') or
+                        cleaned_line.strip().startswith('- ') or
+                        cleaned_line.strip().startswith('* ') or
+                        cleaned_line.strip().startswith('>') or
+                        # Numbered lists
+                        any(cleaned_line.strip().startswith(f'{i}.') for i in range(1, 10)) or
+                        # Headers or sections
+                        cleaned_line.strip().endswith(':') or
+                        '::' in cleaned_line or
+                        cleaned_line.strip().startswith('#') or
+                        # Special markers
+                        cleaned_line.strip().startswith('```') or
+                        cleaned_line.strip().startswith('===') or
+                        cleaned_line.strip().startswith('---') or
+                        # Empty previous line means new paragraph
+                        not prev_line
+                    )
+                    
+                    # Check if previous line seems incomplete (likely wrapped)
+                    prev_incomplete = (
+                        prev_line and 
+                        not prev_line.endswith('.') and 
+                        not prev_line.endswith('!') and 
+                        not prev_line.endswith('?') and 
+                        not prev_line.endswith(':') and
+                        not prev_line.endswith(';') and
+                        not prev_line.endswith(',') and
+                        len(prev_line) > 60  # Likely hit terminal width
+                    )
+                    
+                    if is_new_paragraph or not prev_incomplete:
+                        # Start new line
+                        cleaned_lines.append(cleaned_line.strip())
+                    else:
+                        # Merge with previous line (was wrapped)
+                        if cleaned_lines:
+                            cleaned_lines[-1] += ' ' + cleaned_line.strip()
+                        else:
+                            cleaned_lines.append(cleaned_line.strip())
+                    
+                    prev_line = cleaned_lines[-1] if cleaned_lines else ""
+                else:
+                    # Empty line - preserve for readability
+                    cleaned_lines.append('')
+                    prev_line = ""
             
             # Apply smart truncation strategy
             content = self._smart_truncate_content(cleaned_lines)
