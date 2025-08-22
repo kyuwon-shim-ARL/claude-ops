@@ -96,9 +96,10 @@ class SessionStateAnalyzer:
             "tokens · esc to interrupt", # Token counting with interrupt (without closing paren)
             "tokens · esc to interrupt)", # Token counting with interrupt (with closing paren)
             "Whirring…",                 # Claude thinking indicator
+            "Ideating…",                 # Claude thinking/planning indicator
             "is running…",               # Command execution indicator
-            "⚒",                         # Tool usage indicator
-            "⏵⏵",                        # Progress indicator
+            "⚒",                         # Tool usage indicator (only when actively using)
+            # "⏵⏵" 제거됨 - 이것은 UI 요소이지 작업 상태가 아님
         ]
         
         # Patterns indicating user input is required
