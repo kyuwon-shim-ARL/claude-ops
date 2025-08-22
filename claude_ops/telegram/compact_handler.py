@@ -242,9 +242,8 @@ class CompactMonitorIntegration:
         analysis = self.detector.analyze_context(screen_content)
         
         if analysis['has_suggestion']:
-            # Check if we should notify
-            commands = analysis.get('commands', [])
-            if commands and self.detector.should_notify(session_name, commands[0]):
+            # Check if we should notify (based on content hash)
+            if self.detector.should_notify(session_name, screen_content):
                 logger.info(f"New /compact suggestion detected in {session_name}")
                 return analysis
         

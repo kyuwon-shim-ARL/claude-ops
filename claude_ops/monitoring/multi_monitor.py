@@ -196,6 +196,18 @@ class MultiSessionMonitor:
                     message += f"{i}. `{cmd}`\n"
                 message += "\n"
             
+            # Include ZED guide if available
+            zed_guide = analysis.get('zed_guide')
+            if zed_guide:
+                message += "📝 **ZED 가이드 프롬프트:**\n\n"
+                message += "```\n"
+                # Limit guide length for Telegram
+                if len(zed_guide) > 1000:
+                    message += zed_guide[:1000] + "\n... (더 많은 내용은 세션에서 확인)"
+                else:
+                    message += zed_guide
+                message += "\n```\n\n"
+            
             message += "💡 텔레그램 봇에서 실행 버튼을 사용하거나\n"
             message += "직접 세션에서 명령을 입력하세요."
             
