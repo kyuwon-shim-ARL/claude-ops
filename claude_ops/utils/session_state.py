@@ -90,16 +90,8 @@ class SessionStateAnalyzer:
     def __init__(self):
         # Patterns indicating active work in progress
         self.working_patterns = [
-            "esc to interrupt",           # Standard working indicator
-            "Running…",                   # Background task execution
-            "ctrl+b to run in background", # Background task hint
-            "tokens · esc to interrupt", # Token counting with interrupt (without closing paren)
-            "tokens · esc to interrupt)", # Token counting with interrupt (with closing paren)
-            "Whirring…",                 # Claude thinking indicator
-            "Ideating…",                 # Claude thinking/planning indicator
-            "is running…",               # Command execution indicator
-            "⚒",                         # Tool usage indicator (only when actively using)
-            # "⏵⏵" 제거됨 - 이것은 UI 요소이지 작업 상태가 아님
+            "esc to interrupt",           # Standard working indicator - 가장 신뢰할 수 있는 패턴
+            # 다른 패턴들은 Claude Code 버전에 따라 달라질 수 있어서 제거
         ]
         
         # Patterns indicating user input is required
