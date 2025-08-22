@@ -16,7 +16,6 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, Rep
 
 from ..config import ClaudeOpsConfig
 from ..project_creator import ProjectCreator
-from .compact_handler import CompactTelegramHandler
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +34,6 @@ class TelegramBridge:
         """
         self.config = config or ClaudeOpsConfig()
         self.app: Optional[Application] = None
-        self.compact_handler = CompactTelegramHandler(config)  # /compact handler
         
     def validate_input(self, user_input: str) -> tuple[bool, str]:
         """Validate and filter dangerous commands"""
