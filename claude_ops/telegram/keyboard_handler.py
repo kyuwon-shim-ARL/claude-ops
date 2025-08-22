@@ -171,17 +171,27 @@ class KeyboardHandler:
             error_sessions = []
             unknown_sessions = []
             
+            # Import summary helper for wait times
+            from ..utils.session_summary import summary_helper
+            
             for session in sessions:
                 try:
                     state = self.state_analyzer.get_state(session)
                     display_name = session.replace('claude_', '') if session.startswith('claude_') else session
                     
+                    # Get wait time if applicable
+                    wait_time = summary_helper.get_session_wait_time(session)
+                    if wait_time:
+                        wait_str = f" ({summary_helper.format_wait_time(wait_time)})"
+                    else:
+                        wait_str = ""
+                    
                     if state.name == "WORKING":
                         working_sessions.append(display_name)
                     elif state.name == "WAITING_INPUT":
-                        waiting_sessions.append(display_name)
+                        waiting_sessions.append(f"{display_name}{wait_str}")
                     elif state.name == "IDLE":
-                        idle_sessions.append(display_name)
+                        idle_sessions.append(f"{display_name}{wait_str}")
                     elif state.name == "ERROR":
                         error_sessions.append(display_name)
                     else:

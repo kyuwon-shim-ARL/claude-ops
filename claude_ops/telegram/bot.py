@@ -463,19 +463,20 @@ class TelegramBridge:
             await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
             return
             
-        help_text = """🤖 Claude-Ops Telegram Bot
+        help_text = """🤖 **Claude-Ops Telegram Bot**
 
-📝 주요 명령어:
-• /sessions - 활성 세션 목록 보기
-• /board - 세션 보드 (그리드 뷰)
-• /log - Claude 화면 실시간 확인
-• /stop - Claude 작업 중단 (ESC 키 전송)
-• /erase - 현재 입력 지우기 (Ctrl+C 전송)
-• /status - 봇 및 tmux 세션 상태 확인
-• /help - 도움말 보기
-• /new_project - 새 Claude 프로젝트 생성
+📝 **주요 명령어:**
+• `/sessions` - 활성 세션 목록 보기
+• `/board` - 세션 보드 (그리드 뷰)
+• `/summary` - 대기 중 세션 요약
+• `/log` - Claude 화면 실시간 확인
+• `/stop` - Claude 작업 중단 (ESC 키 전송)
+• `/erase` - 현재 입력 지우기 (Ctrl+C 전송)
+• `/status` - 봇 및 tmux 세션 상태 확인
+• `/help` - 도움말 보기
+• `/new_project` - 새 Claude 프로젝트 생성
 
-🚀 워크플로우 사용법:
+🚀 **워크플로우 사용법:**
 필요시 직접 슬래시 커맨드를 입력하세요:
 • /기획 - 구조적 기획 및 계획 수립
 • /구현 - DRY 원칙 기반 체계적 구현
@@ -1002,7 +1003,29 @@ class TelegramBridge:
         # Show session board grid
         await self._show_session_action_grid(update.message.reply_text, None)
     
-    
+    async def summary_command(self, update, context):
+        """Show summary of waiting sessions with wait times"""
+        user_id = update.effective_user.id
+        
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+        
+        try:
+            from ..utils.session_summary import summary_helper
+            
+            # Generate summary
+            summary_message = summary_helper.generate_summary()
+            
+            # Send with markdown formatting
+            await update.message.reply_text(
+                summary_message,
+                parse_mode='Markdown'
+            )
+            
+        except Exception as e:
+            logger.error(f"세션 요약 생성 오류: {str(e)}")
+            await update.message.reply_text("❌ 세션 요약 생성 중 오류가 발생했습니다.")
     
     async def sessions_command(self, update, context):
         """Show active sessions command or switch to reply session directly"""
@@ -1340,6 +1363,7 @@ class TelegramBridge:
         self.app.add_handler(CommandHandler("restart", self.restart_command))
         self.app.add_handler(CommandHandler("sessions", self.sessions_command))
         self.app.add_handler(CommandHandler("board", self.board_command))
+        self.app.add_handler(CommandHandler("summary", self.summary_command))
         self.app.add_handler(CommandHandler("fix_terminal", self.fix_terminal_command))
         
         # Callback query handler for inline buttons
@@ -1363,6 +1387,7 @@ class TelegramBridge:
         commands = [
             BotCommand("sessions", "🔄 활성 세션 목록 보기"),
             BotCommand("board", "🎯 세션 보드"),
+            BotCommand("summary", "📊 대기 중 세션 요약"),
             BotCommand("log", "📺 현재 Claude 화면 실시간 확인"),
             BotCommand("stop", "⛔ Claude 작업 중단 (ESC 키 전송)"),
             BotCommand("erase", "🧹 현재 입력 지우기 (Ctrl+C 전송)"),
