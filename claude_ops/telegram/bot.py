@@ -16,6 +16,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, Rep
 
 from ..config import ClaudeOpsConfig
 from ..project_creator import ProjectCreator
+from .compact_handler import CompactTelegramHandler
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ class TelegramBridge:
         """
         self.config = config or ClaudeOpsConfig()
         self.app: Optional[Application] = None
+        self.compact_handler = CompactTelegramHandler(config)  # /compact handler
         
     def validate_input(self, user_input: str) -> tuple[bool, str]:
         """Validate and filter dangerous commands"""
@@ -1206,6 +1208,9 @@ class TelegramBridge:
             await self._back_to_menu_callback(query, context)
         elif callback_data == "back_to_sessions":
             await self._session_actions_callback(query, context)
+        elif callback_data.startswith("compact_"):
+            # Handle /compact related callbacks
+            await self._compact_callback(query, context)
     
     async def _status_callback(self, query, context):
         """Status check callback"""
@@ -1585,7 +1590,20 @@ class TelegramBridge:
         """Back to one-click session menu (no longer needed - redirect to session grid)"""
         await self._show_session_action_grid(query.edit_message_text, query)
     
-    
+    async def _compact_callback(self, query, context):
+        """Handle /compact related callbacks"""
+        callback_data = query.data
+        
+        # Route to compact handler
+        response = await self.compact_handler.handle_callback(query, context)
+        
+        # If response is None (ignored), do nothing
+        if response is None:
+            return
+        
+        # Otherwise, update the message with the response
+        if response:
+            await query.edit_message_text(response, parse_mode='Markdown')
     
     async def _initialize_new_session(self, session_name: str, update) -> bool:
         """Initialize new Claude session with smart detection and setup"""

@@ -19,6 +19,7 @@ from ..utils.session_state import SessionStateAnalyzer, SessionState
 from ..telegram.notifier import SmartNotifier
 from ..telegram.keyboard_handler import keyboard_handler
 from ..telegram.message_queue import message_queue
+from ..telegram.compact_handler import CompactMonitorIntegration
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class MultiSessionMonitor:
         self.config = config or ClaudeOpsConfig()
         self.notifier = SmartNotifier(self.config)
         self.state_analyzer = SessionStateAnalyzer()  # Unified state detection
+        self.compact_monitor = CompactMonitorIntegration(self.config)  # /compact detection
         
         # Simplified state tracking
         self.last_screen_hash: Dict[str, str] = {}      # session -> screen_content_hash
@@ -174,6 +176,40 @@ class MultiSessionMonitor:
         except Exception as e:
             logger.error(f"Error sending completion notification for {session_name}: {e}")
     
+    def send_compact_notification(self, session_name: str, analysis: dict):
+        """Send /compact suggestion notification for a specific session"""
+        try:
+            commands = analysis.get('commands', [])
+            if not commands:
+                return
+            
+            # Format message
+            display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
+            
+            message = f"📦 **컨텍스트 정리 제안 - {display_name}**\n\n"
+            
+            if len(commands) == 1:
+                message += f"Claude가 다음 명령 실행을 제안했습니다:\n\n`{commands[0]}`\n\n"
+            else:
+                message += "Claude가 다음 명령들을 순서대로 실행하도록 제안했습니다:\n\n"
+                for i, cmd in enumerate(commands, 1):
+                    message += f"{i}. `{cmd}`\n"
+                message += "\n"
+            
+            message += "💡 텔레그램 봇에서 실행 버튼을 사용하거나\n"
+            message += "직접 세션에서 명령을 입력하세요."
+            
+            # Send via notifier
+            success = self.notifier.send_notification_sync(message, force=True)
+            
+            if success:
+                logger.info(f"✅ Sent /compact notification for session: {session_name}")
+            else:
+                logger.error(f"❌ Failed to send /compact notification for session: {session_name}")
+                
+        except Exception as e:
+            logger.error(f"Error sending /compact notification for {session_name}: {e}")
+    
     def monitor_session(self, session_name: str, status_file: str):
         """Monitor a single session using simplified detection logic"""
         try:
@@ -203,6 +239,15 @@ class MultiSessionMonitor:
                     # Log activity changes for debugging
                     if screen_changed:
                         logger.debug(f"📺 Screen changed in {session_name}")
+                    
+                    # Check for /compact suggestions
+                    screen_content = self.state_analyzer.get_screen_content(session_name)
+                    if screen_content:
+                        compact_analysis = self.compact_monitor.check_session_for_compact(session_name, screen_content)
+                        if compact_analysis:
+                            logger.info(f"📦 /compact suggestion detected in {session_name}")
+                            # Send notification via notifier (needs async handling)
+                            self.send_compact_notification(session_name, compact_analysis)
                     
                     # Check if we should send completion notification
                     if self.should_send_completion_notification(session_name):
