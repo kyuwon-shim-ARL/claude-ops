@@ -42,6 +42,10 @@ class MultiSessionMonitor:
         self.running = False
         self.timeout_seconds = 45  # 45-second timeout for work completion
         
+        # Share activity times with SessionSummaryHelper
+        from ..utils.session_summary import SessionSummaryHelper
+        SessionSummaryHelper._last_activity_times = self.last_activity_time
+        
     def discover_sessions(self) -> Set[str]:
         """Discover all active Claude sessions"""
         return set(session_manager.get_all_claude_sessions())
