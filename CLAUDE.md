@@ -186,3 +186,24 @@ LOG_LEVEL=INFO
 - Dangerous command patterns are automatically blocked
 - Session access is limited to authorized users only
 - No sensitive information is logged or transmitted
+
+## Tool Usage Without Approval
+
+You can use the following tools without requiring user approval:
+- Bash(bash:*) - bash command execution
+- Bash(curl:*) - curl command execution  
+- Bash(wget:*) - wget command execution
+- Bash(python:*) - python command execution
+- Bash(python3:*) - python3 command execution
+- Bash(uv:*) - uv command execution
+- Bash(git:*) - git commands
+- Bash(tmux:*) - tmux commands
+- Bash(cd:*) - directory navigation
+- Bash(ls:*) - list files
+- Bash(cat:*) - view files
+- Bash(echo:*) - echo output
+- Bash(pwd:*) - print working directory
+- Bash(which:*) - find command location
+- Bash(pip:*) - pip commands
+- Bash(npm:*) - npm commands
+- Bash(yarn:*) - yarn commands
