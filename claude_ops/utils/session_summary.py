@@ -17,7 +17,10 @@ class SessionSummaryHelper:
     
     def __init__(self):
         self.state_analyzer = SessionStateAnalyzer()
-        self.last_activity_times: Dict[str, float] = {}  # Track when sessions became idle
+        # Use a class-level dictionary to persist across instances
+        if not hasattr(SessionSummaryHelper, '_last_activity_times'):
+            SessionSummaryHelper._last_activity_times = {}
+        self.last_activity_times = SessionSummaryHelper._last_activity_times
         
     def get_waiting_sessions_with_times(self) -> List[Tuple[str, float, str]]:
         """
@@ -30,21 +33,21 @@ class SessionSummaryHelper:
         sessions = session_manager.get_all_claude_sessions()
         
         for session_name in sessions:
+            # Initialize tracking for new sessions
+            if session_name not in self.last_activity_times:
+                self.last_activity_times[session_name] = time.time()
+            
+            # Check current state
             state = self.state_analyzer.get_state_for_notification(session_name)
             
-            if state in [SessionState.WAITING_INPUT, SessionState.IDLE]:
-                # Get or set last activity time
-                if session_name not in self.last_activity_times:
-                    self.last_activity_times[session_name] = time.time()
-                
+            # Consider all non-working states as waiting
+            if state != SessionState.WORKING:
                 wait_time = time.time() - self.last_activity_times[session_name]
                 last_prompt = self.extract_last_prompt(session_name)
-                
                 waiting_sessions.append((session_name, wait_time, last_prompt))
             else:
-                # Reset if session is active
-                if session_name in self.last_activity_times:
-                    del self.last_activity_times[session_name]
+                # Update activity time for working sessions
+                self.last_activity_times[session_name] = time.time()
         
         # Sort by wait time (shortest first)
         waiting_sessions.sort(key=lambda x: x[1])
@@ -140,8 +143,9 @@ class SessionSummaryHelper:
             lines_list = content.split('\n')
             cleaned_lines = []
             for line in lines_list:
-                line = line.strip()
-                if line:
+                # Remove box drawing characters and excessive whitespace
+                line = re.sub(r'[╭─╮╯╰│]', '', line).strip()
+                if line and len(line) > 2:  # Skip empty or too short lines
                     # Truncate long lines
                     if len(line) > 60:
                         line = line[:57] + "..."
@@ -231,14 +235,19 @@ class SessionSummaryHelper:
         Returns:
             Wait time in seconds or None if not waiting
         """
+        # Initialize if not tracked
+        if session_name not in self.last_activity_times:
+            self.last_activity_times[session_name] = time.time()
+        
         state = self.state_analyzer.get_state_for_notification(session_name)
         
-        if state in [SessionState.WAITING_INPUT, SessionState.IDLE]:
-            if session_name not in self.last_activity_times:
-                self.last_activity_times[session_name] = time.time()
+        # Return wait time for non-working sessions
+        if state != SessionState.WORKING:
             return time.time() - self.last_activity_times[session_name]
-        
-        return None
+        else:
+            # Update activity time for working sessions
+            self.last_activity_times[session_name] = time.time()
+            return None
 
 
 # Global instance for shared state
