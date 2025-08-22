@@ -81,7 +81,7 @@ class SessionManager:
         return result == 0
     
     def get_all_claude_sessions(self) -> List[str]:
-        """Get list of all Claude sessions"""
+        """Get list of all Claude sessions (excluding monitoring sessions)"""
         try:
             import subprocess
             result = subprocess.run(
@@ -93,6 +93,8 @@ class SessionManager:
             
             if result.returncode == 0:
                 sessions = [s.strip() for s in result.stdout.split('\n') if s.strip()]
+                # Exclude monitoring sessions
+                sessions = [s for s in sessions if s not in ['claude-multi-monitor', 'claude-monitor']]
                 return sessions
             else:
                 return []

@@ -54,6 +54,20 @@ class CompactPromptDetector:
         if not screen_content:
             return False
         
+        # Exclude example/documentation patterns
+        exclude_patterns = [
+            r'\[Claude 화면에서\]',  # Example marker
+            r'\[텔레그램 알림\]',     # Example marker
+            r'실제 사용 예시',        # Example header
+            r'작동 방식',            # Documentation header
+            r'/compact 브리지',      # Documentation about /compact
+        ]
+        
+        # Check if this is example/documentation content
+        for exclude in exclude_patterns:
+            if re.search(exclude, screen_content, re.IGNORECASE):
+                return False
+        
         # Check each pattern
         for pattern in self.suggestion_patterns:
             if re.search(pattern, screen_content, re.IGNORECASE | re.MULTILINE):
