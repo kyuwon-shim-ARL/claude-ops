@@ -303,14 +303,17 @@ class SmartNotifier:
             self._last_notification_hash = message_hash
             return self._send_telegram_notification(message)
         else:
-            # Simple fallback message with session info
+            # Simple fallback message with better formatting
             message = f"""✅ **작업 완료** [`{session_name}`]
 
 📁 **프로젝트**: `{working_dir}`
 🎯 **세션**: `{session_name}` (로그: {log_length}줄)
 ⏰ **완료 시간**: {self._get_current_time()}
 
-Claude가 작업을 완료했습니다. 결과를 확인해보세요.
+━━━━━━━━━━━━━━━━━━━━━━━━━
+Claude가 작업을 완료했습니다.
+결과를 확인해보세요.
+━━━━━━━━━━━━━━━━━━━━━━━━━
 
 💡 **답장하려면** 이 메시지에 Reply로 응답하세요!"""
             return self.send_notification_sync(message)
@@ -438,27 +441,18 @@ Claude가 작업을 완료했습니다. 결과를 확인해보세요.
                         not prev_line
                     )
                     
-                    # Check if previous line seems incomplete (likely wrapped)
-                    prev_incomplete = (
-                        prev_line and 
-                        not prev_line.endswith('.') and 
-                        not prev_line.endswith('!') and 
-                        not prev_line.endswith('?') and 
-                        not prev_line.endswith(':') and
-                        not prev_line.endswith(';') and
-                        not prev_line.endswith(',') and
-                        len(prev_line) > 60  # Likely hit terminal width
-                    )
-                    
-                    if is_new_paragraph or not prev_incomplete:
-                        # Start new line
-                        cleaned_lines.append(cleaned_line.strip())
-                    else:
-                        # Merge with previous line (was wrapped)
-                        if cleaned_lines:
-                            cleaned_lines[-1] += ' ' + cleaned_line.strip()
+                    # Always preserve line breaks for better readability in Telegram
+                    # Don't merge lines to maintain original structure
+                    if is_new_paragraph and cleaned_lines and cleaned_lines[-1] != '':
+                        # Add blank line before new paragraph
+                        if not cleaned_lines[-1].strip():
+                            # Don't add multiple blank lines
+                            pass
                         else:
-                            cleaned_lines.append(cleaned_line.strip())
+                            cleaned_lines.append('')
+                    
+                    # Always add as new line (don't merge)
+                    cleaned_lines.append(cleaned_line.strip())
                     
                     prev_line = cleaned_lines[-1] if cleaned_lines else ""
                 else:
@@ -476,9 +470,11 @@ Claude가 작업을 완료했습니다. 결과를 확인해보세요.
                 session_info = session_manager.get_session_info(active_session)
                 
                 header = f"📁 Project: {session_info['directory']}\n🎯 Session: {active_session}\n\n"
-                return header + f"```\n{content}\n```"
+                # Don't use code blocks to preserve line breaks better
+                return header + content
             except:
-                return f"```\n{content}\n```"
+                # Return content without code blocks for better formatting
+                return content
             
         except Exception as e:
             logger.warning(f"Failed to extract work context: {str(e)}")
