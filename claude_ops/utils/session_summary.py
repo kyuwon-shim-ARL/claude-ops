@@ -171,6 +171,22 @@ class SessionSummaryHelper:
                 return f"{hours}시간 {minutes}분"
             return f"{hours}시간"
     
+    def escape_markdown(self, text: str) -> str:
+        """
+        Escape special characters for Telegram Markdown
+        
+        Args:
+            text: Text to escape
+            
+        Returns:
+            Escaped text safe for Markdown
+        """
+        # Characters that need escaping in Telegram Markdown
+        special_chars = ['*', '_', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        for char in special_chars:
+            text = text.replace(char, f'\\{char}')
+        return text
+    
     def generate_summary(self) -> str:
         """
         Generate complete session summary
@@ -204,14 +220,17 @@ class SessionSummaryHelper:
             
             # Last prompt if available
             if last_prompt and len(last_prompt) > 2:
+                # Escape markdown characters in prompt
+                last_prompt = self.escape_markdown(last_prompt)
                 # Truncate if too long
                 if len(last_prompt) > 60:
-                    last_prompt = last_prompt[:57] + "..."
+                    last_prompt = last_prompt[:57] + "\.\.\."
                 message += f"💬 {last_prompt}\n"
             
             # Screen summary (get more lines for better context)
             screen_summary = self.get_screen_summary(session_name, 5)
             if screen_summary and screen_summary != "화면 대기 중":
+                # No need to escape inside code blocks
                 message += f"\n```\n{screen_summary}\n```\n\n"
             else:
                 # Try to get at least the current status
