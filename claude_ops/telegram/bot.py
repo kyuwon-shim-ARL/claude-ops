@@ -467,8 +467,8 @@ class TelegramBridge:
 
 📝 **주요 명령어:**
 • `/sessions` - 활성 세션 목록 보기
-• `/board` - 세션 보드 (그리드 뷰)
 • `/summary` - 대기 중 세션 요약
+• `/board` - 세션 보드 (그리드 뷰)
 • `/log` - Claude 화면 실시간 확인
 • `/stop` - Claude 작업 중단 (ESC 키 전송)
 • `/erase` - 현재 입력 지우기 (Ctrl+C 전송)
@@ -1816,7 +1816,12 @@ class TelegramBridge:
     async def _show_session_action_grid(self, reply_func, query=None):
         """Show one-click session action grid with all sessions and direct actions"""
         try:
-            sessions = self.get_all_claude_sessions()
+            # Use same session list as summary for consistency
+            from ..utils.session_summary import summary_helper
+            waiting_sessions = summary_helper.get_waiting_sessions_with_times()
+            
+            # Extract just session names in the same order as summary
+            sessions = [session_name for session_name, _, _ in waiting_sessions]
             
             if not sessions:
                 await reply_func(
@@ -1836,32 +1841,14 @@ class TelegramBridge:
                     display_name = session.replace('claude_', '') if session.startswith('claude_') else session
                     current_icon = "⭐" if session == self.config.session_name else ""
                     
-                    # Get session status and wait time
+                    # Get session status (simplified without wait time)
                     from ..utils.session_state import is_session_working
-                    from ..utils.wait_time_tracker import wait_tracker
                     is_working = is_session_working(session)
                     status_icon = "🔄" if is_working else "💤"
                     
-                    # Get wait time if session is waiting
-                    wait_time_str = ""
-                    if not is_working:
-                        wait_time = wait_tracker.get_wait_time(session)
-                        if wait_time > 0:
-                            if wait_time < 60:
-                                wait_time_str = f" ({int(wait_time)}초)"
-                            elif wait_time < 3600:
-                                wait_time_str = f" ({int(wait_time/60)}분)"
-                            else:
-                                hours = int(wait_time/3600)
-                                minutes = int((wait_time % 3600) / 60)
-                                if minutes > 0:
-                                    wait_time_str = f" ({hours}시간{minutes}분)"
-                                else:
-                                    wait_time_str = f" ({hours}시간)"
-                    
                     # Get very short prompt hint for button
                     hint = await self._get_session_hint_short(session)
-                    button_text = f"{current_icon}{status_icon} {display_name}{wait_time_str}{hint}"
+                    button_text = f"{current_icon}{status_icon} {display_name}{hint}"
                     
                     session_row.append(
                         InlineKeyboardButton(
