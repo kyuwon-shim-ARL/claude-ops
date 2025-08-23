@@ -54,6 +54,40 @@ class SessionSummaryHelper:
         waiting_sessions.sort(key=lambda x: x[1], reverse=True)
         return waiting_sessions
     
+    def get_all_sessions_with_status(self) -> List[Tuple[str, float, str, str]]:
+        """
+        Get ALL sessions (both waiting and working) with their status
+        
+        Returns:
+            List of tuples: (session_name, wait_time_seconds, last_prompt, status)
+            status is either 'waiting' or 'working'
+        """
+        all_sessions = []
+        sessions = session_manager.get_all_claude_sessions()
+        
+        for session_name in sessions:
+            # Check current state
+            state = self.state_analyzer.get_state_for_notification(session_name)
+            
+            if state != SessionState.WORKING:
+                # Waiting session
+                wait_time = self.tracker.get_wait_time(session_name)
+                last_prompt = self.prompt_recall.extract_last_user_prompt(session_name)
+                if "프롬프트" in last_prompt or "실패" in last_prompt:
+                    last_prompt = ""
+                all_sessions.append((session_name, wait_time, last_prompt, 'waiting'))
+            else:
+                # Working session - reset wait time but include in list
+                self.tracker.reset_session(session_name)
+                last_prompt = self.prompt_recall.extract_last_user_prompt(session_name)
+                if "프롬프트" in last_prompt or "실패" in last_prompt:
+                    last_prompt = ""
+                all_sessions.append((session_name, 0, last_prompt, 'working'))
+        
+        # Sort: waiting sessions first (by wait time), then working sessions
+        all_sessions.sort(key=lambda x: (0 if x[3] == 'waiting' else 1, -x[1]))
+        return all_sessions
+    
     # Removed extract_last_prompt - now using PromptRecallSystem.extract_last_user_prompt
     
     def get_screen_summary(self, session_name: str, lines: int = 5) -> str:
@@ -189,34 +223,39 @@ class SessionSummaryHelper:
     
     def generate_summary(self) -> str:
         """
-        Generate complete session summary
+        Generate complete session summary (shows ALL sessions)
         
         Returns:
             Formatted summary message for Telegram
         """
-        waiting_sessions = self.get_waiting_sessions_with_times()
+        all_sessions = self.get_all_sessions_with_status()
         
-        if not waiting_sessions:
-            return "📊 **세션 요약**\n\n✅ 현재 대기 중인 세션이 없습니다."
+        if not all_sessions:
+            return "📊 **세션 요약**\n\n✅ 현재 활성 세션이 없습니다."
+        
+        # Count waiting and working sessions
+        waiting_count = sum(1 for s in all_sessions if s[3] == 'waiting')
+        working_count = sum(1 for s in all_sessions if s[3] == 'working')
         
         # Header
         current_time = datetime.now().strftime("%H:%M")
         message = f"📊 **세션 요약**\n_{current_time} 기준_\n\n"
-        message += f"**대기 중 세션: {len(waiting_sessions)}개**\n\n"
+        message += f"**전체 세션: {len(all_sessions)}개** (대기: {waiting_count}, 작업중: {working_count})\n\n"
         
         # Session details
-        for i, (session_name, wait_time, last_prompt) in enumerate(waiting_sessions, 1):
+        for i, (session_name, wait_time, last_prompt, status) in enumerate(all_sessions, 1):
             # Format session name
             display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
-            
-            # Format wait time
-            wait_str = self.format_wait_time(wait_time)
             
             # Add separator
             message += "━" * 25 + "\n"
             
-            # Session header
-            message += f"🎯 **{display_name}** ({wait_str})\n"
+            # Session header with status indicator
+            if status == 'working':
+                message += f"🔨 **{display_name}** (작업 중)\n"
+            else:
+                wait_str = self.format_wait_time(wait_time)
+                message += f"🎯 **{display_name}** ({wait_str} 대기)\n"
             
             # Last prompt if available
             if last_prompt and len(last_prompt) > 2:
@@ -236,9 +275,10 @@ class SessionSummaryHelper:
                 # Try to get at least the current status
                 message += f"\n_화면 대기 중_\n\n"
         
-        # Footer with longest waiting session (which is now the first one due to reverse sort)
+        # Footer with longest waiting session (only if there are waiting sessions)
+        waiting_sessions = [(s[0], s[1]) for s in all_sessions if s[3] == 'waiting']
         if waiting_sessions:
-            longest_session, longest_time, _ = waiting_sessions[0]  # First one is the longest now
+            longest_session, longest_time = max(waiting_sessions, key=lambda x: x[1])
             longest_name = longest_session.replace('claude_', '') if longest_session.startswith('claude_') else longest_session
             message += f"💡 **가장 오래 대기**: {longest_name} ({self.format_wait_time(longest_time)})"
         

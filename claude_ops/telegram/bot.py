@@ -1816,14 +1816,14 @@ class TelegramBridge:
     async def _show_session_action_grid(self, reply_func, query=None):
         """Show one-click session action grid with all sessions and direct actions"""
         try:
-            # Use same session list as summary for consistency
+            # Use same session list as summary for consistency (ALL sessions)
             from ..utils.session_summary import summary_helper
-            waiting_sessions = summary_helper.get_waiting_sessions_with_times()
+            all_sessions = summary_helper.get_all_sessions_with_status()
             
-            # Extract just session names in the same order as summary
-            sessions = [session_name for session_name, _, _ in waiting_sessions]
+            # Extract session info
+            sessions_info = [(session_name, status) for session_name, _, _, status in all_sessions]
             
-            if not sessions:
+            if not sessions_info:
                 await reply_func(
                     "❌ **세션 없음**\n\nClaude 세션을 찾을 수 없습니다.\n\n/new_project 명령으로 새 세션을 시작하세요.",
                     parse_mode='Markdown'
@@ -1833,27 +1833,25 @@ class TelegramBridge:
             keyboard = []
             
             # Session rows with direct actions (2 sessions per row max)
-            for i in range(0, len(sessions), 2):
-                row_sessions = sessions[i:i+2]
+            for i in range(0, len(sessions_info), 2):
+                row_sessions = sessions_info[i:i+2]
                 session_row = []
                 
-                for session in row_sessions:
-                    display_name = session.replace('claude_', '') if session.startswith('claude_') else session
-                    current_icon = "⭐" if session == self.config.session_name else ""
+                for session_name, status in row_sessions:
+                    display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
+                    current_icon = "⭐" if session_name == self.config.session_name else ""
                     
-                    # Get session status (simplified without wait time)
-                    from ..utils.session_state import is_session_working
-                    is_working = is_session_working(session)
-                    status_icon = "🔄" if is_working else "💤"
+                    # Use status from summary helper for consistency
+                    status_icon = "🔨" if status == 'working' else "💤"
                     
                     # Get very short prompt hint for button
-                    hint = await self._get_session_hint_short(session)
+                    hint = await self._get_session_hint_short(session_name)
                     button_text = f"{current_icon}{status_icon} {display_name}{hint}"
                     
                     session_row.append(
                         InlineKeyboardButton(
                             button_text,
-                            callback_data=f"session_grid:{session}"
+                            callback_data=f"session_grid:{session_name}"
                         )
                     )
                 
@@ -1863,8 +1861,13 @@ class TelegramBridge:
             
             reply_markup = InlineKeyboardMarkup(keyboard)
             
+            # Count working and waiting sessions
+            waiting_count = sum(1 for _, status in sessions_info if status == 'waiting')
+            working_count = sum(1 for _, status in sessions_info if status == 'working')
+            
             await reply_func(
-                f"🎯 **세션 보드** ({len(sessions)}개)\n\n"
+                f"🎯 **세션 보드** (전체: {len(sessions_info)}개)\n"
+                f"대기: {waiting_count}개 | 작업중: {working_count}개\n\n"
                 f"🎯 현재 메인: `{self.config.session_name}`\n\n"
                 "💆‍♂️ 세션 클릭 → 직접 액션 메뉴:",
                 reply_markup=reply_markup,
