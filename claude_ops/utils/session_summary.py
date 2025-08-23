@@ -119,8 +119,10 @@ class SessionSummaryHelper:
             Formatted screen summary
         """
         try:
+            # Get more lines to find meaningful content
+            scan_lines = 50  # Scan last 50 lines to find meaningful content
             result = subprocess.run(
-                f"tmux capture-pane -t {session_name} -p | tail -{lines}",
+                f"tmux capture-pane -t {session_name} -p -S -{scan_lines}",
                 shell=True,
                 capture_output=True,
                 text=True,
@@ -132,47 +134,68 @@ class SessionSummaryHelper:
             
             content = result.stdout.strip()
             if not content:
-                return "빈 화면"
+                return "뺈 화면"
             
-            # Clean up and format
-            lines_list = content.split('\n')
+            # Split into lines and process from bottom up
+            all_lines = content.split('\n')
             cleaned_lines = []
-            for line in lines_list:
-                # First check if line has any meaningful content before cleaning
-                # Remove box drawing characters but preserve the text
+            
+            # Common UI patterns to skip
+            skip_patterns = [
+                r'^\s*[⏵⏴▶◀]+\s*accept edits',  # Accept edits UI
+                r'^\s*Auto-updating',  # Auto-updating message
+                r'^\s*>\s*$',  # Empty prompt
+                r'^\s*[─│╭╮╯╰┌┐└┘]+\s*$',  # Box drawing only
+                r'^\s*$',  # Empty line
+                r'^\s*\?\s+for\s+shortcuts\s*$',  # Shortcuts hint
+                r'^\s*shift\+tab\s+to\s+cycle',  # Navigation hint
+            ]
+            
+            # Process lines from bottom up to find most recent meaningful content
+            for line in reversed(all_lines):
+                # Skip UI patterns
+                skip = False
+                for pattern in skip_patterns:
+                    if re.match(pattern, line):
+                        skip = True
+                        break
+                
+                if skip:
+                    continue
+                
+                # Clean the line
                 cleaned = re.sub(r'[╭─╮╯╰│┌┐└┘├┤┬┴┼]', ' ', line).strip()
                 
-                # Also try to detect common UI patterns and clean them
-                cleaned = re.sub(r'^\s*[▶⏵◀⏴]+\s*', '', cleaned)  # Remove arrow indicators
-                cleaned = re.sub(r'^\s*>\s*$', '', cleaned)  # Remove lone prompts
-                
-                # Keep lines that have actual text content (not just spaces/symbols)
-                if cleaned and len(cleaned) > 2 and not cleaned.isspace():
+                # Check if line has meaningful content
+                if cleaned and len(cleaned) > 3:
+                    # Skip lines that are just UI elements
+                    if 'accept edits' in cleaned.lower() or 'auto-updating' in cleaned.lower():
+                        continue
+                    if 'shift+tab' in cleaned.lower() or 'esc to interrupt' in cleaned.lower():
+                        continue
+                    
                     # Truncate long lines
-                    if len(cleaned) > 60:
-                        cleaned = cleaned[:57] + "..."
-                    cleaned_lines.append(f"  {cleaned}")
+                    if len(cleaned) > 70:
+                        cleaned = cleaned[:67] + "..."
+                    
+                    cleaned_lines.insert(0, f"  {cleaned}")
+                    
+                    # Stop when we have enough meaningful lines
+                    if len(cleaned_lines) >= lines:
+                        break
             
-            # If no meaningful content found, try to get raw content without heavy filtering
+            # If still no content, try to get anything that's not pure UI
             if not cleaned_lines:
-                # Just get non-empty lines without box characters
-                for line in lines_list:
-                    simple_clean = line.strip()
-                    # Check if line has actual text (not just box drawing chars)
-                    if simple_clean:
-                        # Remove only pure box drawing lines
-                        has_text = False
-                        for char in simple_clean:
-                            if char.isalnum() or char in '!@#$%^&*()_+-={}[]|:";<>?,./':
-                                has_text = True
-                                break
-                        
-                        if has_text:
-                            if len(simple_clean) > 60:
-                                simple_clean = simple_clean[:57] + "..."
-                            cleaned_lines.append(f"  {simple_clean}")
+                for line in reversed(all_lines[-20:]):  # Check last 20 lines
+                    simple = line.strip()
+                    if simple and not all(c in '─│╭╮╯╰┌┐└┘├┤┬┴┼ >?' for c in simple):
+                        if len(simple) > 70:
+                            simple = simple[:67] + "..."
+                        cleaned_lines.insert(0, f"  {simple}")
+                        if len(cleaned_lines) >= 3:
+                            break
             
-            return '\n'.join(cleaned_lines) if cleaned_lines else "빈 화면"
+            return '\n'.join(cleaned_lines) if cleaned_lines else "화면 대기 중"
             
         except Exception as e:
             return f"오류: {str(e)}"
@@ -236,9 +259,10 @@ class SessionSummaryHelper:
             
             # Screen summary (get more lines for better context)
             screen_summary = self.get_screen_summary(session_name, 5)
-            if screen_summary and screen_summary != "빈 화면":
+            if screen_summary and screen_summary != "화면 대기 중":
                 message += f"\n```\n{screen_summary}\n```\n\n"
             else:
+                # Try to get at least the current status
                 message += f"\n_화면 대기 중_\n\n"
         
         # Footer with longest waiting session
