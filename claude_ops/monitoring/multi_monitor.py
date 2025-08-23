@@ -19,6 +19,7 @@ from ..utils.session_state import SessionStateAnalyzer, SessionState
 from ..telegram.notifier import SmartNotifier
 from ..telegram.keyboard_handler import keyboard_handler
 from ..telegram.message_queue import message_queue
+from ..utils.wait_time_tracker import wait_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +31,10 @@ class MultiSessionMonitor:
         self.config = config or ClaudeOpsConfig()
         self.notifier = SmartNotifier(self.config)
         self.state_analyzer = SessionStateAnalyzer()  # Unified state detection
+        self.tracker = wait_tracker  # Use global wait time tracker
         
         # Simplified state tracking
         self.last_screen_hash: Dict[str, str] = {}      # session -> screen_content_hash
-        self.last_activity_time: Dict[str, float] = {}  # session -> timestamp
         self.notification_sent: Dict[str, bool] = {}    # session -> notification_sent_flag
         self.last_state: Dict[str, SessionState] = {}   # session -> last_known_state
         self.last_notification_time: Dict[str, float] = {}  # session -> last_notification_timestamp
@@ -41,10 +42,6 @@ class MultiSessionMonitor:
         self.thread_lock = threading.Lock()  # Thread-safe operations
         self.running = False
         self.timeout_seconds = 45  # 45-second timeout for work completion
-        
-        # Share activity times with SessionSummaryHelper
-        from ..utils.session_summary import SessionSummaryHelper
-        SessionSummaryHelper._last_activity_times = self.last_activity_time
         
     def discover_sessions(self) -> Set[str]:
         """Discover all active Claude sessions"""
@@ -95,7 +92,8 @@ class MultiSessionMonitor:
         
         if current_hash != last_hash:
             self.last_screen_hash[session_name] = current_hash
-            self.last_activity_time[session_name] = time.time()
+            # Screen changed means activity - reset wait time
+            self.tracker.reset_session(session_name)
             return True
             
         return False
@@ -119,7 +117,8 @@ class MultiSessionMonitor:
         # Reset notification flag if currently working
         if current_state == SessionState.WORKING:
             self.notification_sent[session_name] = False
-            self.last_activity_time[session_name] = time.time()
+            # Working means activity - reset wait time
+            self.tracker.reset_session(session_name)
             return False
         
         # Enhanced duplicate prevention
@@ -185,10 +184,11 @@ class MultiSessionMonitor:
             # Initialize session tracking
             with self.thread_lock:
                 self.last_screen_hash[session_name] = ""
-                self.last_activity_time[session_name] = time.time()
                 self.notification_sent[session_name] = False
                 self.last_state[session_name] = SessionState.UNKNOWN
                 self.last_notification_time[session_name] = 0
+                # Initialize wait time tracking
+                self.tracker.reset_session(session_name)
             
             logger.info(f"📊 Started simplified monitoring for {session_name}")
             
@@ -234,8 +234,8 @@ class MultiSessionMonitor:
             logger.info(f"🧹 Monitor thread for {session_name} is exiting")
             with self.thread_lock:
                 # Clean up all session data
-                for data_dict in [self.last_screen_hash, self.last_activity_time, 
-                                self.notification_sent, self.last_state, self.last_notification_time]:
+                for data_dict in [self.last_screen_hash, self.notification_sent, 
+                                self.last_state, self.last_notification_time]:
                     if session_name in data_dict:
                         del data_dict[session_name]
                 if session_name in self.active_threads:
@@ -243,6 +243,8 @@ class MultiSessionMonitor:
                 
                 # Clear state analyzer cache for this session
                 self.state_analyzer.clear_cache(session_name)
+                # Remove from wait time tracker
+                self.tracker.remove_session(session_name)
     
     def start_session_thread(self, session_name: str) -> bool:
         """Start monitoring thread for a session (thread-safe)"""
@@ -283,8 +285,8 @@ class MultiSessionMonitor:
                 logger.debug(f"🧹 Cleaning up dead thread for {session_name}")
                 del self.active_threads[session_name]
                 # Clean up all associated data
-                for data_dict in [self.last_screen_hash, self.last_activity_time,
-                                self.notification_sent, self.last_state, self.last_notification_time]:
+                for data_dict in [self.last_screen_hash, self.notification_sent, 
+                                self.last_state, self.last_notification_time]:
                     if session_name in data_dict:
                         del data_dict[session_name]
     
@@ -323,6 +325,7 @@ class MultiSessionMonitor:
                 if current_time % 300 < 5:  # Every 5 minutes
                     self.state_analyzer.cleanup_expired_cache()
                     message_queue.cleanup_old_messages()  # Clean old keyboard messages too
+                    self.tracker.cleanup_old_sessions()  # Clean up old session wait times
                 
                 # Discover current sessions
                 current_sessions = self.discover_sessions()
@@ -364,7 +367,6 @@ class MultiSessionMonitor:
         with self.thread_lock:
             self.active_threads.clear()
             self.last_screen_hash.clear()
-            self.last_activity_time.clear()
             self.notification_sent.clear()
             self.last_state.clear()
             self.last_notification_time.clear()

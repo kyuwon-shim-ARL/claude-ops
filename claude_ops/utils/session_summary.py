@@ -10,6 +10,7 @@ import subprocess
 from typing import Dict, List, Tuple, Optional
 from datetime import datetime, timedelta
 from ..utils.session_state import SessionStateAnalyzer, SessionState
+from ..utils.wait_time_tracker import wait_tracker
 from ..session_manager import session_manager
 
 class SessionSummaryHelper:
@@ -17,10 +18,7 @@ class SessionSummaryHelper:
     
     def __init__(self):
         self.state_analyzer = SessionStateAnalyzer()
-        # Use a class-level dictionary to persist across instances
-        if not hasattr(SessionSummaryHelper, '_last_activity_times'):
-            SessionSummaryHelper._last_activity_times = {}
-        self.last_activity_times = SessionSummaryHelper._last_activity_times
+        self.tracker = wait_tracker  # Use the global tracker instance
         
     def get_waiting_sessions_with_times(self) -> List[Tuple[str, float, str]]:
         """
@@ -33,21 +31,18 @@ class SessionSummaryHelper:
         sessions = session_manager.get_all_claude_sessions()
         
         for session_name in sessions:
-            # Initialize tracking for new sessions
-            if session_name not in self.last_activity_times:
-                self.last_activity_times[session_name] = time.time()
-            
             # Check current state
             state = self.state_analyzer.get_state_for_notification(session_name)
             
             # Consider all non-working states as waiting
             if state != SessionState.WORKING:
-                wait_time = time.time() - self.last_activity_times[session_name]
+                # Get wait time from persistent tracker
+                wait_time = self.tracker.get_wait_time(session_name)
                 last_prompt = self.extract_last_prompt(session_name)
                 waiting_sessions.append((session_name, wait_time, last_prompt))
             else:
-                # Update activity time for working sessions
-                self.last_activity_times[session_name] = time.time()
+                # Reset wait time for working sessions
+                self.tracker.reset_session(session_name)
         
         # Sort by wait time (shortest first)
         waiting_sessions.sort(key=lambda x: x[1])
@@ -143,13 +138,39 @@ class SessionSummaryHelper:
             lines_list = content.split('\n')
             cleaned_lines = []
             for line in lines_list:
-                # Remove box drawing characters and excessive whitespace
-                line = re.sub(r'[╭─╮╯╰│]', '', line).strip()
-                if line and len(line) > 2:  # Skip empty or too short lines
+                # First check if line has any meaningful content before cleaning
+                # Remove box drawing characters but preserve the text
+                cleaned = re.sub(r'[╭─╮╯╰│┌┐└┘├┤┬┴┼]', ' ', line).strip()
+                
+                # Also try to detect common UI patterns and clean them
+                cleaned = re.sub(r'^\s*[▶⏵◀⏴]+\s*', '', cleaned)  # Remove arrow indicators
+                cleaned = re.sub(r'^\s*>\s*$', '', cleaned)  # Remove lone prompts
+                
+                # Keep lines that have actual text content (not just spaces/symbols)
+                if cleaned and len(cleaned) > 2 and not cleaned.isspace():
                     # Truncate long lines
-                    if len(line) > 60:
-                        line = line[:57] + "..."
-                    cleaned_lines.append(f"  {line}")
+                    if len(cleaned) > 60:
+                        cleaned = cleaned[:57] + "..."
+                    cleaned_lines.append(f"  {cleaned}")
+            
+            # If no meaningful content found, try to get raw content without heavy filtering
+            if not cleaned_lines:
+                # Just get non-empty lines without box characters
+                for line in lines_list:
+                    simple_clean = line.strip()
+                    # Check if line has actual text (not just box drawing chars)
+                    if simple_clean:
+                        # Remove only pure box drawing lines
+                        has_text = False
+                        for char in simple_clean:
+                            if char.isalnum() or char in '!@#$%^&*()_+-={}[]|:";<>?,./':
+                                has_text = True
+                                break
+                        
+                        if has_text:
+                            if len(simple_clean) > 60:
+                                simple_clean = simple_clean[:57] + "..."
+                            cleaned_lines.append(f"  {simple_clean}")
             
             return '\n'.join(cleaned_lines) if cleaned_lines else "빈 화면"
             
@@ -213,9 +234,12 @@ class SessionSummaryHelper:
             if last_prompt:
                 message += f"└ \"{last_prompt}\"\n"
             
-            # Screen summary
-            screen_summary = self.get_screen_summary(session_name, 3)
-            message += f"\n```\n{screen_summary}\n```\n\n"
+            # Screen summary (get more lines for better context)
+            screen_summary = self.get_screen_summary(session_name, 5)
+            if screen_summary and screen_summary != "빈 화면":
+                message += f"\n```\n{screen_summary}\n```\n\n"
+            else:
+                message += f"\n_화면 대기 중_\n\n"
         
         # Footer with longest waiting session
         if waiting_sessions:
@@ -235,18 +259,14 @@ class SessionSummaryHelper:
         Returns:
             Wait time in seconds or None if not waiting
         """
-        # Initialize if not tracked
-        if session_name not in self.last_activity_times:
-            self.last_activity_times[session_name] = time.time()
-        
         state = self.state_analyzer.get_state_for_notification(session_name)
         
         # Return wait time for non-working sessions
         if state != SessionState.WORKING:
-            return time.time() - self.last_activity_times[session_name]
+            return self.tracker.get_wait_time(session_name)
         else:
-            # Update activity time for working sessions
-            self.last_activity_times[session_name] = time.time()
+            # Reset wait time for working sessions
+            self.tracker.reset_session(session_name)
             return None
 
 

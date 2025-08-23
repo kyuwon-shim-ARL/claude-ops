@@ -1836,14 +1836,32 @@ class TelegramBridge:
                     display_name = session.replace('claude_', '') if session.startswith('claude_') else session
                     current_icon = "⭐" if session == self.config.session_name else ""
                     
-                    # Get session status
+                    # Get session status and wait time
                     from ..utils.session_state import is_session_working
+                    from ..utils.wait_time_tracker import wait_tracker
                     is_working = is_session_working(session)
                     status_icon = "🔄" if is_working else "💤"
                     
+                    # Get wait time if session is waiting
+                    wait_time_str = ""
+                    if not is_working:
+                        wait_time = wait_tracker.get_wait_time(session)
+                        if wait_time > 0:
+                            if wait_time < 60:
+                                wait_time_str = f" ({int(wait_time)}초)"
+                            elif wait_time < 3600:
+                                wait_time_str = f" ({int(wait_time/60)}분)"
+                            else:
+                                hours = int(wait_time/3600)
+                                minutes = int((wait_time % 3600) / 60)
+                                if minutes > 0:
+                                    wait_time_str = f" ({hours}시간{minutes}분)"
+                                else:
+                                    wait_time_str = f" ({hours}시간)"
+                    
                     # Get very short prompt hint for button
                     hint = await self._get_session_hint_short(session)
-                    button_text = f"{current_icon}{status_icon} {display_name}{hint}"
+                    button_text = f"{current_icon}{status_icon} {display_name}{wait_time_str}{hint}"
                     
                     session_row.append(
                         InlineKeyboardButton(
