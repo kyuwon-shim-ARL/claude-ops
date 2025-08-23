@@ -11,6 +11,7 @@ from typing import Dict, List, Tuple, Optional
 from datetime import datetime, timedelta
 from ..utils.session_state import SessionStateAnalyzer, SessionState
 from ..utils.wait_time_tracker import wait_tracker
+from ..utils.prompt_recall import PromptRecallSystem
 from ..session_manager import session_manager
 
 class SessionSummaryHelper:
@@ -19,6 +20,7 @@ class SessionSummaryHelper:
     def __init__(self):
         self.state_analyzer = SessionStateAnalyzer()
         self.tracker = wait_tracker  # Use the global tracker instance
+        self.prompt_recall = PromptRecallSystem()  # Reuse existing prompt extraction
         
     def get_waiting_sessions_with_times(self) -> List[Tuple[str, float, str]]:
         """
@@ -38,74 +40,21 @@ class SessionSummaryHelper:
             if state != SessionState.WORKING:
                 # Get wait time from persistent tracker
                 wait_time = self.tracker.get_wait_time(session_name)
-                last_prompt = self.extract_last_prompt(session_name)
+                # Use PromptRecallSystem for better prompt extraction
+                last_prompt = self.prompt_recall.extract_last_user_prompt(session_name)
+                # Clean up the prompt if it contains error messages
+                if "프롬프트" in last_prompt or "실패" in last_prompt:
+                    last_prompt = ""
                 waiting_sessions.append((session_name, wait_time, last_prompt))
             else:
                 # Reset wait time for working sessions
                 self.tracker.reset_session(session_name)
         
-        # Sort by wait time (shortest first)
-        waiting_sessions.sort(key=lambda x: x[1])
+        # Sort by wait time (longest first - reverse order)
+        waiting_sessions.sort(key=lambda x: x[1], reverse=True)
         return waiting_sessions
     
-    def extract_last_prompt(self, session_name: str) -> str:
-        """
-        Extract the last user prompt from session
-        
-        Args:
-            session_name: Name of the tmux session
-            
-        Returns:
-            Last prompt text or empty string
-        """
-        try:
-            # Get last 30 lines of screen
-            result = subprocess.run(
-                f"tmux capture-pane -t {session_name} -p | tail -30",
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=2
-            )
-            
-            if result.returncode != 0:
-                return ""
-            
-            lines = result.stdout.split('\n')
-            
-            # Look for common prompt patterns
-            prompt_patterns = [
-                r'^>\s*(.+)',  # > prompt
-                r'^User:\s*(.+)',  # User: prompt
-                r'^Human:\s*(.+)',  # Human: prompt
-                r'^\?\s*(.+)',  # ? prompt
-                r'^▶\s*(.+)',  # ▶ prompt
-            ]
-            
-            # Search from bottom up for last prompt
-            for line in reversed(lines):
-                line = line.strip()
-                for pattern in prompt_patterns:
-                    match = re.match(pattern, line)
-                    if match:
-                        prompt = match.group(1).strip()
-                        # Truncate if too long
-                        if len(prompt) > 50:
-                            prompt = prompt[:47] + "..."
-                        return prompt
-            
-            # If no prompt pattern found, look for question marks
-            for line in reversed(lines):
-                if '?' in line and len(line) > 5:
-                    prompt = line.strip()
-                    if len(prompt) > 50:
-                        prompt = prompt[:47] + "..."
-                    return prompt
-                    
-            return ""
-            
-        except Exception:
-            return ""
+    # Removed extract_last_prompt - now using PromptRecallSystem.extract_last_user_prompt
     
     def get_screen_summary(self, session_name: str, lines: int = 5) -> str:
         """
@@ -254,8 +203,11 @@ class SessionSummaryHelper:
             message += f"🎯 **{display_name}** ({wait_str})\n"
             
             # Last prompt if available
-            if last_prompt:
-                message += f"└ \"{last_prompt}\"\n"
+            if last_prompt and len(last_prompt) > 2:
+                # Truncate if too long
+                if len(last_prompt) > 60:
+                    last_prompt = last_prompt[:57] + "..."
+                message += f"💬 {last_prompt}\n"
             
             # Screen summary (get more lines for better context)
             screen_summary = self.get_screen_summary(session_name, 5)
@@ -265,9 +217,9 @@ class SessionSummaryHelper:
                 # Try to get at least the current status
                 message += f"\n_화면 대기 중_\n\n"
         
-        # Footer with longest waiting session
+        # Footer with longest waiting session (which is now the first one due to reverse sort)
         if waiting_sessions:
-            longest_session, longest_time, _ = max(waiting_sessions, key=lambda x: x[1])
+            longest_session, longest_time, _ = waiting_sessions[0]  # First one is the longest now
             longest_name = longest_session.replace('claude_', '') if longest_session.startswith('claude_') else longest_session
             message += f"💡 **가장 오래 대기**: {longest_name} ({self.format_wait_time(longest_time)})"
         
