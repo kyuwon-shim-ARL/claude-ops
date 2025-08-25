@@ -161,6 +161,11 @@ class SessionSummaryHelper:
                     if 'shift+tab' in cleaned.lower() or 'esc to interrupt' in cleaned.lower():
                         continue
                     
+                    # Clean problematic characters that break Markdown parsing
+                    # Remove or escape quotes that can break parsing in code blocks
+                    cleaned = cleaned.replace('"', "'")  # Replace double quotes with single quotes
+                    cleaned = cleaned.replace('`', "'")  # Replace backticks with single quotes
+                    
                     # Truncate long lines
                     if len(cleaned) > 70:
                         cleaned = cleaned[:67] + "..."
@@ -176,6 +181,9 @@ class SessionSummaryHelper:
                 for line in reversed(all_lines[-20:]):  # Check last 20 lines
                     simple = line.strip()
                     if simple and not all(c in '─│╭╮╯╰┌┐└┘├┤┬┴┼ >?' for c in simple):
+                        # Clean problematic characters in fallback content too
+                        simple = simple.replace('"', "'")  # Replace double quotes
+                        simple = simple.replace('`', "'")  # Replace backticks
                         if len(simple) > 70:
                             simple = simple[:67] + "..."
                         cleaned_lines.insert(0, f"  {simple}")
@@ -219,8 +227,9 @@ class SessionSummaryHelper:
         Returns:
             Escaped text safe for Markdown
         """
-        # Characters that need escaping in Telegram Markdown
-        special_chars = ['*', '_', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        # Only escape characters that actually cause parsing issues in Telegram
+        # Be more conservative to avoid over-escaping
+        special_chars = ['*', '_', '[', ']', '`', '\\']
         for char in special_chars:
             text = text.replace(char, f'\\{char}')
         return text
