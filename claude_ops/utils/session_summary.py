@@ -38,8 +38,8 @@ class SessionSummaryHelper:
             
             # Consider all non-working states as waiting
             if state != SessionState.WORKING:
-                # Get wait time from persistent tracker
-                wait_time = self.tracker.get_wait_time(session_name)
+                # Use user's definition: time since last completion notification
+                wait_time = self.tracker.get_wait_time_since_completion(session_name)
                 # Use PromptRecallSystem for better prompt extraction
                 last_prompt = self.prompt_recall.extract_last_user_prompt(session_name)
                 # Clean up the prompt if it contains error messages
@@ -47,8 +47,8 @@ class SessionSummaryHelper:
                     last_prompt = ""
                 waiting_sessions.append((session_name, wait_time, last_prompt))
             else:
-                # Reset wait time for working sessions
-                self.tracker.reset_session(session_name)
+                # Working sessions don't affect completion time tracking
+                pass
         
         # Sort by wait time (longest first - reverse order)
         waiting_sessions.sort(key=lambda x: x[1], reverse=True)
@@ -70,19 +70,23 @@ class SessionSummaryHelper:
             state = self.state_analyzer.get_state_for_notification(session_name)
             
             if state != SessionState.WORKING:
-                # Waiting session
-                wait_time = self.tracker.get_wait_time(session_name)
+                # Waiting session - use time since last completion
+                wait_time = self.tracker.get_wait_time_since_completion(session_name)
+                has_record = self.tracker.has_completion_record(session_name)
                 last_prompt = self.prompt_recall.extract_last_user_prompt(session_name)
                 if "프롬프트" in last_prompt or "실패" in last_prompt:
                     last_prompt = ""
-                all_sessions.append((session_name, wait_time, last_prompt, 'waiting'))
+                # Include transparency info: (session, wait_time, prompt, status, has_completion_record)
+                all_sessions.append((session_name, wait_time, last_prompt, 'waiting', has_record))
             else:
-                # Working session - reset wait time but include in list
-                self.tracker.reset_session(session_name)
+                # Working session - still show time since last completion
+                wait_time = self.tracker.get_wait_time_since_completion(session_name)
+                has_record = self.tracker.has_completion_record(session_name)
                 last_prompt = self.prompt_recall.extract_last_user_prompt(session_name)
                 if "프롬프트" in last_prompt or "실패" in last_prompt:
                     last_prompt = ""
-                all_sessions.append((session_name, 0, last_prompt, 'working'))
+                # Include transparency info: (session, wait_time, prompt, status, has_completion_record)  
+                all_sessions.append((session_name, wait_time, last_prompt, 'working', has_record))
         
         # Sort: waiting sessions first (by wait time), then working sessions
         all_sessions.sort(key=lambda x: (0 if x[3] == 'waiting' else 1, -x[1]))
@@ -233,29 +237,42 @@ class SessionSummaryHelper:
         if not all_sessions:
             return "📊 **세션 요약**\n\n✅ 현재 활성 세션이 없습니다."
         
-        # Count waiting and working sessions
+        # Count waiting and working sessions  
         waiting_count = sum(1 for s in all_sessions if s[3] == 'waiting')
         working_count = sum(1 for s in all_sessions if s[3] == 'working')
+        
+        # Count sessions using fallback estimates
+        fallback_count = sum(1 for s in all_sessions if not s[4])  # s[4] is has_record
         
         # Header
         current_time = datetime.now().strftime("%H:%M")
         message = f"📊 **세션 요약**\n_{current_time} 기준_\n\n"
-        message += f"**전체 세션: {len(all_sessions)}개** (대기: {waiting_count}, 작업중: {working_count})\n\n"
+        message += f"**전체 세션: {len(all_sessions)}개** (대기: {waiting_count}, 작업중: {working_count})\n"
+        
+        # Add transparency notice if fallback is being used
+        if fallback_count > 0:
+            message += f"⚠️ _추정_ 표시: Hook 미설정으로 {fallback_count}개 세션 시간 추정\n\n"
+        else:
+            message += "\n"
         
         # Session details
-        for i, (session_name, wait_time, last_prompt, status) in enumerate(all_sessions, 1):
+        for i, (session_name, wait_time, last_prompt, status, has_record) in enumerate(all_sessions, 1):
             # Format session name
             display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
             
             # Add separator
             message += "━" * 25 + "\n"
             
-            # Session header with status indicator
+            # Session header with status indicator and transparency
             if status == 'working':
                 message += f"🔨 **{display_name}** (작업 중)\n"
             else:
                 wait_str = self.format_wait_time(wait_time)
-                message += f"🎯 **{display_name}** ({wait_str} 대기)\n"
+                # Add transparency indicator for fallback estimates
+                if not has_record:
+                    message += f"🎯 **{display_name}** ({wait_str} 대기 ~추정~)\n"
+                else:
+                    message += f"🎯 **{display_name}** ({wait_str} 대기)\n"
             
             # Last prompt if available
             if last_prompt and len(last_prompt) > 2:
