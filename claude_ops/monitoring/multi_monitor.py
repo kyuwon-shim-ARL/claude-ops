@@ -117,8 +117,10 @@ class MultiSessionMonitor:
         # Reset notification flag if currently working
         if current_state == SessionState.WORKING:
             self.notification_sent[session_name] = False
-            # Working means activity - reset wait time
-            self.tracker.reset_session(session_name)
+            # Only reset wait time if state actually changed to working
+            if previous_state != SessionState.WORKING:
+                # State changed to working - reset wait time
+                self.tracker.reset_session(session_name)
             return False
         
         # Enhanced duplicate prevention
@@ -171,6 +173,8 @@ class MultiSessionMonitor:
             
             if success:
                 logger.info(f"✅ Sent completion notification for session: {session_name}")
+                # Mark completion time for wait time tracking (user's definition)
+                self.tracker.mark_completion(session_name)
             else:
                 logger.debug(f"⏭️ Skipped notification for session: {session_name} (duplicate or failed)")
                 

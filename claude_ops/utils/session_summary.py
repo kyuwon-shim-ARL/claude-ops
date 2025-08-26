@@ -227,11 +227,14 @@ class SessionSummaryHelper:
         Returns:
             Escaped text safe for Markdown
         """
-        # Only escape characters that actually cause parsing issues in Telegram
-        # Be more conservative to avoid over-escaping
-        special_chars = ['*', '_', '[', ']', '`', '\\']
-        for char in special_chars:
-            text = text.replace(char, f'\\{char}')
+        # Escape all special Markdown characters properly
+        # Order matters - escape backslash first
+        text = text.replace('\\', '\\\\')
+        text = text.replace('*', '\\*')
+        text = text.replace('_', '\\_')
+        text = text.replace('[', '\\[')
+        text = text.replace(']', '\\]')
+        text = text.replace('`', '\\`')
         return text
     
     def generate_summary(self) -> str:
@@ -253,21 +256,22 @@ class SessionSummaryHelper:
         # Count sessions using fallback estimates
         fallback_count = sum(1 for s in all_sessions if not s[4])  # s[4] is has_record
         
-        # Header
+        # Header  
         current_time = datetime.now().strftime("%H:%M")
-        message = f"📊 **세션 요약**\n_{current_time} 기준_\n\n"
+        message = f"📊 **세션 요약**\n\\_{current_time} 기준\\_\n\n"
         message += f"**전체 세션: {len(all_sessions)}개** (대기: {waiting_count}, 작업중: {working_count})\n"
         
         # Add transparency notice if fallback is being used
         if fallback_count > 0:
-            message += f"⚠️ _추정_ 표시: Hook 미설정으로 {fallback_count}개 세션 시간 추정\n\n"
+            message += f"⚠️ \\_추정\\_ 표시: Hook 미설정으로 {fallback_count}개 세션 시간 추정\n\n"
         else:
             message += "\n"
         
         # Session details
         for i, (session_name, wait_time, last_prompt, status, has_record) in enumerate(all_sessions, 1):
-            # Format session name
+            # Format session name - escape underscores
             display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
+            display_name = self.escape_markdown(display_name)
             
             # Add separator
             message += "━" * 25 + "\n"
@@ -299,13 +303,14 @@ class SessionSummaryHelper:
                 message += f"\n```\n{screen_summary}\n```\n\n"
             else:
                 # Try to get at least the current status
-                message += f"\n_화면 대기 중_\n\n"
+                message += f"\n\\_화면 대기 중\\_\n\n"
         
         # Footer with longest waiting session (only if there are waiting sessions)
         waiting_sessions = [(s[0], s[1]) for s in all_sessions if s[3] == 'waiting']
         if waiting_sessions:
             longest_session, longest_time = max(waiting_sessions, key=lambda x: x[1])
             longest_name = longest_session.replace('claude_', '') if longest_session.startswith('claude_') else longest_session
+            longest_name = self.escape_markdown(longest_name)
             message += f"💡 **가장 오래 대기**: {longest_name} ({self.format_wait_time(longest_time)})"
         
         return message
