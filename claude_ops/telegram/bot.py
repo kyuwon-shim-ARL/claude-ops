@@ -330,15 +330,20 @@ class TelegramBridge:
         
         # If no arguments, show simple usage only
         if not args:
+            logger.info(f"User {user_id} called /new_project without arguments - showing usage")
             await update.message.reply_text(
+                "🚀 **새 프로젝트 생성**\n\n"
                 "📋 **사용법:**\n"
                 "`/new_project <프로젝트명>`\n\n"
                 "💡 **예시:**\n"
                 "• `/new_project my-app`\n"
                 "• `/new_project api-server`\n"
                 "• `/new_project webapp2024`\n\n"
-                "📝 **규칙:**\n"
-                "• 영문, 숫자, 하이픈(-), 언더스코어(_)만 사용",
+                "📝 **프로젝트명 규칙:**\n"
+                "• 영문, 숫자, 하이픈(-), 언더스코어(_)만 사용\n"
+                "• 공백 사용 불가\n\n"
+                "💬 바로 시작하려면:\n"
+                "`/new_project 원하는_프로젝트명`",
                 parse_mode='Markdown'
             )
             return
