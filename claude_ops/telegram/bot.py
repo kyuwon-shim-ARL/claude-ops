@@ -1820,8 +1820,8 @@ class TelegramBridge:
             from ..utils.session_summary import summary_helper
             all_sessions = summary_helper.get_all_sessions_with_status()
             
-            # Extract session info
-            sessions_info = [(session_name, status) for session_name, _, _, status in all_sessions]
+            # Extract session info - unpack 5-tuple correctly
+            sessions_info = [(session_name, status) for session_name, _, _, status, _ in all_sessions]
             
             if not sessions_info:
                 await reply_func(
@@ -1961,8 +1961,11 @@ class TelegramBridge:
             )
             
         except Exception as e:
-            logger.error(f"Session grid callback error: {str(e)}")
-            await query.answer(f"❌ 세션 액션 로드 실패: {str(e)}")
+            logger.error(f"Session grid callback error for {session_name}: {str(e)}", exc_info=True)
+            try:
+                await query.answer(f"❌ 세션 액션 로드 실패")
+            except:
+                pass  # Already answered
     
     async def _direct_action_callback(self, query, context, callback_data):
         """Handle direct action callbacks from enhanced main menu"""

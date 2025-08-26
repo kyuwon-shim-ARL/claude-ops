@@ -49,8 +49,8 @@ echo ""
 # Change to claude-ops directory to use the Python module
 cd "$CLAUDE_OPS_DIR"
 
-# Use Python ProjectCreator
-python3 -c "
+# Use Python ProjectCreator with uv environment
+uv run python -c "
 import sys
 sys.path.insert(0, '.')
 from claude_ops.project_creator import ProjectCreator
