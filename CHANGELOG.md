@@ -48,7 +48,7 @@ This is a major refactoring that transforms Claude-Ops into a focused Telegram-C
 ### ✨ Added
 - **Streamlined Telegram Bot**: Complete rewrite focused on core Claude session control
 - **Reply-Based Session Targeting**: Reply to session messages to send commands directly to specific sessions
-- **Workflow Macros**: `@기획`, `@구현`, `@안정화`, `@배포` for structured development prompts
+- **Workflow Integration**: Seamless integration with claude-dev-kit slash commands (`/기획`, `/구현`, `/안정화`, `/배포`)
 - **Session State Detection**: Real-time monitoring of Claude session states (working/idle/error)
 - **Comprehensive Test Suite**: 128 tests covering all core functionality
 - **Configuration Management**: Unified config system with environment variable support

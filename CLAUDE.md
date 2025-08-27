@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 - **Telegram-First Architecture**: Telegram bot serves as the primary interface for Claude Code session management
 - **Session-Centric Workflow**: All interactions are organized around tmux session management
 - **Reliable Monitoring**: Pure polling-based monitoring for 100% reliability
-- **Smart Automation**: Automatic session detection, reply-based targeting, and workflow macro expansion
+- **Smart Automation**: Automatic session detection, reply-based targeting, and claude-dev-kit integration
 - **Proven Solution**: Polling-based architecture with guaranteed notification delivery
 
 ## System Overview
@@ -169,7 +169,7 @@ LOG_LEVEL=INFO
 
 1. **Use descriptive session names** that reflect project/task context
 2. **Leverage reply-based targeting** for efficient session communication
-3. **Use workflow macros** for consistent development process
+3. **Use claude-dev-kit commands** for consistent development process
 4. **Monitor session board** for overview of all active work
 5. **Set up notifications** for important project milestones
 

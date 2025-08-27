@@ -232,8 +232,8 @@ tmux has-session -t claude_projectname
    - Screenshot and share when needed
 
 3. **Knowledge Sharing**: Document common workflows
-   - Create team-specific macros
-   - Share useful prompts
+   - Share claude-dev-kit command patterns
+   - Document useful prompts and workflows
 
 ### Admin Responsibilities
 
