@@ -5,6 +5,19 @@ All notable changes to Claude-Ops will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2025-08-27
+
+### 🐛 Fixed
+- **Session Log Capture**: Improved reliability for attached sessions with retry logic
+- **Markdown Escaping**: Fixed `/summary` command parsing errors with proper character escaping
+- **Board Access**: Resolved intermittent connection issues with urban-microbiome-toolkit session
+- **Error Handling**: Added timeout and fallback messages for better UX
+
+### 🔧 Improved
+- **Capture Resilience**: 3-attempt retry logic with 0.2s intervals
+- **Timeout Protection**: 2-second timeout prevents hanging on unresponsive sessions
+- **User Feedback**: Clear error messages indicating when sessions are attached elsewhere
+
 ## [2.1.1] - 2025-08-20
 
 ### 🚀 Pure Bridge Architecture Completion
