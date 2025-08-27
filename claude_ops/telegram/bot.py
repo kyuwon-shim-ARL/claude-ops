@@ -2401,38 +2401,66 @@ class TelegramBridge:
     
     
     async def _get_session_log_content(self, session_name: str, line_count: int = 50) -> str:
-        """Get recent log content from session"""
+        """Get recent log content from session with retry logic"""
         try:
             # Check if session exists
             session_exists = os.system(f"tmux has-session -t {session_name}") == 0
             if not session_exists:
                 return "세션이 존재하지 않습니다."
             
-            # Use tmux capture-pane with -S to specify start line (negative for history)
-            result = subprocess.run(
-                f"tmux capture-pane -t {session_name} -p -S -{line_count}", 
-                shell=True, 
-                capture_output=True, 
-                text=True
-            )
-            
-            if result.returncode == 0:
-                log_content = result.stdout.strip()
-                if not log_content:
-                    return "로그 내용이 없습니다."
+            # Try to capture with retry logic for attached sessions
+            max_retries = 3
+            for attempt in range(max_retries):
+                # Use tmux capture-pane with -e (include escape sequences) and -J (join lines)
+                result = subprocess.run(
+                    f"tmux capture-pane -t {session_name} -p -e -S -{line_count}", 
+                    shell=True, 
+                    capture_output=True, 
+                    text=True,
+                    timeout=2  # Add timeout to prevent hanging
+                )
                 
-                # Limit content length for Telegram message
-                if len(log_content) > 3000:  # Telegram message limit consideration
-                    lines = log_content.split('\n')
-                    truncated_lines = lines[-30:]  # Show last 30 lines if too long
-                    log_content = '\n'.join(truncated_lines)
-                    log_content += f"\n\n... (총 {len(lines)}줄 중 마지막 30줄만 표시)"
+                if result.returncode == 0:
+                    log_content = result.stdout.strip()
+                    if not log_content and attempt < max_retries - 1:
+                        # Empty content might be timing issue, retry
+                        await asyncio.sleep(0.2)
+                        continue
+                    
+                    if not log_content:
+                        return "로그 내용이 없습니다."
+                    
+                    # Limit content length for Telegram message
+                    if len(log_content) > 3000:  # Telegram message limit consideration
+                        lines = log_content.split('\n')
+                        truncated_lines = lines[-30:]  # Show last 30 lines if too long
+                        log_content = '\n'.join(truncated_lines)
+                        log_content += f"\n\n... (총 {len(lines)}줄 중 마지막 30줄만 표시)"
+                    
+                    return log_content
+                else:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Capture attempt {attempt+1} failed for {session_name}, retrying...")
+                        await asyncio.sleep(0.2)
+                    else:
+                        logger.error(f"Failed to capture session {session_name} after {max_retries} attempts: {result.stderr}")
+                        
+                        # Fallback: try basic info
+                        info_result = subprocess.run(
+                            f"tmux list-sessions | grep {session_name}",
+                            shell=True,
+                            capture_output=True,
+                            text=True
+                        )
+                        
+                        if info_result.returncode == 0:
+                            return f"세션 정보: {info_result.stdout.strip()}\n(화면 캡처 실패 - 세션이 다른 터미널에 연결되어 있을 수 있습니다)"
+                        
+                        return "로그를 가져올 수 없습니다."
                 
-                return log_content
-            else:
-                logger.error(f"Failed to capture session {session_name}: {result.stderr}")
-                return "로그를 가져올 수 없습니다."
-                
+        except subprocess.TimeoutExpired:
+            logger.error(f"Timeout capturing session {session_name}")
+            return "로그 조회 시간 초과 (세션이 응답하지 않음)"
         except Exception as e:
             logger.error(f"Exception getting session log for {session_name}: {str(e)}")
             return "로그 조회 중 오류가 발생했습니다."
