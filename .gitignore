@@ -92,4 +92,8 @@ monitor.log*
 
 # uv
 .uv/
-uv.lock
+uv.lockdata/cpu_optimized_models/
+data/chembl_*/
+quarto-*
+catboost_info/
+academic/
