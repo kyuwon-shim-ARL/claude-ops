@@ -91,7 +91,17 @@ class SessionStateAnalyzer:
         # Patterns indicating active work in progress
         self.working_patterns = [
             "esc to interrupt",           # Standard working indicator - 가장 신뢰할 수 있는 패턴
-            # 다른 패턴들은 Claude Code 버전에 따라 달라질 수 있어서 제거
+            "Running…",                   # Bash command execution
+            "ctrl+b to run in background", # Background execution option
+            "Building",                   # Build process
+            "Testing",                    # Test execution
+            "Installing",                 # Package installation
+            "Downloading",                # Download in progress
+            "Compiling",                  # Compilation process
+            "Processing",                 # General processing
+            "Analyzing",                  # Code analysis
+            "Searching",                  # Search operations
+            "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"  # Spinner characters
         ]
         
         # Patterns indicating user input is required

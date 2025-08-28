@@ -43,6 +43,11 @@ class MultiSessionMonitor:
         self.running = False
         self.timeout_seconds = 45  # 45-second timeout for work completion
         
+        # Exponential backoff fallback system
+        self.last_activity_time: Dict[str, float] = {}  # session -> last_activity_timestamp
+        self.inactivity_notification_count: Dict[str, int] = {}  # session -> notification_count
+        self.inactivity_intervals = [60, 120, 240, 480, 960]  # 1, 2, 4, 8, 16 minutes
+        
     def discover_sessions(self) -> Set[str]:
         """Discover all active Claude sessions"""
         return set(session_manager.get_all_claude_sessions())
@@ -94,6 +99,9 @@ class MultiSessionMonitor:
             self.last_screen_hash[session_name] = current_hash
             # Screen changed means activity - reset wait time
             self.tracker.reset_session(session_name)
+            # Reset inactivity tracking
+            self.last_activity_time[session_name] = time.time()
+            self.inactivity_notification_count[session_name] = 0
             return True
             
         return False
@@ -154,6 +162,52 @@ class MultiSessionMonitor:
         result = os.system(f"tmux has-session -t {session_name} 2>/dev/null")
         return result == 0
     
+    def check_inactivity_fallback(self, session_name: str) -> bool:
+        """
+        Check if we should send a fallback notification due to inactivity
+        
+        Uses exponential backoff: 1, 2, 4, 8, 16 minutes
+        
+        Returns:
+            bool: True if fallback notification should be sent
+        """
+        # Initialize if not tracked
+        if session_name not in self.last_activity_time:
+            self.last_activity_time[session_name] = time.time()
+            self.inactivity_notification_count[session_name] = 0
+            return False
+        
+        # Calculate inactivity duration
+        current_time = time.time()
+        inactivity_duration = current_time - self.last_activity_time[session_name]
+        
+        # Get notification count for this session
+        notification_count = self.inactivity_notification_count.get(session_name, 0)
+        
+        # Check if we've sent all fallback notifications
+        if notification_count >= len(self.inactivity_intervals):
+            return False
+        
+        # Get the next interval threshold
+        next_interval = self.inactivity_intervals[notification_count]
+        
+        # Check if we've reached the threshold
+        if inactivity_duration >= next_interval:
+            # Don't send if currently working (avoid false positives)
+            current_state = self.get_session_state(session_name)
+            if current_state == SessionState.WORKING:
+                # Still working, just not changing screen - skip
+                return False
+            
+            # Increment notification count
+            self.inactivity_notification_count[session_name] = notification_count + 1
+            
+            logger.info(f"🔔 Inactivity fallback triggered for {session_name}: "
+                       f"{int(inactivity_duration)}s inactive (threshold: {next_interval}s)")
+            return True
+        
+        return False
+    
     def send_completion_notification(self, session_name: str, state_type: str = "completion"):
         """Send work completion notification for a specific session"""
         try:
@@ -193,6 +247,9 @@ class MultiSessionMonitor:
                 self.last_notification_time[session_name] = 0
                 # Initialize wait time tracking
                 self.tracker.reset_session(session_name)
+                # Initialize inactivity tracking
+                self.last_activity_time[session_name] = time.time()
+                self.inactivity_notification_count[session_name] = 0
             
             logger.info(f"📊 Started simplified monitoring for {session_name}")
             
@@ -218,6 +275,10 @@ class MultiSessionMonitor:
                     if self.should_send_completion_notification(session_name):
                         logger.info(f"🎯 Sending completion notification for {session_name}")
                         self.send_completion_notification(session_name, "completion")
+                    # Check inactivity fallback (only if no recent notification)
+                    elif self.check_inactivity_fallback(session_name):
+                        logger.info(f"⏰ Sending inactivity fallback notification for {session_name}")
+                        self.send_completion_notification(session_name, "inactivity")
                     
                     # Log state changes for debugging
                     if session_name in self.last_state:
@@ -239,7 +300,8 @@ class MultiSessionMonitor:
             with self.thread_lock:
                 # Clean up all session data
                 for data_dict in [self.last_screen_hash, self.notification_sent, 
-                                self.last_state, self.last_notification_time]:
+                                self.last_state, self.last_notification_time,
+                                self.last_activity_time, self.inactivity_notification_count]:
                     if session_name in data_dict:
                         del data_dict[session_name]
                 if session_name in self.active_threads:
