@@ -88,7 +88,7 @@ class SessionSummaryHelper:
                 # Include transparency info: (session, wait_time, prompt, status, has_completion_record)  
                 all_sessions.append((session_name, wait_time, last_prompt, 'working', has_record))
         
-        # Sort: waiting sessions first (by wait time), then working sessions
+        # Sort: waiting sessions first (by wait time DESC - longest wait first), then working sessions
         all_sessions.sort(key=lambda x: (0 if x[3] == 'waiting' else 1, -x[1]))
         return all_sessions
     

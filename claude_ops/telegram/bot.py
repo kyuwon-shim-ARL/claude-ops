@@ -1826,7 +1826,8 @@ class TelegramBridge:
             all_sessions = summary_helper.get_all_sessions_with_status()
             
             # Extract session info - unpack 5-tuple correctly
-            sessions_info = [(session_name, status) for session_name, _, _, status, _ in all_sessions]
+            # Reverse order for board: recent sessions (short wait time) at bottom
+            sessions_info = [(session_name, status) for session_name, _, _, status, _ in reversed(all_sessions)]
             
             if not sessions_info:
                 await reply_func(

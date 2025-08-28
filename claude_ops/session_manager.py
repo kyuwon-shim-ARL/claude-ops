@@ -93,8 +93,8 @@ class SessionManager:
             
             if result.returncode == 0:
                 sessions = [s.strip() for s in result.stdout.split('\n') if s.strip()]
-                # Exclude monitoring sessions
-                sessions = [s for s in sessions if s not in ['claude-multi-monitor', 'claude-monitor']]
+                # Exclude monitoring sessions and telegram bridge
+                sessions = [s for s in sessions if s not in ['claude-multi-monitor', 'claude-monitor', 'claude-telegram-bridge']]
                 return sessions
             else:
                 return []
