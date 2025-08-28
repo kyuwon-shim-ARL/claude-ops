@@ -1,14 +1,14 @@
 🎯 **기획 (Structured Discovery & Planning Loop)**
 
 **📚 컨텍스트 자동 로딩 (우선순위 순):**
-- docs/specs/docs/guides/project_rules.md 확인 (없으면 루트에서 찾기)
+- docs/specs/project_rules.md 확인 (없으면 루트에서 찾기)
 - docs/specs/PRD-v*.md 확인 (최신 버전)
 - docs/CURRENT/status.md 확인 (있으면 읽기)
 - 이전 세션 TODO 확인
 
 **🔄 기획 시작 시 컨텍스트 정리 (확정적 실행):**
 IF (새로운_주제_감지 OR 로드맵_전환_감지):
-    /compact "Strategic 영속 컨텍스트와 docs/guides/project_rules.md만 유지. 이전 구현 세부사항과 Tactical/Operational 컨텍스트는 아카이브하여 새로운 기획에 집중할 수 있도록 정리"
+    /compact "Strategic 영속 컨텍스트와 project_rules.md만 유지. 이전 구현 세부사항과 Tactical/Operational 컨텍스트는 아카이브하여 새로운 기획에 집중할 수 있도록 정리"
 
 **🧠 지능형 컨텍스트 관리 (자동 실행):**
 1. **로드맵 전환 감지**: 현재 요청과 이전 3-5개 메시지 비교
@@ -37,7 +37,7 @@ IF (새로운_주제_감지 OR 로드맵_전환_감지):
    - ❌반례: "새 로그분석도구"(기능추가=Tactical)
 
 3. **컨텍스트 상속 적용**:
-   - 영속 유지: docs/specs/* (docs/guides/project_rules.md, PRD, requirements.md, architecture.md)
+   - 영속 유지: docs/specs/* (project_rules.md, PRD, requirements.md, architecture.md)
    - 관련성 필터: 새 주제와 연관성 기반 선별 보존  
    - 자동 아카이브: 완료 작업 + 미채택 대안 → sessions/
 
@@ -74,7 +74,7 @@ def auto_generate_specs():
         
         extract_requirements(PRD) → docs/specs/requirements.md
         extract_architecture(PRD) → docs/specs/architecture.md
-        move_project_rules() → docs/specs/docs/guides/project_rules.md
+        move_project_rules() → docs/specs/project_rules.md
 ```
 
 **자동 생성 트리거:**
@@ -86,7 +86,7 @@ def auto_generate_specs():
 **생성 내용:**
 - **requirements.md**: 기능 요구사항, 비기능 요구사항, 제약사항 추출
 - **architecture.md**: 시스템 구조, 기술 스택, 데이터 흐름, 인터페이스 설계
-- **docs/guides/project_rules.md**: 루트에서 docs/specs/로 이동 (최초 1회)
+- **project_rules.md**: 루트에서 docs/specs/로 이동 (최초 1회)
 
 **문서화 계층:**
 - **전략적 기획**: PRD 생성/업데이트 → 자동 specs 분해 + planning.md + TodoWrite

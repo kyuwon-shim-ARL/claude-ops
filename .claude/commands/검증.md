@@ -1,12 +1,12 @@
 🔍 **검증 (Deep Verification & Testing)**
 
 **📚 컨텍스트 자동 로딩:**
-- docs/guides/project_rules.md 확인 (있으면 읽기)
+- project_rules.md 확인 (있으면 읽기)
 - docs/CURRENT/status.md 확인 (있으면 읽기)
 - 이전 테스트 결과 확인
 
 **1단계: 기획 의도 매트릭스 검증**
-- docs/guides/project_rules.md의 모든 원칙 체크
+- project_rules.md의 모든 원칙 체크
 - 각 원칙별 실제 구현 상태 매핑
 - 기획 의도 충실도 점수 계산 (0-100)
 - 불일치 항목 구체적 리스트업

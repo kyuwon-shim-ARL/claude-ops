@@ -1,7 +1,7 @@
 ⚡ **구현 (Implementation with DRY)**
 
 **📚 컨텍스트 자동 로딩:**
-- docs/guides/project_rules.md 확인 (있으면 읽기)
+- project_rules.md 확인 (있으면 읽기)
 - docs/CURRENT/active-todos.md 확인 (있으면 읽기)
 
 **DRY 원칙 적용:**

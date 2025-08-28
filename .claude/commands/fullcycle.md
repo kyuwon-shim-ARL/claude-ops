@@ -8,7 +8,7 @@
 🎯 **기획 (Structured Discovery & Planning Loop)**
 
 **📚 컨텍스트 자동 로딩:**
-- docs/guides/project_rules.md 확인 (있으면 읽기)
+- project_rules.md 확인 (있으면 읽기)
 - docs/CURRENT/status.md 확인 (있으면 읽기)
 - 이전 세션 TODO 확인
 
@@ -49,7 +49,7 @@
 ⚡ **구현 (Implementation with DRY)**
 
 **📚 컨텍스트 자동 로딩:**
-- docs/guides/project_rules.md 확인 (있으면 읽기)
+- project_rules.md 확인 (있으면 읽기)
 - docs/CURRENT/active-todos.md 확인 (있으면 읽기)
 
 **DRY 원칙 적용:**
@@ -82,7 +82,7 @@
 🔧 **안정화 (Structural Sustainability Protocol v2.0)**
 
 **📚 컨텍스트 자동 로딩:**
-- docs/guides/project_rules.md 확인 (있으면 읽기)
+- project_rules.md 확인 (있으면 읽기)
 - docs/CURRENT/test-report.md 확인 (이전 테스트 결과)
 
 **패러다임 전환:** 기능 중심 → **구조적 지속가능성** 중심
@@ -164,7 +164,7 @@
 🚀 **배포 (Deployment)**
 
 **📚 컨텍스트 자동 로딩:**
-- docs/guides/project_rules.md 확인 (있으면 읽기)
+- project_rules.md 확인 (있으면 읽기)
 - docs/CURRENT/ 전체 상태 확인
 
 **최종 검증:**

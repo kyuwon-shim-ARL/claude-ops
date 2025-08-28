@@ -1,7 +1,7 @@
 🧹 **컨텍스트 (Smart Context Cleanup Guide)**
 
 **📚 컨텍스트 자동 로딩:**
-- docs/guides/project_rules.md 확인 (있으면 읽기)
+- project_rules.md 확인 (있으면 읽기)
 - docs/CURRENT/active-todos.md 확인 (진행 중인 작업 파악)
 - 최근 세션 활동 분석
 

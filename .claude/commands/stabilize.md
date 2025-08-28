@@ -3,7 +3,7 @@
 **🎯 핵심 역할**: 코드 구조와 밀접하게 연결된 문서들의 자동 동기화 + 구조적 안정성 확보
 
 **📚 컨텍스트 자동 로딩:**
-- docs/specs/docs/guides/project_rules.md 확인 (없으면 루트에서 찾기)
+- docs/specs/project_rules.md 확인 (없으면 루트에서 찾기)
 - docs/CURRENT/test-report.md 확인 (이전 테스트 결과)
 
 **패러다임 전환:** 기능 중심 → **구조-문서 통합 안정성** 중심

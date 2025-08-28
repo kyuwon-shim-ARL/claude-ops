@@ -9,14 +9,14 @@ python scripts/context_performance_monitor.py start "strategic" "현재_작업_�
 ```
 
 **📚 컨텍스트 자동 로딩:**
-- docs/guides/project_rules.md 확인 (있으면 읽기)
+- project_rules.md 확인 (있으면 읽기)
 - docs/CURRENT/status.md 확인 (있으면 읽기)
 - docs/CURRENT/context_metrics.json 확인 (성능 데이터 로드)
 
 **🔄 제한된 컨텍스트 관리 (테스트 모드):**
 IF (새로운_주제_감지 AND 성능_점수 > 75):
     성능_측정_시작()
-    /compact "SAFE MODE: 중요한 아키텍처 결정과 docs/guides/project_rules.md만 보존. 
+    /compact "SAFE MODE: 중요한 아키텍처 결정과 project_rules.md만 보존. 
              구현 세부사항은 선별적으로만 제거. 롤백 가능하도록 보수적 접근"
     성능_변화_추적()
 ELSE:

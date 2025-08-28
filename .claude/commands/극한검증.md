@@ -1,7 +1,7 @@
 🚀 **극한검증 (Ultimate Verification with Auto-improvement)**
 
 **📚 컨텍스트 자동 로딩:**
-- docs/guides/project_rules.md 확인 (있으면 읽기)
+- project_rules.md 확인 (있으면 읽기)
 - docs/CURRENT/status.md 확인 (있으면 읽기)
 - 이전 검증 이력 분석
 

@@ -1,7 +1,7 @@
 🚀 **배포 (Deployment)**
 
 **📚 컨텍스트 자동 로딩:**
-- docs/guides/project_rules.md 확인 (있으면 읽기)
+- project_rules.md 확인 (있으면 읽기)
 - docs/CURRENT/ 전체 상태 확인
 
 **최종 검증:**
