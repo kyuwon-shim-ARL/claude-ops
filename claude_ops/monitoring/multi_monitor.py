@@ -46,8 +46,8 @@ class MultiSessionMonitor:
         # Exponential backoff fallback system
         self.last_activity_time: Dict[str, float] = {}  # session -> last_activity_timestamp
         self.inactivity_notification_count: Dict[str, int] = {}  # session -> notification_count
-        self.inactivity_intervals = [60, 120, 240, 480, 960]  # 1, 2, 4, 8, 16 minutes
-        self.max_inactivity_duration = 3600  # Stop fallback notifications after 1 hour (3600s)
+        self.inactivity_intervals = [60, 900, 1800, 3600]  # 1, 15, 30, 60 minutes
+        self.max_inactivity_duration = 3660  # Stop fallback notifications after 61 minutes (3660s)
         
     def discover_sessions(self) -> Set[str]:
         """Discover all active Claude sessions"""
