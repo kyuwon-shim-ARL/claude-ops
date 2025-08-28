@@ -2609,12 +2609,16 @@ class TelegramBridge:
                         logger.info(f"재시도 중... ({attempt + 1}/{max_retries})")
                         time.sleep(5 * attempt)  # Exponential backoff
                     
-                    self.app.run_polling()
+                    self.app.run_polling(drop_pending_updates=True)
                     break  # Success, exit retry loop
                     
                 except Exception as e:
                     if "terminated by other getUpdates request" in str(e) and attempt < max_retries - 1:
                         logger.warning(f"getUpdates 충돌 감지 (시도 {attempt + 1}), 잠시 후 재시도...")
+                        # Kill any existing bot processes to prevent conflicts
+                        import subprocess
+                        subprocess.run("pkill -f 'claude_ops.telegram.bot'", shell=True)
+                        time.sleep(3)
                         continue
                     else:
                         logger.error(f"봇 실행 실패: {str(e)}")
@@ -2622,6 +2626,9 @@ class TelegramBridge:
             
         except Exception as e:
             logger.error(f"봇 실행 중 오류 발생: {str(e)}")
+            # Don't expose raw error to users
+            import traceback
+            logger.debug(f"Full traceback: {traceback.format_exc()}")
             raise
 
 
