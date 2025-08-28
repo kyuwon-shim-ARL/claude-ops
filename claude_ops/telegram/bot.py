@@ -1058,12 +1058,37 @@ class TelegramBridge:
                         logger.info(f"🔄 Reply 기반 세션 전환: {old_session} → {reply_session}")
                         
                         session_display = reply_session.replace('claude_', '') if reply_session.startswith('claude_') else reply_session
-                        await update.message.reply_text(
+                        
+                        # Get last 30 lines of log from the new session
+                        import subprocess
+                        result = subprocess.run(
+                            f"tmux capture-pane -t {reply_session} -p -S -30",
+                            shell=True,
+                            capture_output=True,
+                            text=True
+                        )
+                        
+                        log_content = ""
+                        if result.returncode == 0 and result.stdout.strip():
+                            log_content = result.stdout.strip()
+                            # Limit to last 20 lines for cleaner display
+                            lines = log_content.split('\n')
+                            if len(lines) > 20:
+                                log_content = '\n'.join(lines[-20:])
+                        
+                        switch_message = (
                             f"🔄 **활성 세션 전환 완료**\n\n"
                             f"이전: `{old_session}`\n"
                             f"현재: `{reply_session}`\n\n"
-                            f"이제 `{session_display}` 세션이 활성화되었습니다."
+                            f"이제 `{session_display}` 세션이 활성화되었습니다.\n"
                         )
+                        
+                        if log_content:
+                            switch_message += f"\n📺 **최근 로그 (20줄)**:\n```\n{log_content}\n```"
+                        else:
+                            switch_message += f"\n📺 화면이 비어있습니다."
+                        
+                        await update.message.reply_text(switch_message, parse_mode='Markdown')
                     else:
                         await update.message.reply_text(f"❌ 세션 전환에 실패했습니다: {reply_session}")
                     return
@@ -1499,13 +1524,38 @@ class TelegramBridge:
                 old_status_file = session_manager.get_status_file_for_session(current_session)
                 new_status_file = session_manager.get_status_file_for_session(session_name)
                 
-                await query.edit_message_text(
+                # Get last 30 lines of log from the new session
+                import subprocess
+                result = subprocess.run(
+                    f"tmux capture-pane -t {session_name} -p -S -30",
+                    shell=True,
+                    capture_output=True,
+                    text=True
+                )
+                
+                log_content = ""
+                if result.returncode == 0 and result.stdout.strip():
+                    log_content = result.stdout.strip()
+                    # Limit to last 20 lines for cleaner display
+                    lines = log_content.split('\n')
+                    if len(lines) > 20:
+                        log_content = '\n'.join(lines[-20:])
+                
+                switch_message = (
                     f"✅ **세션 전환 완료**\n\n"
                     f"이전 세션: `{current_session}`\n"
                     f"새 세션: `{session_name}`\n\n"
                     f"📁 상태 파일: `{new_status_file}`\n\n"
                     f"이제 `{session_name}` 세션을 모니터링합니다.\n"
-                    f"모니터링 시스템이 자동으로 업데이트됩니다.",
+                )
+                
+                if log_content:
+                    switch_message += f"\n📺 **최근 로그 (20줄)**:\n```\n{log_content}\n```"
+                else:
+                    switch_message += f"\n📺 화면이 비어있습니다."
+                
+                await query.edit_message_text(
+                    switch_message,
                     parse_mode='Markdown'
                 )
                 
