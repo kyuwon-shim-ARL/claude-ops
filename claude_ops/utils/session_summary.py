@@ -89,7 +89,8 @@ class SessionSummaryHelper:
                 all_sessions.append((session_name, wait_time, last_prompt, 'working', has_record))
         
         # Sort: waiting sessions first (by wait time DESC - longest wait first), then working sessions
-        all_sessions.sort(key=lambda x: (0 if x[3] == 'waiting' else 1, -x[1]))
+        # Add session name as tertiary sort key for stability
+        all_sessions.sort(key=lambda x: (0 if x[3] == 'waiting' else 1, -x[1], x[0]))
         return all_sessions
     
     # Removed extract_last_prompt - now using PromptRecallSystem.extract_last_user_prompt
