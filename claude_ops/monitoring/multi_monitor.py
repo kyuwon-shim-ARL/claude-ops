@@ -47,6 +47,7 @@ class MultiSessionMonitor:
         self.last_activity_time: Dict[str, float] = {}  # session -> last_activity_timestamp
         self.inactivity_notification_count: Dict[str, int] = {}  # session -> notification_count
         self.inactivity_intervals = [60, 120, 240, 480, 960]  # 1, 2, 4, 8, 16 minutes
+        self.max_inactivity_duration = 3600  # Stop fallback notifications after 1 hour (3600s)
         
     def discover_sessions(self) -> Set[str]:
         """Discover all active Claude sessions"""
@@ -181,10 +182,15 @@ class MultiSessionMonitor:
         current_time = time.time()
         inactivity_duration = current_time - self.last_activity_time[session_name]
         
+        # Stop sending fallback notifications after max duration (1 hour)
+        if inactivity_duration > self.max_inactivity_duration:
+            logger.debug(f"Session {session_name} inactive for {int(inactivity_duration)}s (>{self.max_inactivity_duration}s), stopping fallback notifications")
+            return False
+        
         # Get notification count for this session
         notification_count = self.inactivity_notification_count.get(session_name, 0)
         
-        # Check if we've sent all fallback notifications
+        # Check if we've sent all planned fallback notifications
         if notification_count >= len(self.inactivity_intervals):
             return False
         
@@ -271,14 +277,19 @@ class MultiSessionMonitor:
                         logger.debug(f"📺 Screen changed in {session_name}")
                     
                     
-                    # Check if we should send completion notification
+                    # Check if we should send completion notification (state transition)
                     if self.should_send_completion_notification(session_name):
                         logger.info(f"🎯 Sending completion notification for {session_name}")
                         self.send_completion_notification(session_name, "completion")
-                    # Check inactivity fallback (only if no recent notification)
+                        # Reset inactivity tracking on real completion
+                        self.last_activity_time[session_name] = time.time()
+                        self.inactivity_notification_count[session_name] = 0
+                    # Check inactivity fallback (independent of state transition notifications)
                     elif self.check_inactivity_fallback(session_name):
                         logger.info(f"⏰ Sending inactivity fallback notification for {session_name}")
                         self.send_completion_notification(session_name, "inactivity")
+                        # Don't reset notification_sent flag for fallback notifications
+                        # This allows future state transition notifications to still work
                     
                     # Log state changes for debugging
                     if session_name in self.last_state:
