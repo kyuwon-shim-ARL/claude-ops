@@ -278,6 +278,9 @@ class SessionSummaryHelper:
             message += "━" * 25 + "\n"
             
             # Session header with status indicator and transparency
+            # Add clickable command as inline code (users can tap to copy)
+            session_command = f"`/sessions {session_name}`"
+            
             if status == 'working':
                 message += f"🔨 **{display_name}** (작업 중)\n"
             else:
@@ -287,6 +290,9 @@ class SessionSummaryHelper:
                     message += f"🎯 **{display_name}** ({wait_str} 대기 ~추정~)\n"
                 else:
                     message += f"🎯 **{display_name}** ({wait_str} 대기)\n"
+            
+            # Add the clickable command
+            message += f"🔗 {session_command}\n"
             
             # Last prompt if available
             if last_prompt and len(last_prompt) > 2:

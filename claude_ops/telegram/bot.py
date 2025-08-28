@@ -2462,9 +2462,9 @@ class TelegramBridge:
             # Try to capture with retry logic for attached sessions
             max_retries = 3
             for attempt in range(max_retries):
-                # Use tmux capture-pane with -e (include escape sequences) and -J (join lines)
+                # Use tmux capture-pane without -e to avoid ANSI escape codes
                 result = subprocess.run(
-                    f"tmux capture-pane -t {session_name} -p -e -S -{line_count}", 
+                    f"tmux capture-pane -t {session_name} -p -S -{line_count}", 
                     shell=True, 
                     capture_output=True, 
                     text=True,
