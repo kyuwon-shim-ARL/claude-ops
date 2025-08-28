@@ -1032,69 +1032,82 @@ class TelegramBridge:
             logger.error(f"세션 요약 생성 오류: {str(e)}")
             await update.message.reply_text("❌ 세션 요약 생성 중 오류가 발생했습니다.")
     
+    async def _switch_to_session(self, update, target_session: str, switch_type: str = "direct"):
+        """Switch to specified session with common logic"""
+        try:
+            # Check if target session exists
+            session_exists = os.system(f"tmux has-session -t {target_session}") == 0
+            if not session_exists:
+                await update.message.reply_text(f"❌ 세션 `{target_session}`이 존재하지 않습니다.")
+                return
+            
+            # Switch active session using session_manager
+            from ..session_manager import session_manager
+            
+            old_session = self.config.session_name
+            success = session_manager.switch_session(target_session)
+            
+            if success:
+                logger.info(f"🔄 {switch_type} 세션 전환: {old_session} → {target_session}")
+                
+                session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+                
+                # Get last 30 lines of log from the new session
+                import subprocess
+                result = subprocess.run(
+                    f"tmux capture-pane -t {target_session} -p -S -30",
+                    shell=True,
+                    capture_output=True,
+                    text=True
+                )
+                
+                log_content = ""
+                if result.returncode == 0 and result.stdout.strip():
+                    log_content = result.stdout.strip()
+                    # Limit to last 20 lines for cleaner display
+                    lines = log_content.split('\n')
+                    if len(lines) > 20:
+                        log_content = '\n'.join(lines[-20:])
+                
+                switch_message = (
+                    f"🔄 **활성 세션 전환 완료**\n\n"
+                    f"이전: `{old_session}`\n"
+                    f"현재: `{target_session}`\n\n"
+                    f"이제 `{session_display}` 세션이 활성화되었습니다.\n"
+                )
+                
+                if log_content:
+                    switch_message += f"\n📺 **최근 로그 (20줄)**:\n```\n{log_content}\n```"
+                else:
+                    switch_message += f"\n📺 화면이 비어있습니다."
+                
+                await update.message.reply_text(switch_message, parse_mode='Markdown')
+            else:
+                await update.message.reply_text(f"❌ 세션 전환에 실패했습니다: {target_session}")
+                
+        except Exception as e:
+            logger.error(f"세션 전환 중 오류: {str(e)}")
+            await update.message.reply_text(f"❌ 세션 전환 중 오류가 발생했습니다: {str(e)}")
+    
     async def sessions_command(self, update, context):
-        """Show active sessions command or switch to reply session directly"""
+        """Show active sessions command or switch to specified session directly"""
         user_id = update.effective_user.id
         
         if not self.check_user_authorization(user_id):
             await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
             return
         
+        # Check for direct session name argument
+        if context.args and len(context.args) > 0:
+            target_session = context.args[0]
+            return await self._switch_to_session(update, target_session, "direct command")
+        
         # Check if replying to a message - if so, switch to that session directly
         if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
             original_text = update.message.reply_to_message.text
             reply_session = self.extract_session_from_message(original_text)
             if reply_session:
-                # Check if target session exists
-                session_exists = os.system(f"tmux has-session -t {reply_session}") == 0
-                if session_exists:
-                    # Switch active session using session_manager
-                    from ..session_manager import session_manager
-                    
-                    old_session = self.config.session_name
-                    success = session_manager.switch_session(reply_session)
-                    
-                    if success:
-                        logger.info(f"🔄 Reply 기반 세션 전환: {old_session} → {reply_session}")
-                        
-                        session_display = reply_session.replace('claude_', '') if reply_session.startswith('claude_') else reply_session
-                        
-                        # Get last 30 lines of log from the new session
-                        import subprocess
-                        result = subprocess.run(
-                            f"tmux capture-pane -t {reply_session} -p -S -30",
-                            shell=True,
-                            capture_output=True,
-                            text=True
-                        )
-                        
-                        log_content = ""
-                        if result.returncode == 0 and result.stdout.strip():
-                            log_content = result.stdout.strip()
-                            # Limit to last 20 lines for cleaner display
-                            lines = log_content.split('\n')
-                            if len(lines) > 20:
-                                log_content = '\n'.join(lines[-20:])
-                        
-                        switch_message = (
-                            f"🔄 **활성 세션 전환 완료**\n\n"
-                            f"이전: `{old_session}`\n"
-                            f"현재: `{reply_session}`\n\n"
-                            f"이제 `{session_display}` 세션이 활성화되었습니다.\n"
-                        )
-                        
-                        if log_content:
-                            switch_message += f"\n📺 **최근 로그 (20줄)**:\n```\n{log_content}\n```"
-                        else:
-                            switch_message += f"\n📺 화면이 비어있습니다."
-                        
-                        await update.message.reply_text(switch_message, parse_mode='Markdown')
-                    else:
-                        await update.message.reply_text(f"❌ 세션 전환에 실패했습니다: {reply_session}")
-                    return
-                else:
-                    await update.message.reply_text(f"❌ 세션 `{reply_session}`이 존재하지 않습니다.")
-                    return
+                return await self._switch_to_session(update, reply_session, "reply")
         
         # Normal session list display (when not replying)
         try:
