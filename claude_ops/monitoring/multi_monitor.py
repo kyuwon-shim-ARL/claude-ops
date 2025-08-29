@@ -44,11 +44,55 @@ class MultiSessionMonitor:
         self.timeout_seconds = 45  # 45-second timeout for work completion
         
         # Exponential backoff fallback system
-        self.last_activity_time: Dict[str, float] = {}  # session -> last_activity_timestamp
-        self.inactivity_notification_count: Dict[str, int] = {}  # session -> notification_count
+        self.last_activity_time: Dict[str, float] = self._load_activity_times()  # Persistent storage
+        self.inactivity_notification_count: Dict[str, int] = self._load_notification_counts()  # Persistent storage
         self.inactivity_intervals = [60, 900, 1800, 3600]  # 1, 15, 30, 60 minutes
         self.max_inactivity_duration = 3660  # Stop fallback notifications after 61 minutes (3660s)
+        self.activity_file = "/tmp/claude_activity_times.json"
+        self.notification_count_file = "/tmp/claude_notification_counts.json"
         
+    def _load_activity_times(self) -> Dict[str, float]:
+        """Load activity times from persistent storage"""
+        try:
+            import json
+            from pathlib import Path
+            if Path(self.activity_file).exists():
+                with open(self.activity_file, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load activity times: {e}")
+        return {}
+    
+    def _save_activity_times(self):
+        """Save activity times to persistent storage"""
+        try:
+            import json
+            with open(self.activity_file, 'w') as f:
+                json.dump(self.last_activity_time, f)
+        except Exception as e:
+            logger.warning(f"Failed to save activity times: {e}")
+    
+    def _load_notification_counts(self) -> Dict[str, int]:
+        """Load notification counts from persistent storage"""
+        try:
+            import json
+            from pathlib import Path
+            if Path(self.notification_count_file).exists():
+                with open(self.notification_count_file, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load notification counts: {e}")
+        return {}
+    
+    def _save_notification_counts(self):
+        """Save notification counts to persistent storage"""
+        try:
+            import json
+            with open(self.notification_count_file, 'w') as f:
+                json.dump(self.inactivity_notification_count, f)
+        except Exception as e:
+            logger.warning(f"Failed to save notification counts: {e}")
+    
     def discover_sessions(self) -> Set[str]:
         """Discover all active Claude sessions"""
         return set(session_manager.get_all_claude_sessions())
@@ -103,6 +147,8 @@ class MultiSessionMonitor:
             # Reset inactivity tracking
             self.last_activity_time[session_name] = time.time()
             self.inactivity_notification_count[session_name] = 0
+            self._save_activity_times()
+            self._save_notification_counts()
             return True
             
         return False
@@ -176,6 +222,8 @@ class MultiSessionMonitor:
         if session_name not in self.last_activity_time:
             self.last_activity_time[session_name] = time.time()
             self.inactivity_notification_count[session_name] = 0
+            self._save_activity_times()
+            self._save_notification_counts()
             return False
         
         # Calculate inactivity duration
@@ -207,6 +255,7 @@ class MultiSessionMonitor:
             
             # Increment notification count
             self.inactivity_notification_count[session_name] = notification_count + 1
+            self._save_notification_counts()
             
             logger.info(f"🔔 Inactivity fallback triggered for {session_name}: "
                        f"{int(inactivity_duration)}s inactive (threshold: {next_interval}s)")
@@ -255,9 +304,12 @@ class MultiSessionMonitor:
                 self.last_notification_time[session_name] = 0
                 # Initialize wait time tracking
                 self.tracker.reset_session(session_name)
-                # Initialize inactivity tracking
-                self.last_activity_time[session_name] = time.time()
-                self.inactivity_notification_count[session_name] = 0
+                # Initialize inactivity tracking only if not already tracked
+                if session_name not in self.last_activity_time:
+                    self.last_activity_time[session_name] = time.time()
+                    self.inactivity_notification_count[session_name] = 0
+                    self._save_activity_times()
+                    self._save_notification_counts()
             
             logger.info(f"📊 Started simplified monitoring for {session_name}")
             
@@ -286,6 +338,8 @@ class MultiSessionMonitor:
                         # Reset inactivity tracking on real completion
                         self.last_activity_time[session_name] = time.time()
                         self.inactivity_notification_count[session_name] = 0
+                        self._save_activity_times()
+                        self._save_notification_counts()
                     # Check inactivity fallback (independent of state transition notifications)
                     elif self.check_inactivity_fallback(session_name):
                         logger.info(f"⏰ Sending inactivity fallback notification for {session_name}")
