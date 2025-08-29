@@ -233,8 +233,10 @@ class MultiSessionMonitor:
             
             if success:
                 logger.info(f"✅ Sent completion notification for session: {session_name}")
-                # Mark completion time for wait time tracking (user's definition)
-                self.tracker.mark_completion(session_name)
+                # Only mark completion for real state transitions, not fallback notifications
+                if state_type == "completion":
+                    # Mark completion time for wait time tracking (user's definition)
+                    self.tracker.mark_completion(session_name)
             else:
                 logger.debug(f"⏭️ Skipped notification for session: {session_name} (duplicate or failed)")
                 
