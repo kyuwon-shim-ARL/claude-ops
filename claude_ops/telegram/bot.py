@@ -1052,10 +1052,10 @@ class TelegramBridge:
                 
                 session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
                 
-                # Get last 30 lines of log from the new session
+                # Get last 100 lines of log from the new session (will display 50)
                 import subprocess
                 result = subprocess.run(
-                    f"tmux capture-pane -t {target_session} -p -S -30",
+                    f"tmux capture-pane -t {target_session} -p -S -100",
                     shell=True,
                     capture_output=True,
                     text=True
@@ -1064,10 +1064,10 @@ class TelegramBridge:
                 log_content = ""
                 if result.returncode == 0 and result.stdout.strip():
                     log_content = result.stdout.strip()
-                    # Limit to last 20 lines for cleaner display
+                    # Show last 50 lines initially
                     lines = log_content.split('\n')
-                    if len(lines) > 20:
-                        log_content = '\n'.join(lines[-20:])
+                    if len(lines) > 50:
+                        log_content = '\n'.join(lines[-50:])
                 
                 switch_message = (
                     f"🔄 **활성 세션 전환 완료**\n\n"
@@ -1077,11 +1077,23 @@ class TelegramBridge:
                 )
                 
                 if log_content:
-                    switch_message += f"\n📺 **최근 로그 (20줄)**:\n```\n{log_content}\n```"
+                    switch_message += f"\n📺 **최근 로그 (50줄)**:\n```\n{log_content}\n```"
                 else:
                     switch_message += f"\n📺 화면이 비어있습니다."
                 
-                await update.message.reply_text(switch_message, parse_mode='Markdown')
+                # Add quick log buttons like in board
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                keyboard = [
+                    [
+                        InlineKeyboardButton("📜 50줄", callback_data=f"quick_log:50:{target_session}"),
+                        InlineKeyboardButton("📜 100줄", callback_data=f"quick_log:100:{target_session}"),
+                        InlineKeyboardButton("📜 150줄", callback_data=f"quick_log:150:{target_session}"),
+                        InlineKeyboardButton("📜 200줄", callback_data=f"quick_log:200:{target_session}")
+                    ]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await update.message.reply_text(switch_message, parse_mode='Markdown', reply_markup=reply_markup)
             else:
                 await update.message.reply_text(f"❌ 세션 전환에 실패했습니다: {target_session}")
                 
@@ -2481,7 +2493,7 @@ class TelegramBridge:
                     shell=True, 
                     capture_output=True, 
                     text=True,
-                    timeout=2  # Add timeout to prevent hanging
+                    timeout=5  # Increased timeout for better reliability
                 )
                 
                 if result.returncode == 0:
