@@ -142,13 +142,16 @@ class MultiSessionMonitor:
         
         if current_hash != last_hash:
             self.last_screen_hash[session_name] = current_hash
-            # Screen changed means activity - reset wait time
-            self.tracker.reset_session(session_name)
-            # Reset inactivity tracking
-            self.last_activity_time[session_name] = time.time()
-            self.inactivity_notification_count[session_name] = 0
-            self._save_activity_times()
-            self._save_notification_counts()
+            # Only reset activity if actually working, not just screen refresh
+            current_state = self.get_session_state(session_name)
+            if current_state == SessionState.WORKING:
+                # Screen changed while working means real activity
+                self.tracker.reset_session(session_name)
+                # Reset inactivity tracking
+                self.last_activity_time[session_name] = time.time()
+                self.inactivity_notification_count[session_name] = 0
+                self._save_activity_times()
+                self._save_notification_counts()
             return True
             
         return False

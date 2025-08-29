@@ -89,9 +89,11 @@ class SessionActionHandlers:
             # 동적 로그 길이 가져오기
             log_length = get_current_log_length()
             
-            # tmux로부터 로그 가져오기
+            # tmux로부터 로그 가져오기 (최신 내용부터)
+            # -e: 전체 히스토리 끝에서부터
+            # -S: 시작 위치 지정 (음수는 끝에서부터)
             result = subprocess.run(
-                f"tmux capture-pane -t {session_name} -p -S -{log_length}",
+                f"tmux capture-pane -t {session_name} -p -e -S -{log_length}",
                 shell=True,
                 capture_output=True,
                 text=True,
@@ -102,6 +104,9 @@ class SessionActionHandlers:
                 return False, f"❌ '{session_name}' 세션 로그를 가져올 수 없습니다."
             
             logs = result.stdout.strip()
+            
+            # 최신 내용이 아래에 오도록 라인 순서 유지
+            # (tmux capture-pane은 이미 올바른 순서로 반환함)
             if not logs:
                 logs = "(빈 화면)"
             
