@@ -86,6 +86,8 @@ metrics.json
 hook.log
 bot.log
 monitor.log*
+completion-monitor.log*
+*.pid
 *.legacy
 /data/*.json
 /data/*.db
