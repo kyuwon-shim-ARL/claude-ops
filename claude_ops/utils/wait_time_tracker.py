@@ -177,17 +177,29 @@ class WaitTimeTracker:
             session_name: Name of the session
             
         Returns:
-            Time in seconds since last completion (uses fallback if no record)
+            Time in seconds since last completion (uses fallback if no record or unreasonable)
         """
         if session_name not in self.completion_times:
             # Use fallback mechanism: estimate based on session creation time
             return self._get_fallback_wait_time(session_name)
         
-        return time.time() - self.completion_times[session_name]
+        wait_time = time.time() - self.completion_times[session_name]
+        
+        # Sanity check: if wait time is > 24 hours, use fallback instead
+        # This handles cases where completion times are stale/incorrect
+        if wait_time > 24 * 3600:  # 24 hours
+            logger.warning(f"Unreasonably long wait time ({wait_time/3600:.1f}h) for {session_name}, using fallback")
+            return self._get_fallback_wait_time(session_name)
+        
+        return wait_time
     
     def has_completion_record(self, session_name: str) -> bool:
-        """Check if session has completion notification record"""
-        return session_name in self.completion_times
+        """Check if session has completion notification record that's still valid (< 24h)"""
+        if session_name not in self.completion_times:
+            return False
+        
+        wait_time = time.time() - self.completion_times[session_name]
+        return wait_time <= 24 * 3600  # Only consider valid if < 24 hours
     
     def _get_fallback_wait_time(self, session_name: str) -> float:
         """
@@ -265,17 +277,31 @@ class WaitTimeTracker:
         current_time = time.time()
         max_age_seconds = max_age_hours * 3600
         
-        to_remove = []
+        # Clean up wait_times
+        to_remove_wait = []
         for session_name, last_time in self.wait_times.items():
             if current_time - last_time > max_age_seconds:
-                to_remove.append(session_name)
+                to_remove_wait.append(session_name)
         
-        for session_name in to_remove:
+        for session_name in to_remove_wait:
             del self.wait_times[session_name]
-            logger.info(f"Removed old session {session_name} from tracking")
+            logger.info(f"Removed old session {session_name} from wait tracking")
         
-        if to_remove:
+        if to_remove_wait:
             self._save_times()
+        
+        # Clean up completion_times (stale data > 24 hours)
+        to_remove_completion = []
+        for session_name, completion_time in self.completion_times.items():
+            if current_time - completion_time > max_age_seconds:
+                to_remove_completion.append(session_name)
+        
+        for session_name in to_remove_completion:
+            del self.completion_times[session_name]
+            logger.info(f"Removed stale completion time for {session_name}")
+        
+        if to_remove_completion:
+            self._save_completions()
 
 
 # Global instance for easy access
