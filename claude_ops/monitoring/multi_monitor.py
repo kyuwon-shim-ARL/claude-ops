@@ -43,56 +43,9 @@ class MultiSessionMonitor:
         self.running = False
         self.timeout_seconds = 45  # 45-second timeout for work completion
         
-        # Exponential backoff fallback system
-        self.last_activity_time: Dict[str, float] = self._load_activity_times()  # Persistent storage
-        self.inactivity_notification_count: Dict[str, int] = self._load_notification_counts()  # Persistent storage
-        self.inactivity_intervals = [60, 900, 1800, 3600]  # 1, 15, 30, 60 minutes
-        self.max_inactivity_duration = 3660  # Stop fallback notifications after 61 minutes (3660s)
-        self.activity_file = "/tmp/claude_activity_times.json"
-        self.notification_count_file = "/tmp/claude_notification_counts.json"
+        # Activity tracking for proper state management
+        self.last_activity_time: Dict[str, float] = {}  # session -> last_activity_timestamp
         
-    def _load_activity_times(self) -> Dict[str, float]:
-        """Load activity times from persistent storage"""
-        try:
-            import json
-            from pathlib import Path
-            if Path(self.activity_file).exists():
-                with open(self.activity_file, 'r') as f:
-                    return json.load(f)
-        except Exception as e:
-            logger.warning(f"Failed to load activity times: {e}")
-        return {}
-    
-    def _save_activity_times(self):
-        """Save activity times to persistent storage"""
-        try:
-            import json
-            with open(self.activity_file, 'w') as f:
-                json.dump(self.last_activity_time, f)
-        except Exception as e:
-            logger.warning(f"Failed to save activity times: {e}")
-    
-    def _load_notification_counts(self) -> Dict[str, int]:
-        """Load notification counts from persistent storage"""
-        try:
-            import json
-            from pathlib import Path
-            if Path(self.notification_count_file).exists():
-                with open(self.notification_count_file, 'r') as f:
-                    return json.load(f)
-        except Exception as e:
-            logger.warning(f"Failed to load notification counts: {e}")
-        return {}
-    
-    def _save_notification_counts(self):
-        """Save notification counts to persistent storage"""
-        try:
-            import json
-            with open(self.notification_count_file, 'w') as f:
-                json.dump(self.inactivity_notification_count, f)
-        except Exception as e:
-            logger.warning(f"Failed to save notification counts: {e}")
-    
     def discover_sessions(self) -> Set[str]:
         """Discover all active Claude sessions"""
         return set(session_manager.get_all_claude_sessions())
@@ -142,16 +95,10 @@ class MultiSessionMonitor:
         
         if current_hash != last_hash:
             self.last_screen_hash[session_name] = current_hash
-            # Only reset activity if actually working, not just screen refresh
-            current_state = self.get_session_state(session_name)
-            if current_state == SessionState.WORKING:
-                # Screen changed while working means real activity
-                self.tracker.reset_session(session_name)
-                # Reset inactivity tracking
-                self.last_activity_time[session_name] = time.time()
-                self.inactivity_notification_count[session_name] = 0
-                self._save_activity_times()
-                self._save_notification_counts()
+            # Screen changed means activity - reset wait time
+            self.tracker.reset_session(session_name)
+            # Reset activity tracking
+            self.last_activity_time[session_name] = time.time()
             return True
             
         return False
@@ -212,59 +159,6 @@ class MultiSessionMonitor:
         result = os.system(f"tmux has-session -t {session_name} 2>/dev/null")
         return result == 0
     
-    def check_inactivity_fallback(self, session_name: str) -> bool:
-        """
-        Check if we should send a fallback notification due to inactivity
-        
-        Uses exponential backoff: 1, 2, 4, 8, 16 minutes
-        
-        Returns:
-            bool: True if fallback notification should be sent
-        """
-        # Initialize if not tracked
-        if session_name not in self.last_activity_time:
-            self.last_activity_time[session_name] = time.time()
-            self.inactivity_notification_count[session_name] = 0
-            self._save_activity_times()
-            self._save_notification_counts()
-            return False
-        
-        # Calculate inactivity duration
-        current_time = time.time()
-        inactivity_duration = current_time - self.last_activity_time[session_name]
-        
-        # Stop sending fallback notifications after max duration (1 hour)
-        if inactivity_duration > self.max_inactivity_duration:
-            logger.debug(f"Session {session_name} inactive for {int(inactivity_duration)}s (>{self.max_inactivity_duration}s), stopping fallback notifications")
-            return False
-        
-        # Get notification count for this session
-        notification_count = self.inactivity_notification_count.get(session_name, 0)
-        
-        # Check if we've sent all planned fallback notifications
-        if notification_count >= len(self.inactivity_intervals):
-            return False
-        
-        # Get the next interval threshold
-        next_interval = self.inactivity_intervals[notification_count]
-        
-        # Check if we've reached the threshold
-        if inactivity_duration >= next_interval:
-            # Don't send if currently working (avoid false positives)
-            current_state = self.get_session_state(session_name)
-            if current_state == SessionState.WORKING:
-                # Still working, just not changing screen - skip
-                return False
-            
-            # Increment notification count
-            self.inactivity_notification_count[session_name] = notification_count + 1
-            self._save_notification_counts()
-            
-            logger.info(f"🔔 Inactivity fallback triggered for {session_name}: "
-                       f"{int(inactivity_duration)}s inactive (threshold: {next_interval}s)")
-            return True
-        
-        return False
     
     def send_completion_notification(self, session_name: str, state_type: str = "completion"):
         """Send work completion notification for a specific session"""
@@ -285,10 +179,8 @@ class MultiSessionMonitor:
             
             if success:
                 logger.info(f"✅ Sent completion notification for session: {session_name}")
-                # Only mark completion for real state transitions, not fallback notifications
-                if state_type == "completion":
-                    # Mark completion time for wait time tracking (user's definition)
-                    self.tracker.mark_completion(session_name)
+                # Mark completion time for wait time tracking
+                self.tracker.mark_completion(session_name)
             else:
                 logger.debug(f"⏭️ Skipped notification for session: {session_name} (duplicate or failed)")
                 
@@ -307,12 +199,8 @@ class MultiSessionMonitor:
                 self.last_notification_time[session_name] = 0
                 # Initialize wait time tracking
                 self.tracker.reset_session(session_name)
-                # Initialize inactivity tracking only if not already tracked
-                if session_name not in self.last_activity_time:
-                    self.last_activity_time[session_name] = time.time()
-                    self.inactivity_notification_count[session_name] = 0
-                    self._save_activity_times()
-                    self._save_notification_counts()
+                # Initialize activity tracking
+                self.last_activity_time[session_name] = time.time()
             
             logger.info(f"📊 Started simplified monitoring for {session_name}")
             
@@ -338,17 +226,8 @@ class MultiSessionMonitor:
                     if self.should_send_completion_notification(session_name):
                         logger.info(f"🎯 Sending completion notification for {session_name}")
                         self.send_completion_notification(session_name, "completion")
-                        # Reset inactivity tracking on real completion
+                        # Reset activity tracking on real completion
                         self.last_activity_time[session_name] = time.time()
-                        self.inactivity_notification_count[session_name] = 0
-                        self._save_activity_times()
-                        self._save_notification_counts()
-                    # Check inactivity fallback (independent of state transition notifications)
-                    elif self.check_inactivity_fallback(session_name):
-                        logger.info(f"⏰ Sending inactivity fallback notification for {session_name}")
-                        self.send_completion_notification(session_name, "inactivity")
-                        # Don't reset notification_sent flag for fallback notifications
-                        # This allows future state transition notifications to still work
                     
                     # Log state changes for debugging
                     if session_name in self.last_state:
@@ -371,7 +250,7 @@ class MultiSessionMonitor:
                 # Clean up all session data
                 for data_dict in [self.last_screen_hash, self.notification_sent, 
                                 self.last_state, self.last_notification_time,
-                                self.last_activity_time, self.inactivity_notification_count]:
+                                self.last_activity_time]:
                     if session_name in data_dict:
                         del data_dict[session_name]
                 if session_name in self.active_threads:
