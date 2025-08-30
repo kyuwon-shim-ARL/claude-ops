@@ -119,6 +119,24 @@ class TelegramBridge:
         """Extract session name from notification message"""
         import re
         
+        # Priority patterns - look for current/active session first
+        priority_patterns = [
+            r'📍 현재 활성: `([^`]+)`',           # New switch format - current active
+            r'현재: `([^`]+)`',                    # Old switch format - current
+            r'새 세션: `([^`]+)`',                 # New session in switch
+        ]
+        
+        # Try priority patterns first
+        for pattern in priority_patterns:
+            match = re.search(pattern, message_text)
+            if match:
+                session_name = match.group(1)
+                if session_name.startswith('claude_'):
+                    return session_name
+                elif not session_name.startswith('claude'):
+                    return f'claude_{session_name}'
+                return session_name
+        
         # Look for session patterns in the message (updated for all formats)
         patterns = [
             r'🎛️ 세션: ([^\n]+)',                    # Log format: 🎛️ 세션: claude_claude-ops
@@ -1071,9 +1089,10 @@ class TelegramBridge:
                 
                 switch_message = (
                     f"🔄 **활성 세션 전환 완료**\n\n"
-                    f"이전: `{old_session}`\n"
-                    f"현재: `{target_session}`\n\n"
+                    f"📍 현재 활성: `{target_session}`\n"
+                    f"📁 프로젝트: `{session_display}`\n\n"
                     f"이제 `{session_display}` 세션이 활성화되었습니다.\n"
+                    f"_(이전 세션: {old_session})_\n"
                 )
                 
                 if log_content:
@@ -1568,10 +1587,10 @@ class TelegramBridge:
                 
                 switch_message = (
                     f"✅ **세션 전환 완료**\n\n"
-                    f"이전 세션: `{current_session}`\n"
-                    f"새 세션: `{session_name}`\n\n"
+                    f"📍 현재 활성: `{session_name}`\n"
                     f"📁 상태 파일: `{new_status_file}`\n\n"
                     f"이제 `{session_name}` 세션을 모니터링합니다.\n"
+                    f"_(이전: {current_session})_\n"
                 )
                 
                 if log_content:
@@ -1876,9 +1895,10 @@ class TelegramBridge:
                 # Send confirmation message
                 await update.message.reply_text(
                     f"🔄 메인 세션 자동 전환 완료\n\n"
-                    f"📤 이전: {old_session}\n"
-                    f"📥 현재: {session_name}\n\n"
-                    f"✅ 이제 모든 메시지가 새 세션으로 전송됩니다!"
+                    f"📍 현재 활성: `{session_name}`\n\n"
+                    f"✅ 이제 모든 메시지가 새 세션으로 전송됩니다!\n"
+                    f"_(이전: {old_session})_",
+                    parse_mode='Markdown'
                 )
                 return True
             else:
@@ -2270,10 +2290,11 @@ class TelegramBridge:
                 
                 await query.edit_message_text(
                     f"🏠 **메인 세션 변경 완료**\n\n"
-                    f"이전: `{current_session}`\n"
-                    f"새 메인: `{session_name}`\n\n"
+                    f"📍 현재 메인: `{session_name}`\n"
+                    f"📁 프로젝트: `{display_name}`\n\n"
                     f"✅ 이제 `{display_name}` 세션이 메인 세션입니다.\n"
-                    f"모니터링 시스템이 자동으로 업데이트됩니다.",
+                    f"모니터링 시스템이 자동으로 업데이트됩니다.\n"
+                    f"_(이전: {current_session})_",
                     parse_mode='Markdown'
                 )
                 

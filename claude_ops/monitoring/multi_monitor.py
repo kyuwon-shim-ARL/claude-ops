@@ -20,6 +20,7 @@ from ..telegram.notifier import SmartNotifier
 from ..telegram.keyboard_handler import keyboard_handler
 from ..telegram.message_queue import message_queue
 from ..utils.wait_time_tracker import wait_tracker
+from ..utils.fallback_tracker import fallback_tracker
 
 logger = logging.getLogger(__name__)
 
