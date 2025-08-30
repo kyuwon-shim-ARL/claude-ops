@@ -91,6 +91,7 @@ completion-monitor.log*
 *.legacy
 /data/*.json
 /data/*.db
+.claude*
 
 # uv
 .uv/

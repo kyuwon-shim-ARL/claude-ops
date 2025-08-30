@@ -1104,10 +1104,10 @@ class TelegramBridge:
                 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                 keyboard = [
                     [
-                        InlineKeyboardButton("📜 50줄", callback_data=f"quick_log:50:{target_session}"),
-                        InlineKeyboardButton("📜 100줄", callback_data=f"quick_log:100:{target_session}"),
-                        InlineKeyboardButton("📜 150줄", callback_data=f"quick_log:150:{target_session}"),
-                        InlineKeyboardButton("📜 200줄", callback_data=f"quick_log:200:{target_session}")
+                        InlineKeyboardButton("📜 50줄", callback_data=f"quick_log_50:{target_session}"),
+                        InlineKeyboardButton("📜 100줄", callback_data=f"quick_log_100:{target_session}"),
+                        InlineKeyboardButton("📜 150줄", callback_data=f"quick_log_150:{target_session}"),
+                        InlineKeyboardButton("📜 200줄", callback_data=f"quick_log_200:{target_session}")
                     ]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
