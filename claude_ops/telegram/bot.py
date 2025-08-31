@@ -1441,11 +1441,11 @@ class TelegramBridge:
         self.app.add_handler(CommandHandler("fix_terminal", self.fix_terminal_command))
         
         # TADD Workflow Commands
-        self.app.add_handler(CommandHandler("기획", self.workflow_planning_command))
-        self.app.add_handler(CommandHandler("구현", self.workflow_implementation_command))
-        self.app.add_handler(CommandHandler("안정화", self.workflow_stabilization_command))
-        self.app.add_handler(CommandHandler("배포", self.workflow_deployment_command))
-        self.app.add_handler(CommandHandler("전체사이클", self.workflow_fullcycle_command))
+        self.app.add_handler(CommandHandler("planning", self.workflow_planning_command))
+        self.app.add_handler(CommandHandler("implementation", self.workflow_implementation_command))
+        self.app.add_handler(CommandHandler("stabilization", self.workflow_stabilization_command))
+        self.app.add_handler(CommandHandler("deployment", self.workflow_deployment_command))
+        self.app.add_handler(CommandHandler("fullcycle", self.workflow_fullcycle_command))
         
         # Callback query handler for inline buttons
         self.app.add_handler(CallbackQueryHandler(self.button_callback))
@@ -1477,11 +1477,11 @@ class TelegramBridge:
             BotCommand("help", "❓ 도움말 보기"),
             BotCommand("new_project", "🆕 새 Claude 프로젝트 생성"),
             # TADD Workflow Commands
-            BotCommand("전체사이클", "🔄 TADD 전체 개발 워크플로우"),
-            BotCommand("기획", "🎯 구조적 기획 및 계획 수립"),
-            BotCommand("구현", "⚡ DRY 원칙 기반 체계적 구현"),
-            BotCommand("안정화", "🔧 구조적 지속가능성 검증"),
-            BotCommand("배포", "🚀 최종 검증 및 배포")
+            BotCommand("fullcycle", "🔄 TADD 전체 개발 워크플로우"),
+            BotCommand("planning", "🎯 구조적 기획 및 계획 수립"),
+            BotCommand("implementation", "⚡ DRY 원칙 기반 체계적 구현"),
+            BotCommand("stabilization", "🔧 구조적 지속가능성 검증"),
+            BotCommand("deployment", "🚀 최종 검증 및 배포")
         ]
         
         await self.app.bot.set_my_commands(commands)
@@ -2242,64 +2242,101 @@ class TelegramBridge:
             )
     
     async def _session_log_callback(self, query, context, session_name):
-        """Show logs for specific session"""
+        """Show logs for specific session with enhanced error handling"""
+        logger.info(f"📜 로그 콜백 시작 - 세션: {session_name}")
+        
         try:
             import subprocess
             
             # Check if session exists
             session_exists = os.system(f"tmux has-session -t {session_name}") == 0
             if not session_exists:
+                logger.warning(f"세션 '{session_name}' 존재하지 않음")
                 await query.edit_message_text(
                     f"❌ 세션 없음\n\n세션 '{session_name}'이 존재하지 않습니다."
                 )
                 return
             
-            # Get screen content with moderate line count
-            result = subprocess.run(
-                f"tmux capture-pane -t {session_name} -p -S -100", 
-                shell=True, 
-                capture_output=True, 
-                text=True
-            )
+            logger.info(f"✅ 세션 '{session_name}' 존재 확인됨")
             
-            if result.returncode == 0:
-                current_screen = result.stdout
+            # Get screen content with moderate line count - use safer approach
+            try:
+                result = subprocess.run(
+                    ["tmux", "capture-pane", "-t", session_name, "-p", "-S", "-100"], 
+                    capture_output=True, 
+                    text=True,
+                    timeout=10,  # Add timeout to prevent hanging
+                    check=False  # Don't raise exception on non-zero exit
+                )
                 
-                if current_screen:
-                    display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
-                    lines = current_screen.split('\n')
+                logger.info(f"📊 tmux 명령어 실행 완료 - returncode: {result.returncode}")
+                
+                if result.returncode == 0:
+                    current_screen = result.stdout
+                    logger.info(f"📏 캡처된 로그 길이: {len(current_screen)} characters")
                     
-                    # Limit message length for Telegram
-                    max_length = 3000
-                    if len(current_screen) > max_length:
-                        # Show last part with truncation notice
-                        truncated_lines = []
-                        current_length = 0
-                        for line in reversed(lines):
-                            if current_length + len(line) > max_length:
-                                break
-                            truncated_lines.insert(0, line)
-                            current_length += len(line) + 1
+                    if current_screen and current_screen.strip():
+                        display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
+                        lines = current_screen.split('\n')
                         
-                        screen_text = "...(앞부분 생략)...\n" + '\n'.join(truncated_lines)
+                        # More conservative length limit (considering header)
+                        header = f"📜 {display_name} 세션 로그\n\n🎛️ 세션: {session_name}\n📏 라인 수: ~{len(lines)}줄\n\n"
+                        max_content_length = 3500 - len(header)  # Leave room for header
+                        
+                        if len(current_screen) > max_content_length:
+                            logger.info("📝 로그가 길어서 잘라내기 실행")
+                            # Show last part with truncation notice
+                            truncated_lines = []
+                            current_length = len("...(앞부분 생략)...\n")
+                            
+                            for line in reversed(lines):
+                                line_length = len(line) + 1  # +1 for newline
+                                if current_length + line_length > max_content_length:
+                                    break
+                                truncated_lines.insert(0, line)
+                                current_length += line_length
+                            
+                            screen_text = "...(앞부분 생략)...\n" + '\n'.join(truncated_lines)
+                        else:
+                            screen_text = current_screen
+                        
+                        # Escape potential problematic characters for safety
+                        screen_text = screen_text.replace('```', '｀｀｀')  # Replace markdown code blocks
+                        screen_text = screen_text.strip()
+                        
+                        message = f"{header}{screen_text}"
+                        
+                        logger.info(f"📤 최종 메시지 길이: {len(message)} characters")
+                        await query.edit_message_text(message)
+                        logger.info("✅ 로그 메시지 전송 완료")
+                        
                     else:
-                        screen_text = current_screen
-                    
-                    header = f"📜 {display_name} 세션 로그\n\n"
-                    header += f"🎛️ 세션: {session_name}\n"
-                    header += f"📏 라인 수: ~{len(lines)}줄\n\n"
-                    
-                    # Use same safe format as log_command (no markdown parsing)
-                    message = f"{header}{screen_text.strip()}"
-                    await query.edit_message_text(message)
+                        logger.info("📺 세션 화면이 비어있음")
+                        display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
+                        await query.edit_message_text(f"📜 {display_name} 로그\n\n📺 세션 화면이 비어있습니다.")
+                        
                 else:
-                    await query.edit_message_text(f"📜 {session_name} 로그\n\n📺 세션 화면이 비어있습니다.")
-            else:
-                await query.edit_message_text(f"❌ 세션 '{session_name}'의 로그를 가져올 수 없습니다.")
+                    error_msg = result.stderr.strip() if result.stderr else "알 수 없는 오류"
+                    logger.error(f"tmux capture-pane 실패 - stderr: {error_msg}")
+                    await query.edit_message_text(
+                        f"❌ 로그 캡처 실패\n\n세션 '{session_name}'의 로그를 가져올 수 없습니다.\n\n"
+                        f"오류: {error_msg[:200]}..."  # Limit error message length
+                    )
+                    
+            except subprocess.TimeoutExpired:
+                logger.error("tmux 명령어 타임아웃")
+                await query.edit_message_text("❌ 시간 초과\n\n로그 조회 시간이 초과되었습니다.")
+                
+            except subprocess.SubprocessError as se:
+                logger.error(f"subprocess 오류: {str(se)}")
+                await query.edit_message_text(f"❌ 명령어 실행 오류\n\n{str(se)[:200]}...")
                 
         except Exception as e:
-            logger.error(f"세션 로그 조회 중 오류: {str(e)}")
-            await query.edit_message_text(f"❌ 로그 조회 오류\n\n오류: {str(e)}")
+            logger.error(f"세션 로그 조회 중 예외 발생: {str(e)}", exc_info=True)
+            await query.edit_message_text(
+                f"❌ 로그 조회 오류\n\n예상치 못한 오류가 발생했습니다.\n\n"
+                f"오류: {str(e)[:200]}..."
+            )
     
     async def _session_switch_callback(self, query, context, session_name):
         """Switch main session"""
@@ -2666,8 +2703,13 @@ class TelegramBridge:
         
         # Import TADD modules
         try:
-            from ...tadd.task_manager import TADDTaskManager, TADD_TEMPLATES
-            from ...tadd.document_generator import TADDDocumentGenerator
+            import sys
+            import os
+            tadd_path = os.path.join(os.path.dirname(__file__), '..', '..', 'tadd')
+            if tadd_path not in sys.path:
+                sys.path.insert(0, tadd_path)
+            from tadd.task_manager import TADDTaskManager, TADD_TEMPLATES
+            from tadd.document_generator import TADDDocumentGenerator
             
             # Initialize TADD components
             task_manager = TADDTaskManager()
@@ -2728,7 +2770,7 @@ ARGUMENTS: {args_text}
         except ImportError as e:
             logger.error(f"TADD module import failed: {e}")
             # Fallback to basic command
-            basic_prompt = f"/기획 {args_text}"
+            basic_prompt = f"/planning {args_text}"
             target_session = await self._get_target_session_from_context(update, context)
             success = await self._send_to_claude_with_session(basic_prompt, target_session)
             
@@ -2745,7 +2787,12 @@ ARGUMENTS: {args_text}
         args_text = ' '.join(context.args) if context.args else ""
         
         try:
-            from ...tadd.task_manager import TADDTaskManager, TADD_TEMPLATES
+            import sys
+            import os
+            tadd_path = os.path.join(os.path.dirname(__file__), '..', '..', 'tadd')
+            if tadd_path not in sys.path:
+                sys.path.insert(0, tadd_path)
+            from tadd.task_manager import TADDTaskManager, TADD_TEMPLATES
             
             task_manager = TADDTaskManager()
             impl_tasks = task_manager.create_task_template("구현", TADD_TEMPLATES["구현"])
@@ -2789,7 +2836,7 @@ ARGUMENTS: {args_text}
                 
         except ImportError:
             # Fallback
-            basic_prompt = f"/구현 {args_text}"
+            basic_prompt = f"/implementation {args_text}"
             target_session = await self._get_target_session_from_context(update, context)
             success = await self._send_to_claude_with_session(basic_prompt, target_session)
             
@@ -2806,7 +2853,12 @@ ARGUMENTS: {args_text}
         args_text = ' '.join(context.args) if context.args else ""
         
         try:
-            from ...tadd.task_manager import TADDTaskManager, TADD_TEMPLATES
+            import sys
+            import os
+            tadd_path = os.path.join(os.path.dirname(__file__), '..', '..', 'tadd')
+            if tadd_path not in sys.path:
+                sys.path.insert(0, tadd_path)
+            from tadd.task_manager import TADDTaskManager, TADD_TEMPLATES
             
             task_manager = TADDTaskManager()
             stab_tasks = task_manager.create_task_template("안정화", TADD_TEMPLATES["안정화"])
@@ -2854,7 +2906,7 @@ ARGUMENTS: {args_text}
                 
         except ImportError:
             # Fallback
-            basic_prompt = f"/안정화 {args_text}"
+            basic_prompt = f"/stabilization {args_text}"
             target_session = await self._get_target_session_from_context(update, context)
             success = await self._send_to_claude_with_session(basic_prompt, target_session)
             
@@ -2871,8 +2923,13 @@ ARGUMENTS: {args_text}
         args_text = ' '.join(context.args) if context.args else ""
         
         try:
-            from ...tadd.task_manager import TADDTaskManager, TADD_TEMPLATES
-            from ...tadd.session_archiver import TADDSessionArchiver
+            import sys
+            import os
+            tadd_path = os.path.join(os.path.dirname(__file__), '..', '..', 'tadd')
+            if tadd_path not in sys.path:
+                sys.path.insert(0, tadd_path)
+            from tadd.task_manager import TADDTaskManager, TADD_TEMPLATES
+            from tadd.session_archiver import TADDSessionArchiver
             
             task_manager = TADDTaskManager()
             archiver = TADDSessionArchiver()
@@ -2922,7 +2979,7 @@ ARGUMENTS: {args_text}
                 
         except ImportError:
             # Fallback
-            basic_prompt = f"/배포 {args_text}"
+            basic_prompt = f"/deployment {args_text}"
             target_session = await self._get_target_session_from_context(update, context)
             success = await self._send_to_claude_with_session(basic_prompt, target_session)
             
@@ -2939,8 +2996,13 @@ ARGUMENTS: {args_text}
         args_text = ' '.join(context.args) if context.args else ""
         
         try:
-            from ...tadd.task_manager import TADDTaskManager
-            from ...tadd.prd_manager import TADDPRDManager
+            import sys
+            import os
+            tadd_path = os.path.join(os.path.dirname(__file__), '..', '..', 'tadd')
+            if tadd_path not in sys.path:
+                sys.path.insert(0, tadd_path)
+            from tadd.task_manager import TADDTaskManager
+            from tadd.prd_manager import TADDPRDManager
             
             task_manager = TADDTaskManager()
             prd_manager = TADDPRDManager()
@@ -3019,7 +3081,7 @@ ARGUMENTS: {args_text}
                 
         except ImportError:
             # Fallback - send as basic command
-            basic_prompt = f"/전체사이클 {args_text}"
+            basic_prompt = f"/fullcycle {args_text}"
             target_session = await self._get_target_session_from_context(update, context)
             success = await self._send_to_claude_with_session(basic_prompt, target_session)
             
