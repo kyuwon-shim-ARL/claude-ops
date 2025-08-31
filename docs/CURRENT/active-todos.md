@@ -1,31 +1,34 @@
-# Active TODOs - Claude-Ops Documentation Cleanup
+# Active TODOs - TADD Task Management
 
-**Last Updated**: 2025-08-20 17:35:00
-**Sprint**: Documentation Structure Alignment
+**Last Updated**: 2025-08-30 10:30:00
 
-## ✅ Completed Tasks
-- [x] claude-dev-kit init.sh 변경사항 분석
-- [x] 현재 문서 구조와 충돌 여부 확인
-- [x] 중복/불필요한 문서 식별
-- [x] 문서 정리 계획 수립
+## In Progress Tasks
 
-## 🔄 Current Sprint
-### 즉시 실행 필요
-- [ ] 불필요한 디렉토리 제거 (src/my_project/, core_features/, tools/)
-- [ ] 기존 Claude-Ops 특화 문서 백업
-- [ ] init.sh 실행 및 영향 확인
+- 🔄 **P1** 슬래시 명령어 업데이트 및 active-todos.md 동기화
+  - *Estimated*: 1h
 
-### 문서 정리
-- [ ] 중복 내용 제거
-- [ ] Claude-Ops 특화 내용 보존
-- [ ] 역할 분리 명확화
+## Pending Tasks
 
-## 📋 Backlog
-- [ ] README.md 업데이트 - 순수 브리지 역할 반영
-- [ ] CHANGELOG.md 업데이트 - v2.1.0 변경사항 기록
-- [ ] 사용자 가이드 업데이트
+- ⏳ E2E 테스트 스위트 작성
+  - *Estimated*: 3h
+  
+- ⏳ 성능 벤치마킹 및 검증
+  - *Estimated*: 2h
+  
+- ⏳ 최종 통합 및 배포
+  - *Estimated*: 1h
 
-## 💡 Ideas & Notes
-- Claude-Ops는 순수 텔레그램 브리지 역할에 집중
-- claude-dev-kit이 워크플로우 프롬프트 제공
-- 문서 중복 최소화로 유지보수 간소화
+## Completed Tasks
+
+- ✅ 현재 시스템 구조 및 문서 분석
+- ✅ TADD 방법론 기반 As-Is/To-Be/Gap 분석
+- ✅ PRD 작성 및 전략적 계획 수립
+- ✅ TADD 모듈 구조 생성
+- ✅ Telegram 버튼 TADD 명령어 통합
+
+## 📊 Task Analytics
+
+- **Total Tasks**: 9
+- **Completed**: 5 (55.6%)
+- **In Progress**: 1
+- **Remaining**: 4

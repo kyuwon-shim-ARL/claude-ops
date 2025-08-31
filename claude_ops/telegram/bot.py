@@ -1440,6 +1440,13 @@ class TelegramBridge:
         self.app.add_handler(CommandHandler("summary", self.summary_command))
         self.app.add_handler(CommandHandler("fix_terminal", self.fix_terminal_command))
         
+        # TADD Workflow Commands
+        self.app.add_handler(CommandHandler("기획", self.workflow_planning_command))
+        self.app.add_handler(CommandHandler("구현", self.workflow_implementation_command))
+        self.app.add_handler(CommandHandler("안정화", self.workflow_stabilization_command))
+        self.app.add_handler(CommandHandler("배포", self.workflow_deployment_command))
+        self.app.add_handler(CommandHandler("전체사이클", self.workflow_fullcycle_command))
+        
         # Callback query handler for inline buttons
         self.app.add_handler(CallbackQueryHandler(self.button_callback))
         
@@ -1468,7 +1475,13 @@ class TelegramBridge:
             BotCommand("fix_terminal", "🔧 터미널 크기 문제 자동 진단 및 복구"),
             BotCommand("status", "📊 봇 및 tmux 세션 상태 확인"),
             BotCommand("help", "❓ 도움말 보기"),
-            BotCommand("new_project", "🆕 새 Claude 프로젝트 생성")
+            BotCommand("new_project", "🆕 새 Claude 프로젝트 생성"),
+            # TADD Workflow Commands
+            BotCommand("전체사이클", "🔄 TADD 전체 개발 워크플로우"),
+            BotCommand("기획", "🎯 구조적 기획 및 계획 수립"),
+            BotCommand("구현", "⚡ DRY 원칙 기반 체계적 구현"),
+            BotCommand("안정화", "🔧 구조적 지속가능성 검증"),
+            BotCommand("배포", "🚀 최종 검증 및 배포")
         ]
         
         await self.app.bot.set_my_commands(commands)
@@ -1922,7 +1935,7 @@ class TelegramBridge:
             
             # Extract session info - unpack 5-tuple correctly
             # Reverse order for board: recent sessions (short wait time) at bottom
-            sessions_info = [(session_name, status) for session_name, _, _, status, _ in reversed(all_sessions)]
+            sessions_info = [(session_name, wait_time, status, has_record) for session_name, wait_time, _, status, has_record in reversed(all_sessions)]
             
             if not sessions_info:
                 await reply_func(
@@ -1938,16 +1951,30 @@ class TelegramBridge:
                 row_sessions = sessions_info[i:i+2]
                 session_row = []
                 
-                for session_name, status in row_sessions:
+                for session_name, wait_time, status, has_record in row_sessions:
                     display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
                     current_icon = "⭐" if session_name == self.config.session_name else ""
                     
                     # Use status from summary helper for consistency
                     status_icon = "🔨" if status == 'working' else "💤"
                     
+                    # Format wait time for button
+                    if status == 'waiting' and wait_time > 0:
+                        wait_str = summary_helper.format_wait_time(wait_time)
+                        # Add transparency indicator for estimates
+                        if not has_record:
+                            wait_str = f"~{wait_str}"
+                    else:
+                        wait_str = ""
+                    
                     # Get very short prompt hint for button
                     hint = await self._get_session_hint_short(session_name)
-                    button_text = f"{current_icon}{status_icon} {display_name}{hint}"
+                    
+                    # Build button text with wait time
+                    if wait_str:
+                        button_text = f"{current_icon}{status_icon} {display_name} ({wait_str}){hint}"
+                    else:
+                        button_text = f"{current_icon}{status_icon} {display_name}{hint}"
                     
                     session_row.append(
                         InlineKeyboardButton(
@@ -1963,8 +1990,8 @@ class TelegramBridge:
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             # Count working and waiting sessions
-            waiting_count = sum(1 for _, status in sessions_info if status == 'waiting')
-            working_count = sum(1 for _, status in sessions_info if status == 'working')
+            waiting_count = sum(1 for _, _, status, _ in sessions_info if status == 'waiting')
+            working_count = sum(1 for _, _, status, _ in sessions_info if status == 'working')
             
             await reply_func(
                 f"🎯 **세션 보드** (전체: {len(sessions_info)}개)\n"
@@ -2007,9 +2034,25 @@ class TelegramBridge:
             
             # Get session status and prompt hint
             from ..utils.session_state import is_session_working, get_session_working_info
+            from ..utils.session_summary import summary_helper
             is_working = is_session_working(session_name)
             info = get_session_working_info(session_name)
-            status_emoji = "🔄 작업중" if is_working else "💤 대기중"
+            
+            # Get wait time
+            wait_time = summary_helper.tracker.get_wait_time_since_completion(session_name)
+            has_record = summary_helper.tracker.has_completion_record(session_name)
+            
+            if is_working:
+                status_emoji = "🔄 작업중"
+            else:
+                if wait_time > 0:
+                    wait_str = summary_helper.format_wait_time(wait_time)
+                    if not has_record:
+                        status_emoji = f"💤 대기중 (~{wait_str} 추정)"
+                    else:
+                        status_emoji = f"💤 대기중 ({wait_str})"
+                else:
+                    status_emoji = "💤 대기중"
             
             # Get full prompt hint for this view
             prompt_hint = await self.get_session_prompt_hint(session_name)
@@ -2612,8 +2655,378 @@ class TelegramBridge:
             logger.error(f"Exception while sending text to Claude session {target_session}: {str(e)}")
             return False
     
-    # Workflow commands removed - now handled by Claude-Dev-Kit directly
-    # Users should use /기획, /구현, /안정화, /배포 directly
+    # TADD Workflow Command Handlers
+    
+    async def workflow_planning_command(self, update, context):
+        """Handle /기획 command with TADD integration"""
+        if not await self._basic_auth_check(update):
+            return
+        
+        args_text = ' '.join(context.args) if context.args else ""
+        
+        # Import TADD modules
+        try:
+            from ...tadd.task_manager import TADDTaskManager, TADD_TEMPLATES
+            from ...tadd.document_generator import TADDDocumentGenerator
+            
+            # Initialize TADD components
+            task_manager = TADDTaskManager()
+            doc_generator = TADDDocumentGenerator()
+            
+            # Create planning tasks from template
+            planning_tasks = task_manager.create_task_template("기획", TADD_TEMPLATES["기획"])
+            
+            # Start first task
+            if planning_tasks:
+                task_manager.update_task_status(planning_tasks[0], task_manager.TaskStatus.IN_PROGRESS)
+            
+            # Prepare TADD planning prompt
+            tadd_prompt = f"""
+🎯 **전체 개발 워크플로우 실행**
+
+==================================================
+
+🎯 **기획 (Structured Discovery & Planning Loop)**
+
+**📚 컨텍스트 자동 로딩:**
+- project_rules.md 확인 (있으면 읽기)
+- docs/CURRENT/status.md 확인 (있으면 읽기)  
+- 이전 세션 TODO 확인
+
+**탐색 단계:**
+- 전체 구조 파악: 현재 시스템 아키텍처와 요구사항 분석
+- As-Is/To-Be/Gap 분석: 현재 상태, 목표 상태, 차이점 식별
+- 이해관계자 요구사항 수집 및 우선순위화
+
+**계획 단계:**
+- MECE 기반 작업분해(WBS): 상호배타적이고 전체포괄적인 업무 구조
+- 우선순위 매트릭스: 중요도와 긴급도 기반 작업 순서 결정
+- 리소스 및 일정 계획 수립
+
+**수렴 단계:**
+- 탐색↔계획 반복 iterative refinement
+- PRD(Product Requirements Document) 완성
+- TodoWrite를 활용한 구조화된 작업 계획 수립
+
+ARGUMENTS: {args_text}
+"""
+            
+            # Send to Claude session
+            target_session = await self._get_target_session_from_context(update, context)
+            success = await self._send_to_claude_with_session(tadd_prompt, target_session)
+            
+            if success:
+                await update.message.reply_text(
+                    f"🎯 **기획 단계 시작**\\n"
+                    f"📋 **{len(planning_tasks)}개 작업** 추가됨\\n"
+                    f"🔄 **세션**: {target_session}\\n"
+                    f"📝 **인수**: {args_text or '없음'}"
+                )
+            else:
+                await update.message.reply_text("❌ Claude 세션으로 전송 실패")
+                
+        except ImportError as e:
+            logger.error(f"TADD module import failed: {e}")
+            # Fallback to basic command
+            basic_prompt = f"/기획 {args_text}"
+            target_session = await self._get_target_session_from_context(update, context)
+            success = await self._send_to_claude_with_session(basic_prompt, target_session)
+            
+            if success:
+                await update.message.reply_text("🎯 기획 명령어 전송됨 (기본 모드)")
+            else:
+                await update.message.reply_text("❌ Claude 세션으로 전송 실패")
+        
+    async def workflow_implementation_command(self, update, context):
+        """Handle /구현 command with TADD integration"""
+        if not await self._basic_auth_check(update):
+            return
+        
+        args_text = ' '.join(context.args) if context.args else ""
+        
+        try:
+            from ...tadd.task_manager import TADDTaskManager, TADD_TEMPLATES
+            
+            task_manager = TADDTaskManager()
+            impl_tasks = task_manager.create_task_template("구현", TADD_TEMPLATES["구현"])
+            
+            if impl_tasks:
+                task_manager.update_task_status(impl_tasks[0], task_manager.TaskStatus.IN_PROGRESS)
+            
+            tadd_prompt = f"""
+📍 **기획 완료 → 구현 시작**
+
+⚡ **구현 (Implementation with DRY)**
+
+**📚 컨텍스트 자동 로딩:**
+- project_rules.md 확인 (있으면 읽기)
+- docs/CURRENT/active-todos.md 확인 (있으면 읽기)
+
+**DRY 원칙 적용:**
+- 기존 코드 검색: Grep, Glob 도구로 유사 기능 탐색
+- 재사용 우선: 기존 라이브러리/모듈/함수 활용
+- 없으면 생성: 새로운 컴포넌트 개발 시 재사용성 고려
+
+**체계적 진행:**
+- TodoWrite 기반 단계별 구현
+- 모듈화된 코드 구조 유지
+- 코딩 컨벤션 준수 (기존 코드 스타일 분석 후 적용)
+
+ARGUMENTS: {args_text}
+"""
+            
+            target_session = await self._get_target_session_from_context(update, context)
+            success = await self._send_to_claude_with_session(tadd_prompt, target_session)
+            
+            if success:
+                await update.message.reply_text(
+                    f"⚡ **구현 단계 시작**\\n"
+                    f"📋 **{len(impl_tasks)}개 작업** 추가됨\\n"
+                    f"🔄 **세션**: {target_session}"
+                )
+            else:
+                await update.message.reply_text("❌ Claude 세션으로 전송 실패")
+                
+        except ImportError:
+            # Fallback
+            basic_prompt = f"/구현 {args_text}"
+            target_session = await self._get_target_session_from_context(update, context)
+            success = await self._send_to_claude_with_session(basic_prompt, target_session)
+            
+            if success:
+                await update.message.reply_text("⚡ 구현 명령어 전송됨 (기본 모드)")
+            else:
+                await update.message.reply_text("❌ Claude 세션으로 전송 실패")
+    
+    async def workflow_stabilization_command(self, update, context):
+        """Handle /안정화 command with TADD integration"""
+        if not await self._basic_auth_check(update):
+            return
+        
+        args_text = ' '.join(context.args) if context.args else ""
+        
+        try:
+            from ...tadd.task_manager import TADDTaskManager, TADD_TEMPLATES
+            
+            task_manager = TADDTaskManager()
+            stab_tasks = task_manager.create_task_template("안정화", TADD_TEMPLATES["안정화"])
+            
+            if stab_tasks:
+                task_manager.update_task_status(stab_tasks[0], task_manager.TaskStatus.IN_PROGRESS)
+            
+            tadd_prompt = f"""
+📍 **구현 완료 → 안정화 시작**
+
+🔧 **안정화 (Structural Sustainability Protocol v2.0)**
+
+**📚 컨텍스트 자동 로딩:**
+- project_rules.md 확인 (있으면 읽기)
+- docs/CURRENT/test-report.md 확인 (이전 테스트 결과)
+
+**6단계 통합 검증 루프:**
+1. **Repository Structure Scan** - 전체 파일 분석
+2. **Structural Optimization** - 디렉토리 정리 및 최적화
+3. **Dependency Resolution** - Import 수정 및 의존성 해결
+4. **User-Centric Comprehensive Testing** ⚠️ **Mock 테스트 금지**
+5. **Documentation Sync** - 문서 동기화
+6. **Quality Assurance** - 품질 보증
+
+**실제 시나리오 기반 테스트 필수:**
+- PRD 기반 사용자 스토리 검증
+- 실제 데이터 사용 (Mock 금지)
+- 정량적 성능 측정
+
+ARGUMENTS: {args_text}
+"""
+            
+            target_session = await self._get_target_session_from_context(update, context)
+            success = await self._send_to_claude_with_session(tadd_prompt, target_session)
+            
+            if success:
+                await update.message.reply_text(
+                    f"🔧 **안정화 단계 시작**\\n"
+                    f"📋 **{len(stab_tasks)}개 작업** 추가됨\\n"
+                    f"⚠️ **실제 테스트 필수** (Mock 금지)\\n"
+                    f"🔄 **세션**: {target_session}"
+                )
+            else:
+                await update.message.reply_text("❌ Claude 세션으로 전송 실패")
+                
+        except ImportError:
+            # Fallback
+            basic_prompt = f"/안정화 {args_text}"
+            target_session = await self._get_target_session_from_context(update, context)
+            success = await self._send_to_claude_with_session(basic_prompt, target_session)
+            
+            if success:
+                await update.message.reply_text("🔧 안정화 명령어 전송됨 (기본 모드)")
+            else:
+                await update.message.reply_text("❌ Claude 세션으로 전송 실패")
+    
+    async def workflow_deployment_command(self, update, context):
+        """Handle /배포 command with TADD integration"""
+        if not await self._basic_auth_check(update):
+            return
+        
+        args_text = ' '.join(context.args) if context.args else ""
+        
+        try:
+            from ...tadd.task_manager import TADDTaskManager, TADD_TEMPLATES
+            from ...tadd.session_archiver import TADDSessionArchiver
+            
+            task_manager = TADDTaskManager()
+            archiver = TADDSessionArchiver()
+            
+            deploy_tasks = task_manager.create_task_template("배포", TADD_TEMPLATES["배포"])
+            
+            if deploy_tasks:
+                task_manager.update_task_status(deploy_tasks[0], task_manager.TaskStatus.IN_PROGRESS)
+            
+            tadd_prompt = f"""
+📍 **안정화 완료 → 배포 시작**
+
+🚀 **배포 (Deployment)**
+
+**📚 컨텍스트 자동 로딩:**
+- project_rules.md 확인 (있으면 읽기)
+- docs/CURRENT/ 전체 상태 확인
+
+**배포 프로세스:**
+1. **최종 검증** - 체크리스트 완료 확인
+2. **구조화 커밋** - 의미있는 커밋 메시지
+3. **⚠️ 필수: 원격 배포 실행**
+   - **반드시 git push 실행**
+   - **git push origin main** 
+   - **버전 태깅 및 푸시**
+4. **배포 후 검증** - 원격 저장소 확인
+5. **📦 세션 아카이빙** - CURRENT/ → sessions/YYYY-MM/
+
+**💡 배포 = 커밋 + 푸시 + 태깅 + 검증의 완전한 과정**
+
+ARGUMENTS: {args_text}
+"""
+            
+            target_session = await self._get_target_session_from_context(update, context)
+            success = await self._send_to_claude_with_session(tadd_prompt, target_session)
+            
+            if success:
+                await update.message.reply_text(
+                    f"🚀 **배포 단계 시작**\\n"
+                    f"📋 **{len(deploy_tasks)}개 작업** 추가됨\\n"
+                    f"⚠️ **git push 필수**\\n"
+                    f"📦 **세션 아카이빙 자동 실행**\\n"
+                    f"🔄 **세션**: {target_session}"
+                )
+            else:
+                await update.message.reply_text("❌ Claude 세션으로 전송 실패")
+                
+        except ImportError:
+            # Fallback
+            basic_prompt = f"/배포 {args_text}"
+            target_session = await self._get_target_session_from_context(update, context)
+            success = await self._send_to_claude_with_session(basic_prompt, target_session)
+            
+            if success:
+                await update.message.reply_text("🚀 배포 명령어 전송됨 (기본 모드)")
+            else:
+                await update.message.reply_text("❌ Claude 세션으로 전송 실패")
+    
+    async def workflow_fullcycle_command(self, update, context):
+        """Handle /전체사이클 command with TADD integration"""
+        if not await self._basic_auth_check(update):
+            return
+        
+        args_text = ' '.join(context.args) if context.args else ""
+        
+        try:
+            from ...tadd.task_manager import TADDTaskManager
+            from ...tadd.prd_manager import TADDPRDManager
+            
+            task_manager = TADDTaskManager()
+            prd_manager = TADDPRDManager()
+            
+            # Create comprehensive task list for full cycle
+            full_cycle_tasks = [
+                ("컨텍스트 로딩 및 현재 상태 분석", "컨텍스트를 로딩하고 현재 상태를 분석하는 중"),
+                ("As-Is/To-Be/Gap 분석", "As-Is/To-Be/Gap을 분석하는 중"),
+                ("PRD 작성 및 기획 완료", "PRD를 작성하고 기획을 완료하는 중"),
+                ("DRY 원칙 기반 구현", "DRY 원칙을 기반으로 구현하는 중"),
+                ("실제 시나리오 테스트", "실제 시나리오로 테스트하는 중"),
+                ("구조적 안정화", "구조적 안정화를 진행하는 중"),
+                ("Git 커밋 및 원격 푸시", "Git 커밋 및 원격 푸시를 진행하는 중"),
+                ("세션 아카이빙", "세션 아카이빙을 진행하는 중")
+            ]
+            
+            cycle_task_ids = task_manager.create_task_template("전체사이클", full_cycle_tasks)
+            
+            if cycle_task_ids:
+                task_manager.update_task_status(cycle_task_ids[0], task_manager.TaskStatus.IN_PROGRESS)
+            
+            tadd_prompt = f"""
+🔄 **전체 개발 워크플로우 실행**
+
+다음 4단계를 순차적으로 진행하되, 현재 프로젝트 상태를 고려하여 필요한 단계에 집중해주세요:
+
+==================================================
+
+🎯 **기획 (Structured Discovery & Planning Loop)**
+- 컨텍스트 자동 로딩 (project_rules.md, status.md)
+- As-Is/To-Be/Gap 분석
+- MECE 기반 작업분해
+- PRD 작성 및 TodoWrite 계획
+
+📍 **기획 완료 → 구현 시작**
+
+⚡ **구현 (Implementation with DRY)**
+- DRY 원칙 적용
+- 기존 코드 재사용 우선
+- TodoWrite 기반 단계별 구현
+- 품질 보증 및 테스트
+
+📍 **구현 완료 → 안정화 시작**
+
+🔧 **안정화 (Structural Sustainability Protocol v2.0)**
+- 6단계 통합 검증
+- ⚠️ **실제 시나리오 테스트 필수** (Mock 금지)
+- 정량적 성능 측정
+- 구조적 최적화
+
+📍 **안정화 완료 → 배포 시작**
+
+🚀 **배포 (Deployment)**
+- 최종 검증 및 커밋
+- ⚠️ **필수: git push origin main**
+- 버전 태깅 및 원격 배포
+- 📦 **세션 아카이빙 자동 실행**
+
+ARGUMENTS: {args_text}
+"""
+            
+            target_session = await self._get_target_session_from_context(update, context)
+            success = await self._send_to_claude_with_session(tadd_prompt, target_session)
+            
+            if success:
+                await update.message.reply_text(
+                    f"🔄 **전체 사이클 시작**\\n"
+                    f"📋 **{len(cycle_task_ids)}개 작업** 생성됨\\n"
+                    f"🎯 **4단계 순차 진행**: 기획 → 구현 → 안정화 → 배포\\n"
+                    f"⚠️ **실제 테스트 & git push 필수**\\n"
+                    f"📦 **자동 세션 아카이빙**\\n"
+                    f"🔄 **세션**: {target_session}"
+                )
+            else:
+                await update.message.reply_text("❌ Claude 세션으로 전송 실패")
+                
+        except ImportError:
+            # Fallback - send as basic command
+            basic_prompt = f"/전체사이클 {args_text}"
+            target_session = await self._get_target_session_from_context(update, context)
+            success = await self._send_to_claude_with_session(basic_prompt, target_session)
+            
+            if success:
+                await update.message.reply_text("🔄 전체사이클 명령어 전송됨 (기본 모드)")
+            else:
+                await update.message.reply_text("❌ Claude 세션으로 전송 실패")
     
     async def _send_to_claude(self, text: str) -> bool:
         """Send text to current Claude session (legacy function - now uses _send_to_claude_with_session)"""
