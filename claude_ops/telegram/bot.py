@@ -1132,7 +1132,13 @@ class TelegramBridge:
             await update.message.reply_text(f"❌ 세션 전환 중 오류가 발생했습니다: {str(e)}")
     
     async def sessions_command(self, update, context):
-        """Show active sessions command or switch to specified session directly"""
+        """Show active sessions, switch to session, or send text to specific session
+        
+        Usage:
+        - /sessions - Show all sessions
+        - /sessions session_name - Switch to session
+        - /sessions session_name text... - Send text to specific session
+        """
         user_id = update.effective_user.id
         
         if not self.check_user_authorization(user_id):
@@ -1142,7 +1148,68 @@ class TelegramBridge:
         # Check for direct session name argument
         if context.args and len(context.args) > 0:
             target_session = context.args[0]
-            return await self._switch_to_session(update, target_session, "direct command")
+            
+            # If more than one argument, treat the rest as text to send
+            if len(context.args) > 1:
+                # Join all arguments after the first as the message
+                text_to_send = ' '.join(context.args[1:])
+                
+                # Check if session exists
+                session_exists = os.system(f"tmux has-session -t {target_session}") == 0
+                if not session_exists:
+                    await update.message.reply_text(
+                        f"❌ 세션 `{target_session}`이 존재하지 않습니다.\n"
+                        f"사용 가능한 세션을 보려면 `/sessions`를 입력하세요."
+                    )
+                    return
+                
+                # Send text to the specific session
+                import subprocess
+                try:
+                    # Use tmux send-keys to send the text
+                    result = subprocess.run(
+                        ["tmux", "send-keys", "-t", target_session, "-l", text_to_send],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    
+                    if result.returncode == 0:
+                        # Also send Enter to execute the command
+                        subprocess.run(
+                            ["tmux", "send-keys", "-t", target_session, "Enter"],
+                            timeout=5
+                        )
+                        
+                        session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+                        await update.message.reply_text(
+                            f"✅ **텍스트 전송 완료**\n\n"
+                            f"📍 대상 세션: `{target_session}`\n"
+                            f"📁 프로젝트: `{session_display}`\n"
+                            f"📝 전송된 텍스트: `{text_to_send}`\n\n"
+                            f"💡 세션 로그를 보려면 `/log`를 사용하세요.",
+                            parse_mode='Markdown'
+                        )
+                        
+                        logger.info(f"텍스트 전송 성공: {target_session} <- {text_to_send[:100]}")
+                    else:
+                        error_msg = result.stderr if result.stderr else "Unknown error"
+                        await update.message.reply_text(
+                            f"❌ 텍스트 전송 실패\n\n"
+                            f"오류: {error_msg}"
+                        )
+                        logger.error(f"텍스트 전송 실패: {error_msg}")
+                        
+                except subprocess.TimeoutExpired:
+                    await update.message.reply_text("❌ 명령 실행 시간 초과")
+                except Exception as e:
+                    await update.message.reply_text(f"❌ 텍스트 전송 중 오류 발생: {str(e)}")
+                    logger.error(f"텍스트 전송 예외: {str(e)}")
+                
+                return
+            else:
+                # Single argument - switch to session
+                return await self._switch_to_session(update, target_session, "direct command")
         
         # Check if replying to a message - if so, switch to that session directly
         if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
