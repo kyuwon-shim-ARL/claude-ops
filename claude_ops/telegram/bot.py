@@ -1080,25 +1080,35 @@ class TelegramBridge:
                 )
                 
                 log_content = ""
-                if result.returncode == 0 and result.stdout.strip():
-                    log_content = result.stdout.strip()
+                if result.returncode == 0 and result.stdout:
+                    # Use same safe approach as /log command - keep original spacing
+                    current_screen = result.stdout
+                    lines = current_screen.split('\n')
+                    
                     # Show last 50 lines initially
-                    lines = log_content.split('\n')
                     if len(lines) > 50:
-                        log_content = '\n'.join(lines[-50:])
+                        display_lines = lines[-50:]
+                    else:
+                        display_lines = lines
+                    
+                    log_content = '\n'.join(display_lines)
                 
+                # Build message parts separately
                 switch_message = (
                     f"🔄 **활성 세션 전환 완료**\n\n"
                     f"📍 현재 활성: `{target_session}`\n"
                     f"📁 프로젝트: `{session_display}`\n\n"
                     f"이제 `{session_display}` 세션이 활성화되었습니다.\n"
-                    f"_(이전 세션: {old_session})_\n"
+                    f"_(이전 세션: {old_session})_"
                 )
                 
                 if log_content:
-                    switch_message += f"\n📺 **최근 로그 (50줄)**:\n```\n{log_content}\n```"
+                    # Add log header
+                    log_header = f"\n\n📺 **최근 로그 (50줄)**:\n"
+                    # Combine without markdown code blocks to avoid parsing errors
+                    full_message = f"{switch_message}{log_header}{log_content}"
                 else:
-                    switch_message += f"\n📺 화면이 비어있습니다."
+                    full_message = f"{switch_message}\n\n📺 화면이 비어있습니다."
                 
                 # Add quick log buttons like in board
                 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -1112,7 +1122,8 @@ class TelegramBridge:
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
-                await update.message.reply_text(switch_message, parse_mode='Markdown', reply_markup=reply_markup)
+                # Send without markdown parsing to avoid errors with log content
+                await update.message.reply_text(full_message, parse_mode=None, reply_markup=reply_markup)
             else:
                 await update.message.reply_text(f"❌ 세션 전환에 실패했습니다: {target_session}")
                 
