@@ -1438,6 +1438,7 @@ class TelegramBridge:
         self.app.add_handler(CommandHandler("new_project", self.start_claude_command))  # Primary command
         self.app.add_handler(CommandHandler("help", self.help_command))
         self.app.add_handler(CommandHandler("log", self.log_command))
+        self.app.add_handler(CommandHandler("logs", self.log_command))  # Alias for common typo
         self.app.add_handler(CommandHandler("log50", self.log50_command))
         self.app.add_handler(CommandHandler("log100", self.log100_command))
         self.app.add_handler(CommandHandler("log150", self.log150_command))
