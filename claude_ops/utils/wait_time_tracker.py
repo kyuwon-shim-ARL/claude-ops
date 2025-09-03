@@ -39,6 +39,9 @@ class WaitTimeTracker:
         self.wait_times: Dict[str, float] = self._load_times()
         self.session_states: Dict[str, str] = self._load_states()  # Track last known state
         self.completion_times: Dict[str, float] = self._load_completions()  # Track completion notification times
+        
+        # Auto-validate and fix timestamps on initialization
+        self.validate_and_fix_timestamps()
     
     def _load_times(self) -> Dict[str, float]:
         """Load times from storage file"""
@@ -270,6 +273,40 @@ class WaitTimeTracker:
             logger.error(f"Fallback estimation failed for {session_name}: {e}")
             # Ultimate fallback: indicate uncertainty with fixed time
             return 1800.0  # 30 minutes as "unknown but likely been waiting"
+    
+    def validate_and_fix_timestamps(self):
+        """
+        Validate and fix future/invalid timestamps in completion times
+        
+        This method fixes timestamps that are:
+        1. In the future (beyond current time)
+        2. Older than 24 hours (stale data)
+        
+        Fixed timestamps are set to 30 minutes before current time as a reasonable estimate.
+        """
+        current_time = time.time()
+        fixed_count = 0
+        max_age_seconds = 24 * 3600  # 24 hours
+        
+        # Check and fix each completion timestamp
+        for session_name, timestamp in list(self.completion_times.items()):
+            # Check if timestamp is in the future or too old
+            if timestamp > current_time:
+                # Future timestamp - definitely wrong
+                logger.warning(f"Future timestamp detected for {session_name}: {timestamp} > {current_time}")
+                self.completion_times[session_name] = current_time - 1800  # Set to 30 minutes ago
+                fixed_count += 1
+            elif (current_time - timestamp) > max_age_seconds:
+                # Timestamp older than 24 hours - likely stale
+                logger.info(f"Stale timestamp detected for {session_name}: {(current_time - timestamp)/3600:.1f} hours old")
+                # Remove stale entries entirely to trigger fallback
+                del self.completion_times[session_name]
+                fixed_count += 1
+        
+        # Save if any changes were made
+        if fixed_count > 0:
+            self._save_completions()
+            logger.info(f"Fixed/removed {fixed_count} invalid timestamps")
     
     def cleanup_old_sessions(self, max_age_hours: float = 24):
         """Remove sessions older than max_age_hours"""
