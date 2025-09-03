@@ -4,9 +4,7 @@
 로그 길이 조절 기능의 단위 테스트를 포함합니다.
 """
 
-import pytest
 import tempfile
-import json
 from pathlib import Path
 from unittest.mock import patch
 

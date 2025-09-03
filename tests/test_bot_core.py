@@ -4,8 +4,7 @@ Core Bot Functionality Tests
 Tests for TelegramBridge core functionality, macro expansion, and session management
 """
 
-import pytest
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import Mock, patch
 from claude_ops.telegram.bot import TelegramBridge
 
 
@@ -198,7 +197,6 @@ class TestErrorHandling:
         
         # Should not raise exception during import/initialization
         try:
-            from claude_ops.telegram.bot import TelegramBridge
             # If we get here, the import succeeded despite config error
             assert True
         except Exception as e:

@@ -6,11 +6,9 @@ with templates, automation, and quality assurance.
 """
 
 import os
-import json
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from enum import Enum
-from pathlib import Path
 
 
 class DocumentType(Enum):
@@ -471,9 +469,9 @@ E2E Tests: {test_results.get('coverage', {}).get('e2e', 'N/A')}%
         
         # This is a simplified update - real implementation would parse and update sections
         with open(status_file, 'w', encoding='utf-8') as f:
-            f.write(f"# Current System Status - Claude-Ops\\n\\n")
+            f.write("# Current System Status - Claude-Ops\\n\\n")
             f.write(f"**Last Updated**: {timestamp}\\n")
-            f.write(f"**TADD Integration**: 🟢 Active\\n\\n")
+            f.write("**TADD Integration**: 🟢 Active\\n\\n")
             
             for section, content in updates.items():
                 f.write(f"## {section}\\n{content}\\n\\n")

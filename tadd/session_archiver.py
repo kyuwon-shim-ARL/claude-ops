@@ -7,10 +7,8 @@ version control integration, and session lifecycle tracking.
 
 import os
 import shutil
-import json
 from datetime import datetime
-from typing import Dict, List, Optional, Any
-from pathlib import Path
+from typing import Dict, List, Any
 import subprocess
 
 
@@ -326,7 +324,7 @@ class SessionArchiver:
                 
                 analysis["tasks_completed"] = f"✅ {completed_count} tasks completed, {pending_count} remaining"
         
-        except Exception as e:
+        except Exception:
             # Log error but continue
             pass
     

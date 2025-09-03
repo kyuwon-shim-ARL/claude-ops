@@ -6,13 +6,10 @@ InlineKeyboard 콜백을 처리하는 텔레그램 봇
 
 import logging
 import asyncio
-import json
-import time
 from typing import Dict, Any, Optional
 import requests
 from ..config import ClaudeOpsConfig
 from .inline_panel import InlineSessionPanel
-from .ui_state_manager import ui_state_manager
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +171,7 @@ class InlineKeyboardBot:
                     else:
                         status_text += "❌ 활성 Claude 세션이 없습니다."
                     
-                    status_text += f"\n\n💡 `/panel` 명령어로 관리 패널을 띄우세요."
+                    status_text += "\n\n💡 `/panel` 명령어로 관리 패널을 띄우세요."
                     self.send_message(status_text)
                 else:
                     self.send_message("❌ 세션 상태를 확인할 수 없습니다.")

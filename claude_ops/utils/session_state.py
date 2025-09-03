@@ -39,7 +39,7 @@ Error Handling:
 import subprocess
 import logging
 from enum import Enum
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from datetime import datetime
 from .log_length_manager import get_current_log_length
 

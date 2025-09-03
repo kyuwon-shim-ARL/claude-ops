@@ -8,7 +8,7 @@
 import subprocess
 import re
 import logging
-from typing import List, Optional
+from typing import List
 from datetime import datetime
 
 logger = logging.getLogger(__name__)

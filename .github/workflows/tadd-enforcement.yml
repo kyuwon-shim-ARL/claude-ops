@@ -1,0 +1,162 @@
+name: TADD Enforcement
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main, develop]
+
+jobs:
+  verify-test-first:
+    name: Verify Test-First Development
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Full history needed for commit analysis
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Check TADD Order
+        id: tadd_check
+        run: |
+          python scripts/verify_tadd_order.py
+          echo "status=$?" >> $GITHUB_OUTPUT
+      
+      - name: Comment PR (if failed)
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `❌ **TADD Violation Detected**
+              
+              Tests must be written before implementation.
+              
+              Please ensure:
+              1. Write failing tests first (commit with \`test:\` prefix)
+              2. Then implement the feature (commit with \`feat:\` or \`fix:\` prefix)
+              3. Tests should fail initially and pass after implementation
+              
+              Run \`python scripts/verify_tadd_order.py\` locally to check compliance.`
+            })
+
+  check-mock-usage:
+    name: Check Mock Usage
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Analyze Mock Usage
+        id: mock_check
+        run: |
+          python scripts/detect_mock_usage.py
+          echo "status=$?" >> $GITHUB_OUTPUT
+      
+      - name: Upload Mock Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mock-usage-report
+          path: |
+            mock-report.json
+            mock-violations.txt
+
+  test-coverage:
+    name: Test Coverage Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          pip install pytest pytest-cov
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      
+      - name: Run tests with coverage
+        run: |
+          pytest --cov=scripts --cov-report=xml --cov-report=term --cov-fail-under=20
+      
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          fail_ci_if_error: false
+
+  quality-gate:
+    name: TADD Quality Gate
+    runs-on: ubuntu-latest
+    needs: [verify-test-first, check-mock-usage, test-coverage]
+    if: always()
+    
+    steps:
+      - name: Check Quality Gate Status
+        run: |
+          echo "🔍 TADD Enforcement Summary"
+          echo "=========================="
+          
+          # Check if all jobs passed
+          if [ "${{ needs.verify-test-first.result }}" != "success" ]; then
+            echo "❌ Test-First Development: FAILED"
+            exit 1
+          else
+            echo "✅ Test-First Development: PASSED"
+          fi
+          
+          if [ "${{ needs.check-mock-usage.result }}" != "success" ]; then
+            echo "❌ Mock Usage Check: FAILED"
+            exit 1
+          else
+            echo "✅ Mock Usage Check: PASSED"
+          fi
+          
+          if [ "${{ needs.test-coverage.result }}" != "success" ]; then
+            echo "⚠️  Test Coverage: WARNING"
+          else
+            echo "✅ Test Coverage: PASSED"
+          fi
+          
+          echo ""
+          echo "✅ All TADD checks passed!"
+      
+      - name: Set PR Status
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const status = '${{ job.status }}' === 'success' ? 'success' : 'failure';
+            const description = status === 'success' 
+              ? 'All TADD requirements met' 
+              : 'TADD requirements not met';
+            
+            github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: status,
+              description: description,
+              context: 'TADD Enforcement'
+            });

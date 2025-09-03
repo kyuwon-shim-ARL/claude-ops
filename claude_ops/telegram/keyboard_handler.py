@@ -6,7 +6,7 @@
 
 import logging
 import re
-from typing import Optional, Dict, Any
+from typing import Optional
 from ..utils.session_state import SessionStateAnalyzer
 from ..utils.log_length_manager import get_current_log_length
 from .notifier import SmartNotifier

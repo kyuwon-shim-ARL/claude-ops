@@ -12,7 +12,7 @@ import re
 import asyncio
 from typing import Optional
 from telegram.ext import Application, MessageHandler, CommandHandler, CallbackQueryHandler, filters
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 
 from ..config import ClaudeOpsConfig
 from ..project_creator import ProjectCreator
@@ -117,7 +117,6 @@ class TelegramBridge:
     
     def extract_session_from_message(self, message_text: str) -> Optional[str]:
         """Extract session name from notification message"""
-        import re
         
         # Priority patterns - look for current/active session first
         priority_patterns = [
@@ -385,7 +384,6 @@ class TelegramBridge:
             return
         
         # Validate project name
-        import re
         if not re.match(r'^[a-zA-Z0-9_-]+$', first_arg):
             await update.message.reply_text(
                 f"❌ **잘못된 프로젝트명**: `{first_arg}`\n\n"
@@ -871,8 +869,8 @@ class TelegramBridge:
         except Exception as e:
             logger.error(f"Claude 재시작 중 오류: {str(e)}")
             await update.message.reply_text(
-                f"❌ 세션 재시작 중 오류가 발생했습니다.\n"
-                f"수동으로 `claude` 명령어를 실행해주세요."
+                "❌ 세션 재시작 중 오류가 발생했습니다.\n"
+                "수동으로 `claude` 명령어를 실행해주세요."
             )
     
     async def fix_terminal_command(self, update, context):
@@ -954,7 +952,7 @@ class TelegramBridge:
                 issues = health.issues if health.issues else ["알 수 없는 문제"]
                 
                 failure_msg = f"❌ `{session_display}` 터미널 복구 실패\n\n"
-                failure_msg += f"🔍 **감지된 문제들**:\n"
+                failure_msg += "🔍 **감지된 문제들**:\n"
                 for issue in issues:
                     failure_msg += f"  • {issue}\n"
                 
@@ -962,8 +960,8 @@ class TelegramBridge:
                 failure_msg += f"🎯 **목표 크기**: {health.expected_width}x{health.expected_height}\n\n"
                 
                 failure_msg += "🔧 **수동 복구 방법**:\n"
-                failure_msg += f"1. `/fix_terminal --force` (강제 패널 재생성)\n"
-                failure_msg += f"2. 또는 `/restart` (Claude 재시작)\n"
+                failure_msg += "1. `/fix_terminal --force` (강제 패널 재생성)\n"
+                failure_msg += "2. 또는 `/restart` (Claude 재시작)\n"
                 
                 if health.screen_sample:
                     failure_msg += f"\n📺 **화면 샘플**:\n```\n{health.screen_sample[:200]}...\n```"
@@ -1104,7 +1102,7 @@ class TelegramBridge:
                 
                 if log_content:
                     # Add log header
-                    log_header = f"\n\n📺 **최근 로그 (50줄)**:\n"
+                    log_header = "\n\n📺 **최근 로그 (50줄)**:\n"
                     # Combine without markdown code blocks to avoid parsing errors
                     full_message = f"{switch_message}{log_header}{log_content}"
                 else:
@@ -1688,7 +1686,7 @@ class TelegramBridge:
                 if log_content:
                     switch_message += f"\n📺 **최근 로그 (20줄)**:\n```\n{log_content}\n```"
                 else:
-                    switch_message += f"\n📺 화면이 비어있습니다."
+                    switch_message += "\n📺 화면이 비어있습니다."
                 
                 await query.edit_message_text(
                     switch_message,
@@ -1761,7 +1759,7 @@ class TelegramBridge:
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            guide_msg = f"""🎆 **새 프로젝트 생성 가이드**
+            guide_msg = """🎆 **새 프로젝트 생성 가이드**
 
 🚀 **Claude Dev Kit으로 새 프로젝트 생성**:
 
@@ -1857,11 +1855,11 @@ class TelegramBridge:
             os.system(f"tmux send-keys -t {session_name} Enter")
             
             # Send initialization notification
-            init_msg = f"🎆 세션 초기화 완료\n\n"
+            init_msg = "🎆 세션 초기화 완료\n\n"
             if has_example_text:
-                init_msg += f"✨ 예시 텍스트 제거 후 /init 실행\n"
+                init_msg += "✨ 예시 텍스트 제거 후 /init 실행\n"
             else:
-                init_msg += f"✨ 빈 세션에 /init 실행\n"
+                init_msg += "✨ 빈 세션에 /init 실행\n"
             init_msg += f"🎯 세션: {session_name}\n\n🚀 이제 정상적으로 사용 가능합니다!"
             
             await update.message.reply_text(init_msg)
@@ -2186,7 +2184,7 @@ class TelegramBridge:
         except Exception as e:
             logger.error(f"Session grid callback error for {session_name}: {str(e)}", exc_info=True)
             try:
-                await query.answer(f"❌ 세션 액션 로드 실패")
+                await query.answer("❌ 세션 액션 로드 실패")
             except:
                 pass  # Already answered
     
@@ -2260,7 +2258,7 @@ class TelegramBridge:
             is_current = session_name == self.config.session_name
             
             # Get session status and prompt hint
-            from ..utils.session_state import is_session_working, get_session_working_info
+            from ..utils.session_state import is_session_working
             is_working = is_session_working(session_name)
             status_emoji = "🔄 작업중" if is_working else "💤 대기중"
             
@@ -3200,7 +3198,6 @@ ARGUMENTS: {args_text}
             logger.info(f"텔레그램 봇이 시작되었습니다. 세션: {self.config.session_name}")
             
             # Add some retry logic for conflicts
-            import asyncio
             import time
             max_retries = 3
             for attempt in range(max_retries):

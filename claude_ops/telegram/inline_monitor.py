@@ -10,7 +10,6 @@ import logging
 import asyncio
 import threading
 from typing import Dict, Set, Optional
-from pathlib import Path
 from ..config import ClaudeOpsConfig
 from ..session_manager import session_manager
 from ..utils.session_state import SessionStateAnalyzer, SessionState

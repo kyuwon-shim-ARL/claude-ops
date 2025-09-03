@@ -1,0 +1,22 @@
+# TADD Enforcement Configuration
+version: 29.0
+created: 2025-09-03
+project: 
+
+rules:
+  test_first: true
+  mock_limit: 20  # Maximum 20% mock usage
+  coverage_min: 80  # Minimum 80% coverage
+  
+exceptions:
+  - path: "legacy/*"
+    reason: "Legacy code - gradual improvement"
+  - path: "vendor/*"
+    reason: "Third-party code"
+  - path: "node_modules/*"
+    reason: "Dependencies"
+
+notifications:
+  enabled: false
+  # slack: "https://hooks.slack.com/..."
+  # email: "team@example.com"

@@ -6,8 +6,7 @@ Manages active session state and switching between different Claude Code session
 
 import os
 import json
-from typing import Optional, Dict, List
-from pathlib import Path
+from typing import Dict, List
 
 
 class SessionManager:

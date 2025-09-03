@@ -5,7 +5,6 @@
 multi_monitor에서 주기적으로 확인하여 처리합니다.
 """
 
-import os
 import json
 import time
 import logging

@@ -6,7 +6,6 @@ Simple and reliable time tracking for Claude sessions
 
 import time
 import json
-import os
 from pathlib import Path
 from typing import Dict, Optional
 import logging

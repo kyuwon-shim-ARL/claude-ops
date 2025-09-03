@@ -12,15 +12,12 @@ import threading
 import subprocess
 import hashlib
 from typing import Dict, Set
-from pathlib import Path
 from ..config import ClaudeOpsConfig
 from ..session_manager import session_manager
 from ..utils.session_state import SessionStateAnalyzer, SessionState
 from ..telegram.notifier import SmartNotifier
-from ..telegram.keyboard_handler import keyboard_handler
 from ..telegram.message_queue import message_queue
 from ..utils.wait_time_tracker import wait_tracker
-from ..utils.fallback_tracker import fallback_tracker
 
 logger = logging.getLogger(__name__)
 

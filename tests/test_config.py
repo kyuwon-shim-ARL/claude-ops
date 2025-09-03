@@ -4,10 +4,9 @@ Configuration Management Tests
 Tests for ClaudeOpsConfig and environment variable handling
 """
 
-import pytest
 import os
 import tempfile
-from unittest.mock import patch, mock_open
+from unittest.mock import patch
 from claude_ops.config import ClaudeOpsConfig
 
 

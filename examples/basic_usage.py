@@ -5,7 +5,6 @@ Claude-Ops Usage Examples
 간단한 사용 시나리오를 통해 Claude-Ops의 핵심 워크플로우를 보여줍니다.
 """
 
-import os
 import sys
 from pathlib import Path
 

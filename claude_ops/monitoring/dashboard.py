@@ -3,11 +3,10 @@ Performance Monitoring Dashboard
 Provides real-time metrics and comparison between hook and polling systems
 """
 
-import time
 import json
 import logging
-from typing import Dict, Any, List
-from datetime import datetime, timedelta
+from typing import Dict, Any
+from datetime import datetime
 from pathlib import Path
 
 from ..config import ClaudeOpsConfig
@@ -289,24 +288,24 @@ class PerformanceDashboard:
         print(f"└── Active Hooks: {', '.join(status['hook_system']['active_hooks'])}")
         
         # Performance Comparison
-        print(f"\n⚡ Response Time Comparison")
+        print("\n⚡ Response Time Comparison")
         response = comparison['response_time']
         print(f"├── Hook System: {response['hook_advantage']}")
         print(f"└── Polling System: {response['polling_disadvantage']}")
         
         # Resource Usage
-        print(f"\n💻 Resource Usage")
+        print("\n💻 Resource Usage")
         resources = comparison['resource_usage']
         print(f"├── Hook System: {resources['hook_system']['lines_of_code']} LOC, {resources['hook_system']['memory_footprint']}")
         print(f"└── Polling System: {resources['polling_system']['lines_of_code']} LOC, {resources['polling_system']['memory_footprint']}")
         
         # Efficiency Scores
-        print(f"\n📈 Efficiency Scores")
+        print("\n📈 Efficiency Scores")
         print(f"├── Hook System: {resources['hook_system']['efficiency_score']:.1f}/100")
         print(f"└── Polling System: {resources['polling_system']['efficiency_score']:.1f}/100")
         
         # Accuracy
-        print(f"\n🎯 Accuracy")
+        print("\n🎯 Accuracy")
         accuracy = comparison['accuracy']
         print(f"├── Hook Precision: {accuracy['hook_precision']}")
         print(f"└── Polling Precision: {accuracy['polling_precision']}")

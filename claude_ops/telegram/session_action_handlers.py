@@ -6,7 +6,7 @@
 
 import subprocess
 import logging
-from typing import Optional, Tuple
+from typing import Tuple
 from datetime import datetime
 from ..utils.log_length_manager import get_current_log_length
 from ..session_manager import session_manager

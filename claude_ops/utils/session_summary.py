@@ -4,11 +4,10 @@ Session Summary Helper for Claude-Ops
 Provides summary and analysis of Claude sessions with wait time tracking
 """
 
-import time
 import re
 import subprocess
-from typing import Dict, List, Tuple, Optional
-from datetime import datetime, timedelta
+from typing import List, Tuple, Optional
+from datetime import datetime
 from ..utils.session_state import SessionStateAnalyzer, SessionState
 from ..utils.wait_time_tracker import wait_tracker
 from ..utils.prompt_recall import PromptRecallSystem
@@ -310,7 +309,7 @@ class SessionSummaryHelper:
                 message += f"\n```\n{screen_summary}\n```\n\n"
             else:
                 # Try to get at least the current status
-                message += f"\n\\_화면 대기 중\\_\n\n"
+                message += "\n\\_화면 대기 중\\_\n\n"
         
         # Footer with longest waiting session (only if there are waiting sessions)
         waiting_sessions = [(s[0], s[1]) for s in all_sessions if s[3] == 'waiting']

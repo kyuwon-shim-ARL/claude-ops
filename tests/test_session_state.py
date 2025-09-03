@@ -13,8 +13,7 @@ from datetime import datetime
 from claude_ops.utils.session_state import (
     SessionStateAnalyzer, 
     SessionState, 
-    StateTransition,
-    session_state_analyzer
+    StateTransition
 )
 
 
@@ -402,7 +401,6 @@ Do you want to proceed with deployment?
     def test_concurrent_state_detection(self):
         """Test concurrent access to state analyzer"""
         import threading
-        import time
         
         analyzer = SessionStateAnalyzer()
         results = []

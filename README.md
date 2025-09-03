@@ -32,7 +32,7 @@ uv sync && python -m claude_ops.telegram.bot
 
 ### 핵심 명령어
 ```
-/new_project <name>    # 새 Claude 프로젝트 생성
+/new-project <name>    # 새 Claude 프로젝트 생성
 /sessions              # 세션 목록 및 전환
 /board                 # 세션 보드 (그리드 뷰)
 /summary               # 대기 중 세션 요약

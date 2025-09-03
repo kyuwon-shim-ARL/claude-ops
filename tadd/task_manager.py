@@ -6,10 +6,9 @@ dependency tracking, and automatic documentation updates.
 """
 
 import os
-import json
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass, asdict
+from typing import Dict, List, Tuple
+from dataclasses import dataclass
 from enum import Enum
 
 
