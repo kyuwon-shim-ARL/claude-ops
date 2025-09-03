@@ -241,11 +241,11 @@ class WaitTimeTracker:
                 logger.warning(f"Could not parse creation date from: {session_line}")
                 return 300.0
                 
-            date_str = date_match.group(1) + " 2025"  # Add year back
+            current_year = datetime.now().year
+            date_str = date_match.group(1) + f" {current_year}"  # Add year back
             
             # Parse date string to timestamp using standard library
             try:
-                from datetime import datetime
                 # Expected format: "Sat Aug 16 12:51:34 2025" 
                 created_dt = datetime.strptime(date_str, "%a %b %d %H:%M:%S %Y")
                 created_timestamp = created_dt.timestamp()
