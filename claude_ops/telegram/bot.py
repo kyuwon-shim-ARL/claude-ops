@@ -2785,7 +2785,7 @@ class TelegramBridge:
             tadd_path = os.path.join(os.path.dirname(__file__), '..', '..', 'tadd')
             if tadd_path not in sys.path:
                 sys.path.insert(0, tadd_path)
-            from tadd.task_manager import TADDTaskManager, TADD_TEMPLATES
+            from tadd.task_manager import TADDTaskManager, TADD_TEMPLATES, TaskStatus
             from tadd.document_generator import TADDDocumentGenerator
             
             # Initialize TADD components
@@ -2797,7 +2797,7 @@ class TelegramBridge:
             
             # Start first task
             if planning_tasks:
-                task_manager.update_task_status(planning_tasks[0], task_manager.TaskStatus.IN_PROGRESS)
+                task_manager.update_task_status(planning_tasks[0], TaskStatus.IN_PROGRESS)
             
             # Prepare TADD planning prompt
             tadd_prompt = f"""
@@ -2869,13 +2869,13 @@ ARGUMENTS: {args_text}
             tadd_path = os.path.join(os.path.dirname(__file__), '..', '..', 'tadd')
             if tadd_path not in sys.path:
                 sys.path.insert(0, tadd_path)
-            from tadd.task_manager import TADDTaskManager, TADD_TEMPLATES
+            from tadd.task_manager import TADDTaskManager, TADD_TEMPLATES, TaskStatus
             
             task_manager = TADDTaskManager()
             impl_tasks = task_manager.create_task_template("구현", TADD_TEMPLATES["구현"])
             
             if impl_tasks:
-                task_manager.update_task_status(impl_tasks[0], task_manager.TaskStatus.IN_PROGRESS)
+                task_manager.update_task_status(impl_tasks[0], TaskStatus.IN_PROGRESS)
             
             tadd_prompt = f"""
 📍 **기획 완료 → 구현 시작**
@@ -2935,13 +2935,13 @@ ARGUMENTS: {args_text}
             tadd_path = os.path.join(os.path.dirname(__file__), '..', '..', 'tadd')
             if tadd_path not in sys.path:
                 sys.path.insert(0, tadd_path)
-            from tadd.task_manager import TADDTaskManager, TADD_TEMPLATES
+            from tadd.task_manager import TADDTaskManager, TADD_TEMPLATES, TaskStatus
             
             task_manager = TADDTaskManager()
             stab_tasks = task_manager.create_task_template("안정화", TADD_TEMPLATES["안정화"])
             
             if stab_tasks:
-                task_manager.update_task_status(stab_tasks[0], task_manager.TaskStatus.IN_PROGRESS)
+                task_manager.update_task_status(stab_tasks[0], TaskStatus.IN_PROGRESS)
             
             tadd_prompt = f"""
 📍 **구현 완료 → 안정화 시작**
@@ -3005,7 +3005,7 @@ ARGUMENTS: {args_text}
             tadd_path = os.path.join(os.path.dirname(__file__), '..', '..', 'tadd')
             if tadd_path not in sys.path:
                 sys.path.insert(0, tadd_path)
-            from tadd.task_manager import TADDTaskManager, TADD_TEMPLATES
+            from tadd.task_manager import TADDTaskManager, TADD_TEMPLATES, TaskStatus
             from tadd.session_archiver import TADDSessionArchiver
             
             task_manager = TADDTaskManager()
@@ -3014,7 +3014,7 @@ ARGUMENTS: {args_text}
             deploy_tasks = task_manager.create_task_template("배포", TADD_TEMPLATES["배포"])
             
             if deploy_tasks:
-                task_manager.update_task_status(deploy_tasks[0], task_manager.TaskStatus.IN_PROGRESS)
+                task_manager.update_task_status(deploy_tasks[0], TaskStatus.IN_PROGRESS)
             
             tadd_prompt = f"""
 📍 **안정화 완료 → 배포 시작**
@@ -3078,7 +3078,7 @@ ARGUMENTS: {args_text}
             tadd_path = os.path.join(os.path.dirname(__file__), '..', '..', 'tadd')
             if tadd_path not in sys.path:
                 sys.path.insert(0, tadd_path)
-            from tadd.task_manager import TADDTaskManager
+            from tadd.task_manager import TADDTaskManager, TaskStatus
             from tadd.prd_manager import TADDPRDManager
             
             task_manager = TADDTaskManager()
@@ -3099,7 +3099,7 @@ ARGUMENTS: {args_text}
             cycle_task_ids = task_manager.create_task_template("전체사이클", full_cycle_tasks)
             
             if cycle_task_ids:
-                task_manager.update_task_status(cycle_task_ids[0], task_manager.TaskStatus.IN_PROGRESS)
+                task_manager.update_task_status(cycle_task_ids[0], TaskStatus.IN_PROGRESS)
             
             tadd_prompt = f"""
 🔄 **전체 개발 워크플로우 실행**
