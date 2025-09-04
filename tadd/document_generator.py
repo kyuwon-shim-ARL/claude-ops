@@ -36,7 +36,10 @@ class TADDDocumentGenerator:
     - Context-aware content
     """
     
-    def __init__(self, base_path: str = "/home/kyuwon/claude-ops"):
+    def __init__(self, base_path: Optional[str] = None):
+        # Use current working directory if base_path not specified
+        if base_path is None:
+            base_path = os.getcwd()
         self.base_path = base_path
         self.current_path = os.path.join(base_path, "docs/CURRENT")
         self.templates_path = os.path.join(base_path, "docs/specs")
