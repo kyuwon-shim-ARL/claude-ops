@@ -42,10 +42,12 @@ class MockDetector(ast.NodeVisitor):
             # 데코레이터 확인 (@patch, @mock 등)
             for decorator in node.decorator_list:
                 if self._is_mock_decorator(decorator):
+                    mock_target = self._extract_mock_target(decorator)
                     self.mock_usages.append({
                         'test': node.name,
                         'type': 'decorator',
-                        'line': node.lineno
+                        'line': node.lineno,
+                        'mock_target': mock_target
                     })
         
         self.generic_visit(node)
@@ -76,6 +78,17 @@ class MockDetector(ast.NodeVisitor):
         elif isinstance(decorator, ast.Call):
             return self._is_mock_decorator(decorator.func)
         return False
+    
+    def _extract_mock_target(self, decorator) -> str:
+        """데코레이터에서 mock 대상 추출"""
+        if isinstance(decorator, ast.Call):
+            if decorator.args:
+                arg = decorator.args[0]
+                if isinstance(arg, ast.Constant):
+                    return arg.value
+                elif isinstance(arg, ast.Str):  # Python 3.7 compatibility
+                    return arg.s
+        return ""
     
     def _get_call_name(self, node) -> str:
         """함수 호출의 이름 추출"""
@@ -164,10 +177,28 @@ def generate_report(results: List[Dict]) -> Dict:
             continue
             
         for usage in result['mock_usages']:
-            # 파일 내용을 읽어서 카테고리 분류 (실제 구현에서는 더 정교하게)
-            category = 'internal_logic'  # 기본값
+            # 허용되는 mock 패턴 체크
+            allowed_patterns = [
+                'subprocess.run',
+                'subprocess.Popen', 
+                'time.time',
+                'time.sleep',
+                'datetime.now',
+                'requests.',
+                'urllib.',
+                'open(',  # File I/O
+                'os.system',
+                'os.path.exists',
+            ]
             
-            if category == 'internal_logic':
+            # Mock 대상이 허용되는 패턴인지 확인
+            is_allowed = any(pattern in usage.get('mock_target', '') 
+                           for pattern in allowed_patterns)
+            
+            if is_allowed:
+                category = 'external_service'  # 허용되는 외부 의존성
+            else:
+                category = 'internal_logic'  # 내부 로직 (비허용)
                 violations.append({
                     'file': result['file'],
                     'test': usage['test'],
