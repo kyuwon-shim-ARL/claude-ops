@@ -7,7 +7,7 @@ dependency tracking, and automatic documentation updates.
 
 import os
 from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 from enum import Enum
 
@@ -62,7 +62,10 @@ class TADDTaskManager:
     - Task templates
     """
     
-    def __init__(self, base_path: str = "/home/kyuwon/claude-ops"):
+    def __init__(self, base_path: Optional[str] = None):
+        # Use current working directory if base_path not specified
+        if base_path is None:
+            base_path = os.getcwd()
         self.base_path = base_path
         self.todos_file = os.path.join(base_path, "docs/CURRENT/active-todos.md")
         self.tasks: Dict[str, TADDTask] = {}

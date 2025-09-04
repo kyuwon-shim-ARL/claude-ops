@@ -8,7 +8,7 @@ version control integration, and session lifecycle tracking.
 import os
 import shutil
 from datetime import datetime
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 import subprocess
 
 
@@ -24,7 +24,10 @@ class SessionArchiver:
     - Archive integrity validation
     """
     
-    def __init__(self, base_path: str = "/home/kyuwon/claude-ops"):
+    def __init__(self, base_path: Optional[str] = None):
+        # Use current working directory if base_path not specified
+        if base_path is None:
+            base_path = os.getcwd()
         self.base_path = base_path
         self.current_path = os.path.join(base_path, "docs/CURRENT")
         self.sessions_path = os.path.join(base_path, "docs/development/sessions")

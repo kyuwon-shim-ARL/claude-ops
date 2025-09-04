@@ -8,7 +8,7 @@ with templates, approval workflows, and traceability.
 import os
 import json
 from datetime import datetime
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from enum import Enum
 from dataclasses import dataclass
 
@@ -55,7 +55,10 @@ class TADDPRDManager:
     - Quality gates
     """
     
-    def __init__(self, base_path: str = "/home/kyuwon/claude-ops"):
+    def __init__(self, base_path: Optional[str] = None):
+        # Use current working directory if base_path not specified
+        if base_path is None:
+            base_path = os.getcwd()
         self.base_path = base_path
         self.prd_path = os.path.join(base_path, "docs/specs/PRD")
         self.current_path = os.path.join(base_path, "docs/CURRENT")
