@@ -17,7 +17,13 @@ from ..session_manager import session_manager
 from ..utils.session_state import SessionStateAnalyzer, SessionState
 from ..telegram.notifier import SmartNotifier
 from ..telegram.message_queue import message_queue
-from ..utils.wait_time_tracker import wait_tracker
+# Import improved tracker with state-based completion detection
+try:
+    from ..utils.wait_time_tracker_v2 import ImprovedWaitTimeTracker, migrate_to_v2
+    wait_tracker = migrate_to_v2()  # Auto-migrate on import
+except ImportError:
+    # Fallback to original tracker
+    from ..utils.wait_time_tracker import wait_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -178,9 +184,13 @@ class MultiSessionMonitor:
             if success:
                 logger.info(f"✅ Sent completion notification for session: {session_name}")
                 # Mark completion time for wait time tracking
-                self.tracker.mark_completion(session_name)
+                if hasattr(self.tracker, 'mark_completion'):
+                    self.tracker.mark_completion(session_name)
             else:
                 logger.debug(f"⏭️ Skipped notification for session: {session_name} (duplicate or failed)")
+                # Still mark completion if state changed (v2 tracker feature)
+                if hasattr(self.tracker, 'mark_state_transition'):
+                    self.tracker.mark_state_transition(session_name, 'waiting')
                 
         except Exception as e:
             logger.error(f"Error sending completion notification for {session_name}: {e}")
@@ -233,6 +243,10 @@ class MultiSessionMonitor:
                         curr_state = self.get_session_state(session_name)
                         if prev_state != curr_state:
                             logger.info(f"🔄 {session_name}: {prev_state} → {curr_state}")
+                            # Update state in tracker for auto-completion detection
+                            if hasattr(self.tracker, 'mark_state_transition'):
+                                state_name = 'working' if curr_state == SessionState.WORKING else 'waiting'
+                                self.tracker.mark_state_transition(session_name, state_name)
                     
                     # Wait before next check
                     time.sleep(self.config.check_interval)

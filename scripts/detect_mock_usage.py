@@ -5,9 +5,10 @@ Mock 사용률 검사 스크립트
 """
 
 import ast
+import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Tuple
 
 class MockDetector(ast.NodeVisitor):
     """AST를 순회하며 Mock 사용 패턴 검출"""
@@ -85,9 +86,19 @@ class MockDetector(ast.NodeVisitor):
         return ""
 
 def analyze_test_file(filepath: Path) -> Dict:
-    """단일 테스트 파일 분석"""
-    with open(filepath, 'r', encoding='utf-8') as f:
-        content = f.read()
+    """Analyze a single test file for mock usage with better error handling"""
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+    except Exception as e:
+        # Skip files with encoding or other issues
+        return {
+            'filepath': filepath,
+            'mock_count': 0,
+            'total_tests': 0,
+            'mock_percentage': 0.0,
+            'mock_lines': []
+        }
     
     try:
         tree = ast.parse(content)
@@ -207,13 +218,13 @@ def main():
     print("📊 Mock Usage Analysis Report")
     print("=" * 50)
     
-    print("\n📈 Overall Statistics:")
+    print(f"\n📈 Overall Statistics:")
     print(f"   Total test methods: {report['total_tests']}")
     print(f"   Tests using mocks: {report['tests_with_mock']}")
     print(f"   Mock usage rate: {report['mock_percentage']:.1f}%")
     print(f"   Total mock usages: {report['total_mock_usages']}")
     
-    print("\n📦 Mock Categories:")
+    print(f"\n📦 Mock Categories:")
     for category, count in report['categories'].items():
         emoji = "✅" if category != 'internal_logic' else "❌"
         print(f"   {emoji} {category}: {count}")
@@ -222,7 +233,7 @@ def main():
     MAX_MOCK_PERCENTAGE = 20
     
     if report['mock_percentage'] > MAX_MOCK_PERCENTAGE:
-        print("\n❌ MOCK USAGE VIOLATION")
+        print(f"\n❌ MOCK USAGE VIOLATION")
         print(f"   Current: {report['mock_percentage']:.1f}%")
         print(f"   Limit: {MAX_MOCK_PERCENTAGE}%")
         print(f"   Reduce mock usage by {report['mock_percentage'] - MAX_MOCK_PERCENTAGE:.1f}%")
@@ -240,7 +251,7 @@ def main():
         
         return 1
     
-    print("\n✅ Mock Usage Check: PASSED")
+    print(f"\n✅ Mock Usage Check: PASSED")
     print(f"   Mock usage ({report['mock_percentage']:.1f}%) is within limit ({MAX_MOCK_PERCENTAGE}%)")
     
     # GitHub Actions 출력

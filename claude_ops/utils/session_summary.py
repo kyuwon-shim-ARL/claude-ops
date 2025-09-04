@@ -9,7 +9,13 @@ import subprocess
 from typing import List, Tuple, Optional
 from datetime import datetime
 from ..utils.session_state import SessionStateAnalyzer, SessionState
-from ..utils.wait_time_tracker import wait_tracker
+# Import improved tracker with auto-recovery
+try:
+    from ..utils.wait_time_tracker_v2 import ImprovedWaitTimeTracker, migrate_to_v2
+    wait_tracker = migrate_to_v2()  # Auto-migrate on import
+except ImportError:
+    # Fallback to original tracker if v2 not available
+    from ..utils.wait_time_tracker import wait_tracker
 from ..utils.prompt_recall import PromptRecallSystem
 from ..session_manager import session_manager
 
@@ -70,8 +76,15 @@ class SessionSummaryHelper:
             
             if state != SessionState.WORKING:
                 # Waiting session - use time since last completion
-                wait_time = self.tracker.get_wait_time_since_completion(session_name)
-                has_record = self.tracker.has_completion_record(session_name)
+                # Check if we're using v2 tracker with accuracy indicator
+                if hasattr(self.tracker, 'get_wait_time_since_completion') and \
+                   hasattr(self.tracker.get_wait_time_since_completion(session_name), '__iter__'):
+                    wait_time, is_accurate = self.tracker.get_wait_time_since_completion(session_name)
+                    has_record = is_accurate  # v2 tracker provides accuracy
+                else:
+                    # Original tracker
+                    wait_time = self.tracker.get_wait_time_since_completion(session_name)
+                    has_record = self.tracker.has_completion_record(session_name)
                 last_prompt = self.prompt_recall.extract_last_user_prompt(session_name)
                 if "프롬프트" in last_prompt or "실패" in last_prompt:
                     last_prompt = ""
@@ -79,8 +92,15 @@ class SessionSummaryHelper:
                 all_sessions.append((session_name, wait_time, last_prompt, 'waiting', has_record))
             else:
                 # Working session - still show time since last completion
-                wait_time = self.tracker.get_wait_time_since_completion(session_name)
-                has_record = self.tracker.has_completion_record(session_name)
+                # Check if we're using v2 tracker with accuracy indicator
+                if hasattr(self.tracker, 'get_wait_time_since_completion') and \
+                   hasattr(self.tracker.get_wait_time_since_completion(session_name), '__iter__'):
+                    wait_time, is_accurate = self.tracker.get_wait_time_since_completion(session_name)
+                    has_record = is_accurate  # v2 tracker provides accuracy
+                else:
+                    # Original tracker
+                    wait_time = self.tracker.get_wait_time_since_completion(session_name)
+                    has_record = self.tracker.has_completion_record(session_name)
                 last_prompt = self.prompt_recall.extract_last_user_prompt(session_name)
                 if "프롬프트" in last_prompt or "실패" in last_prompt:
                     last_prompt = ""

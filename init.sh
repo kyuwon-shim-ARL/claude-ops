@@ -148,24 +148,46 @@ install_slash_commands() {
         ["극한검증"]="extreme"
         ["컨텍스트"]="context"
         ["분석"]="analyze"
-        ["주간보고"]="weekly"
+        ["주간보고"]="주간보고"
         ["문서정리"]="docsorg"
         ["레포정리"]="repoclean"
-        ["세션마감"]="session-closure"
+        ["세션마감"]="세션마감"
+        ["실험시작"]="실험시작"
+        ["실험완료"]="실험완료"
+        ["보고서작업"]="보고서작업"
+        ["TADD강화"]="TADD강화"
     )
     
     local success_count=0
     local total_commands=${#commands[@]}
     
     for korean_cmd in "${!commands[@]}"; do
-        english_cmd="${commands[$korean_cmd]}"
         echo "  📥 Downloading /$korean_cmd command..."
         
-        if curl -sSL "$BASE_URL/$english_cmd.md" -o ".claude/commands/$korean_cmd.md" 2>/dev/null; then
-            success_count=$((success_count + 1))
-            echo "    ✅ $korean_cmd.md"
+        # URL encode Korean filename for GitHub Raw access
+        encoded_filename=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$korean_cmd.md'))" 2>/dev/null)
+        
+        if [ -n "$encoded_filename" ]; then
+            # Try URL-encoded download first (GitHub Raw)
+            if curl -sSL "$BASE_URL/$encoded_filename" -o ".claude/commands/$korean_cmd.md" 2>/dev/null && 
+               [ -s ".claude/commands/$korean_cmd.md" ] && 
+               ! grep -q "html" ".claude/commands/$korean_cmd.md"; then
+                success_count=$((success_count + 1))
+                echo "    ✅ $korean_cmd.md ($(stat -c%s ".claude/commands/$korean_cmd.md") bytes)"
+            else
+                # Fallback to English mapping for backward compatibility
+                english_cmd="${commands[$korean_cmd]}"
+                if curl -sSL "$BASE_URL/$english_cmd.md" -o ".claude/commands/$korean_cmd.md" 2>/dev/null; then
+                    success_count=$((success_count + 1))
+                    echo "    ✅ $korean_cmd.md (fallback)"
+                else
+                    echo "    ⚠️ Failed to download $korean_cmd (skipping)"
+                    # Create empty file to prevent errors
+                    echo "# $korean_cmd - 다운로드 실패" > ".claude/commands/$korean_cmd.md"
+                fi
+            fi
         else
-            echo "    ⚠️ Failed to download $korean_cmd (will continue)"
+            echo "    ⚠️ URL encoding failed for $korean_cmd (skipping)"
         fi
     done
     
@@ -336,11 +358,13 @@ install_tadd_scripts() {
     echo "  📦 Installing TADD verification scripts..."
     mkdir -p scripts
     
-    # Download verification scripts
+    # Download comprehensive verification scripts
     curl -sSL "https://raw.githubusercontent.com/kyuwon-shim-ARL/claude-dev-kit/main/scripts/verify_tadd_order.py" \
          -o scripts/verify_tadd_order.py 2>/dev/null && echo "    ✅ verify_tadd_order.py"
     curl -sSL "https://raw.githubusercontent.com/kyuwon-shim-ARL/claude-dev-kit/main/scripts/detect_mock_usage.py" \
          -o scripts/detect_mock_usage.py 2>/dev/null && echo "    ✅ detect_mock_usage.py"
+    curl -sSL "https://raw.githubusercontent.com/kyuwon-shim-ARL/claude-dev-kit/main/scripts/comprehensive_test_validator.py" \
+         -o scripts/comprehensive_test_validator.py 2>/dev/null && echo "    ✅ comprehensive_test_validator.py"
     
     # Create quick check script
     cat > scripts/quick_tadd_check.sh << 'EOF'

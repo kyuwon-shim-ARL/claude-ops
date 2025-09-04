@@ -6,6 +6,11 @@ on:
   push:
     branches: [main, develop]
 
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write  # Required for checks API
+
 jobs:
   verify-test-first:
     name: Verify Test-First Development
@@ -134,7 +139,8 @@ jobs:
           fi
           
           if [ "${{ needs.test-coverage.result }}" != "success" ]; then
-            echo "⚠️  Test Coverage: WARNING"
+            echo "❌ Test Coverage: FAILED"
+            exit 1
           else
             echo "✅ Test Coverage: PASSED"
           fi
@@ -143,20 +149,43 @@ jobs:
           echo "✅ All TADD checks passed!"
       
       - name: Set PR Status
-        if: github.event_name == 'pull_request'
+        if: always()
         uses: actions/github-script@v6
         with:
           script: |
-            const status = '${{ job.status }}' === 'success' ? 'success' : 'failure';
-            const description = status === 'success' 
-              ? 'All TADD requirements met' 
-              : 'TADD requirements not met';
+            // Use checks API instead of commit status API to avoid permission issues
+            const { owner, repo } = context.repo;
+            const checkName = 'TADD Quality Gate';
+            const head_sha = context.payload.pull_request?.head?.sha || context.sha;
             
-            github.rest.repos.createCommitStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              sha: context.sha,
-              state: status,
-              description: description,
-              context: 'TADD Enforcement'
-            });
+            const conclusion = '${{ job.status }}' === 'success' ? 'success' : 'failure';
+            const title = conclusion === 'success' 
+              ? '✅ All TADD requirements met' 
+              : '❌ TADD requirements not met';
+            
+            const summary = conclusion === 'success'
+              ? `All TADD enforcement checks have passed successfully:
+              - ✅ Test-First Development verified
+              - ✅ Test Coverage meets requirements (>20%)
+              - ✅ Mock usage within limits (<20%)`
+              : `Some TADD requirements were not met. Please review the failed checks above.`;
+            
+            try {
+              await github.rest.checks.create({
+                owner,
+                repo,
+                name: checkName,
+                head_sha,
+                status: 'completed',
+                conclusion,
+                output: {
+                  title,
+                  summary
+                }
+              });
+              console.log(`✅ Successfully created check: ${checkName}`);
+            } catch (error) {
+              console.error(`Failed to create check: ${error.message}`);
+              // Don't fail the job if we can't create the check
+              // The individual job results are what matter
+            }

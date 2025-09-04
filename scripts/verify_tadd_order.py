@@ -6,6 +6,7 @@ TADD 순서 검증 스크립트
 
 import subprocess
 import sys
+import json
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
 
@@ -151,7 +152,7 @@ def main():
         
         # 순서 검증
         if verify_test_first(test_commit, impl_commit):
-            print("   ✅ Test written before implementation")
+            print(f"   ✅ Test written before implementation")
             
             # 초기 실패 검증
             if not check_test_initially_fails(test_commit):
