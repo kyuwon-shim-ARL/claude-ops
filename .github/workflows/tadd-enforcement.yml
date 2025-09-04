@@ -97,8 +97,10 @@ jobs:
       
       - name: Install dependencies
         run: |
+          pip install --upgrade pip
           pip install pytest pytest-cov
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # Install project dependencies from pyproject.toml
+          pip install -e .
       
       - name: Run tests with coverage
         env:
