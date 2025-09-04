@@ -1,10 +1,14 @@
 
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "claude-ops"
 version = "2.0.1"
 description = "Telegram-Claude Bridge System for development workflow automation"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "jinja2>=3.1.6",
     "matplotlib>=3.10.5",
@@ -26,3 +30,6 @@ dev = [
     "pytest>=8.4.1",
     "pytest-asyncio>=1.1.0",
 ]
+
+[tool.setuptools]
+packages = ["claude_ops", "tadd"]
