@@ -263,13 +263,144 @@ class SessionSummaryHelper:
         text = text.replace('`', '\\`')
         return text
     
-    def generate_summary(self) -> str:
+    def _generate_single_session_summary(self, session_name: str) -> str:
         """
-        Generate complete session summary (shows ALL sessions)
+        Generate summary for a single session with context info
+        
+        Args:
+            session_name: Name of the session
+            
+        Returns:
+            Formatted summary with context status
+        """
+        try:
+            # Get session status
+            state = self.state_analyzer.get_state_for_notification(session_name)
+            status_text = "작업 중" if state == SessionState.WORKING else "대기 중"
+            
+            # Get context warning info
+            context_info = None
+            try:
+                # Try to get screen content for context detection
+                result = subprocess.run(
+                    f"tmux capture-pane -t {session_name} -p -S -100",
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+                tmux_output = result.stdout if result.returncode == 0 else None
+            except Exception:
+                tmux_output = None
+            
+            # Build summary message
+            message = f"📊 **세션 요약**\n\n"
+            message += f"**세션:** {session_name}\n"
+            message += f"**상태:** {status_text}\n"
+            
+            # Add context status with proper error handling
+            try:
+                # Try to detect context warning - may raise exception
+                context_info = self._detect_context_warning(tmux_output)
+                
+                if context_info:
+                    usage = context_info['usage_percent']
+                    remaining = context_info['remaining_tokens']
+                    
+                    # Format remaining tokens
+                    if remaining >= 1000:
+                        remaining_str = f"{remaining // 1000}K 토큰 남음"
+                    else:
+                        remaining_str = f"{remaining} 토큰 남음"
+                    
+                    # Choose appropriate message based on usage
+                    if usage >= 90:
+                        message += f"⚠️ 컨텍스트: {usage}% 사용됨 ({remaining_str}) - 곧 정리 필요\n"
+                    else:
+                        message += f"📊 컨텍스트: {usage}% 사용됨 ({remaining_str})\n"
+                else:
+                    message += "📊 컨텍스트: 여유\n"
+            except Exception:
+                message += "📊 컨텍스트: 상태 확인 불가\n"
+            
+            return message
+            
+        except Exception as e:
+            return f"오류 발생: {str(e)}"
+    
+    def _detect_context_warning(self, tmux_output: str = None) -> Optional[dict]:
+        """
+        Detect context warning from tmux output or screen content
+        
+        Args:
+            tmux_output: Optional tmux output to parse. If None, fetches current screen
+            
+        Returns:
+            Dict with usage_percent, remaining_tokens, total_tokens or None if no warning
+        """
+        try:
+            if tmux_output is None:
+                # Get current screen content from active session
+                # This is a simplified version - in real implementation would get from specific session
+                return None
+            
+            # Pattern matching for various context warning formats
+            # Claude typically shows warnings like:
+            # "Context window approaching limit (85% used, ~15K tokens remaining)"
+            # "⚠️ Context window: 85% used (~15,000 tokens remaining)"
+            # "Context: 85% (15K remaining)"
+            
+            patterns = [
+                r'(\d+)%\s*used.*?([~\d,]+[kK]?)\s*(?:tokens?\s*)?remaining',
+                r'Context.*?(\d+)%.*?([~\d,]+[kK]?)\s*remaining',
+                r'⚠️.*?Context.*?(\d+)%.*?([~\d,]+[kK]?)',
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, tmux_output, re.IGNORECASE)
+                if match:
+                    usage_percent = int(match.group(1))
+                    
+                    # Parse remaining tokens
+                    remaining_str = match.group(2).replace(',', '').replace('~', '')
+                    if 'k' in remaining_str.lower():
+                        remaining_tokens = int(float(remaining_str.replace('k', '').replace('K', '')) * 1000)
+                    else:
+                        remaining_tokens = int(remaining_str)
+                    
+                    # Estimate total tokens from percentage and remaining
+                    if usage_percent > 0:
+                        total_tokens = int(remaining_tokens / ((100 - usage_percent) / 100))
+                    else:
+                        total_tokens = remaining_tokens
+                    
+                    return {
+                        'usage_percent': usage_percent,
+                        'remaining_tokens': remaining_tokens,
+                        'total_tokens': total_tokens
+                    }
+            
+            return None
+            
+        except Exception:
+            # Silent fail - context detection is optional feature
+            return None
+    
+    def generate_summary(self, session_name: str = None) -> str:
+        """
+        Generate complete session summary or single session summary with context info
+        
+        Args:
+            session_name: Optional session name for single session summary
         
         Returns:
             Formatted summary message for Telegram
         """
+        # For single session summary (used in tests)
+        if session_name:
+            return self._generate_single_session_summary(session_name)
+        
+        # Original multi-session summary
         all_sessions = self.get_all_sessions_with_status()
         
         if not all_sessions:
