@@ -322,78 +322,88 @@ class TADDIntegrationTest(unittest.TestCase):
         """Test Telegram bot integration with workflow commands"""
         print("\\n📱 Testing Telegram workflow command integration...")
         
-        # Create test config
-        test_config = ClaudeOpsConfig()
-        # Note: session_name is a read-only property, using default
-        
-        # Mock telegram update and context for testing
-        class MockUpdate:
-            def __init__(self):
-                self.message = MockMessage()
-        
-        class MockMessage:
-            def __init__(self):
-                self.reply_text = self._reply_mock
-                self.replies = []
+        # Set up test environment to use temp directory
+        import os
+        original_cwd = os.getcwd()
+        try:
+            # Change to test directory to ensure TADD components use it
+            os.chdir(self.test_base_path)
             
-            async def _reply_mock(self, text):
-                self.replies.append(text)
-        
-        class MockContext:
-            def __init__(self, args=None):
-                self.args = args or []
-        
-        # Test workflow command handlers
-        bot = TelegramBridge(test_config)
-        
-        # Mock authentication and session methods
-        async def mock_auth_check(update):
-            return True
-        
-        async def mock_get_target_session(update, context):
-            return "test-session"
-        
-        async def mock_send_to_claude(text, session):
-            return True
-        
-        bot._basic_auth_check = mock_auth_check
-        bot._get_target_session_from_context = mock_get_target_session
-        bot._send_to_claude_with_session = mock_send_to_claude
-        
-        # Test each workflow command using asyncio
-        import asyncio
-        
-        async def test_commands():
-            workflow_commands = [
-                ("기획", bot.workflow_planning_command),
-                ("구현", bot.workflow_implementation_command),
-                ("안정화", bot.workflow_stabilization_command),
-                ("배포", bot.workflow_deployment_command),
-                ("전체사이클", bot.workflow_fullcycle_command)
-            ]
+            # Create test config
+            test_config = ClaudeOpsConfig()
+            # Note: session_name is a read-only property, using default
             
-            for cmd_name, cmd_handler in workflow_commands:
-                update = MockUpdate()
-                context = MockContext(["test", "arguments"])
+            # Mock telegram update and context for testing
+            class MockUpdate:
+                def __init__(self):
+                    self.message = MockMessage()
+            
+            class MockMessage:
+                def __init__(self):
+                    self.reply_text = self._reply_mock
+                    self.replies = []
                 
-                # Test command execution
-                await cmd_handler(update, context)
+                async def _reply_mock(self, text):
+                    self.replies.append(text)
+            
+            class MockContext:
+                def __init__(self, args=None):
+                    self.args = args or []
+            
+            # Test workflow command handlers
+            bot = TelegramBridge(test_config)
+            
+            # Mock authentication and session methods
+            async def mock_auth_check(update):
+                return True
+            
+            async def mock_get_target_session(update, context):
+                return "test-session"
+            
+            async def mock_send_to_claude(text, session):
+                return True
+            
+            bot._basic_auth_check = mock_auth_check
+            bot._get_target_session_from_context = mock_get_target_session
+            bot._send_to_claude_with_session = mock_send_to_claude
+            
+            # Test each workflow command using asyncio
+            import asyncio
+            
+            async def test_commands():
+                workflow_commands = [
+                    ("기획", bot.workflow_planning_command),
+                    ("구현", bot.workflow_implementation_command),
+                    ("안정화", bot.workflow_stabilization_command),
+                    ("배포", bot.workflow_deployment_command),
+                    ("전체사이클", bot.workflow_fullcycle_command)
+                ]
                 
-                # Validate response
-                self.assertGreater(len(update.message.replies), 0)
-                reply = update.message.replies[0]
-                
-                # Should contain Korean workflow phase indicator
-                korean_indicators = ["기획", "구현", "안정화", "배포", "전체"]
-                has_korean = any(indicator in reply for indicator in korean_indicators)
-                self.assertTrue(has_korean, f"Command {cmd_name} should have Korean workflow indicator")
-                
-                print(f"    ✅ /{cmd_name} command test passed")
+                for cmd_name, cmd_handler in workflow_commands:
+                    update = MockUpdate()
+                    context = MockContext(["test", "arguments"])
+                    
+                    # Test command execution
+                    await cmd_handler(update, context)
+                    
+                    # Validate response
+                    self.assertGreater(len(update.message.replies), 0)
+                    reply = update.message.replies[0]
+                    
+                    # Should contain Korean workflow phase indicator
+                    korean_indicators = ["기획", "구현", "안정화", "배포", "전체"]
+                    has_korean = any(indicator in reply for indicator in korean_indicators)
+                    self.assertTrue(has_korean, f"Command {cmd_name} should have Korean workflow indicator")
+                    
+                    print(f"    ✅ /{cmd_name} command test passed")
         
-        # Run async test
-        asyncio.run(test_commands())
-        
-        print("  ✅ Telegram integration test passed")
+            # Run async test
+            asyncio.run(test_commands())
+            
+            print("  ✅ Telegram integration test passed")
+        finally:
+            # Restore original directory
+            os.chdir(original_cwd)
     
     def test_end_to_end_performance_benchmarks(self):
         """Test complete E2E workflow performance"""
