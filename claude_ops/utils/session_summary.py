@@ -328,20 +328,40 @@ class SessionSummaryHelper:
         except Exception as e:
             return f"오류 발생: {str(e)}"
     
-    def _detect_context_warning(self, tmux_output: str = None) -> Optional[dict]:
+    def _detect_context_warning(self, tmux_output: str = None, session_name: str = None) -> Optional[dict]:
         """
         Detect context warning from tmux output or screen content
         
         Args:
-            tmux_output: Optional tmux output to parse. If None, fetches current screen
+            tmux_output: Optional tmux output to parse. If None, fetches from session
+            session_name: Session name to get tmux output from (if tmux_output is None)
             
         Returns:
             Dict with usage_percent, remaining_tokens, total_tokens or None if no warning
         """
         try:
-            if tmux_output is None:
-                # Get current screen content from active session
-                # This is a simplified version - in real implementation would get from specific session
+            if tmux_output is None and session_name:
+                # Get raw screen content from specific session for context detection
+                # Don't use get_screen_summary as it filters out UI elements
+                try:
+                    import subprocess
+                    result = subprocess.run(
+                        ["tmux", "capture-pane", "-t", session_name, "-p"],
+                        capture_output=True,
+                        text=True,
+                        timeout=3
+                    )
+                    
+                    if result.returncode == 0:
+                        tmux_output = result.stdout.strip()
+                        if not tmux_output:
+                            return None
+                    else:
+                        return None
+                except Exception:
+                    return None
+            elif tmux_output is None:
+                # Neither tmux_output nor session_name provided
                 return None
             
             # Pattern matching for various context warning formats
@@ -354,31 +374,50 @@ class SessionSummaryHelper:
                 r'(\d+)%\s*used.*?([~\d,]+[kK]?)\s*(?:tokens?\s*)?remaining',
                 r'Context.*?(\d+)%.*?([~\d,]+[kK]?)\s*remaining',
                 r'⚠️.*?Context.*?(\d+)%.*?([~\d,]+[kK]?)',
+                # Pattern for "Context left until auto-compact: 6%" format
+                r'Context\s+left\s+until\s+auto-compact:\s*(\d+)%',
             ]
             
             for pattern in patterns:
                 match = re.search(pattern, tmux_output, re.IGNORECASE)
                 if match:
-                    usage_percent = int(match.group(1))
-                    
-                    # Parse remaining tokens
-                    remaining_str = match.group(2).replace(',', '').replace('~', '')
-                    if 'k' in remaining_str.lower():
-                        remaining_tokens = int(float(remaining_str.replace('k', '').replace('K', '')) * 1000)
+                    # Check if this is the "Context left until auto-compact: X%" pattern
+                    if "auto-compact" in pattern:
+                        remaining_percent = int(match.group(1))
+                        usage_percent = 100 - remaining_percent  # Convert to usage percent
+                        
+                        # Estimate tokens based on typical Claude context windows
+                        # Assuming ~200K context window (conservative estimate)
+                        estimated_total = 200000
+                        remaining_tokens = int(estimated_total * (remaining_percent / 100))
+                        
+                        return {
+                            'usage_percent': usage_percent,
+                            'remaining_tokens': int(remaining_tokens / 1000),  # Convert to K tokens
+                            'total_tokens': estimated_total
+                        }
                     else:
-                        remaining_tokens = int(remaining_str)
-                    
-                    # Estimate total tokens from percentage and remaining
-                    if usage_percent > 0:
-                        total_tokens = int(remaining_tokens / ((100 - usage_percent) / 100))
-                    else:
-                        total_tokens = remaining_tokens
-                    
-                    return {
-                        'usage_percent': usage_percent,
-                        'remaining_tokens': remaining_tokens,
-                        'total_tokens': total_tokens
-                    }
+                        # Original token-based patterns
+                        usage_percent = int(match.group(1))
+                        
+                        # Parse remaining tokens
+                        remaining_str = match.group(2).replace(',', '').replace('~', '')
+                        if 'k' in remaining_str.lower():
+                            remaining_tokens = int(float(remaining_str.replace('k', '').replace('K', '')) * 1000)
+                        else:
+                            remaining_tokens = int(remaining_str)
+                        
+                        # Estimate total tokens from percentage and remaining
+                        if usage_percent > 0:
+                            total_tokens = int(remaining_tokens / ((100 - usage_percent) / 100))
+                        else:
+                            total_tokens = remaining_tokens
+                        
+                        return {
+                            'usage_percent': usage_percent,
+                            'remaining_tokens': remaining_tokens,
+                            'total_tokens': total_tokens
+                        }
             
             return None
             
@@ -458,6 +497,22 @@ class SessionSummaryHelper:
                 if len(last_prompt) > 60:
                     last_prompt = last_prompt[:57] + "\.\.\."
                 message += f"💬 {last_prompt}\n"
+            
+            # Context status for each session
+            try:
+                context_info = self._detect_context_warning(session_name=session_name)
+                if context_info:
+                    usage_percent = context_info['usage_percent']
+                    remaining_tokens = context_info['remaining_tokens']
+                    
+                    if usage_percent >= 90:
+                        message += f"⚠️ 컨텍스트: {usage_percent}% 사용됨 ({remaining_tokens}K 토큰 남음, 곧 정리 필요)\n"
+                    else:
+                        message += f"📊 컨텍스트: {usage_percent}% 사용됨 ({remaining_tokens}K 토큰 남음)\n"
+                else:
+                    message += f"📊 컨텍스트: 여유\n"
+            except Exception:
+                message += f"📊 컨텍스트: 상태 확인 불가\n"
             
             # Screen summary (get more lines for better context)
             screen_summary = self.get_screen_summary(session_name, 5)
