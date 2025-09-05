@@ -1244,12 +1244,17 @@ class TelegramBridge:
                         callback_data=f"select_session:{session}"
                     )])
             
+            # Use safe message sending to handle long session lists
+            from .message_utils import safe_send_message
+            
             if keyboard:
                 keyboard.append([InlineKeyboardButton("🔙 뒤로", callback_data="back_to_menu")])
                 reply_markup = InlineKeyboardMarkup(keyboard)
-                await update.message.reply_text(message, reply_markup=reply_markup)
+                await safe_send_message(update.message.reply_text, message, 
+                                      reply_markup=reply_markup, parse_mode='Markdown')
             else:
-                await update.message.reply_text(message)
+                await safe_send_message(update.message.reply_text, message, 
+                                      parse_mode='Markdown')
                 
         except Exception as e:
             logger.error(f"세션 목록 조회 중 오류: {str(e)}", exc_info=True)

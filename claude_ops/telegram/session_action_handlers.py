@@ -111,7 +111,7 @@ class SessionActionHandlers:
                 logs = "(빈 화면)"
             
             # 너무 긴 로그는 자르기 (Telegram 4096자 제한)
-            max_log_length = 3000  # 헤더와 푸터를 위한 여유공간
+            max_log_length = 4500  # get_telegram_max_length() - 500
             if len(logs) > max_log_length:
                 # 마지막 부분 우선으로 자르기
                 logs = "...(로그 시작 부분 생략)...\n" + logs[-max_log_length:]

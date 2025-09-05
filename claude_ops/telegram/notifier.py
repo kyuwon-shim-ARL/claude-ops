@@ -495,8 +495,8 @@ Claude가 작업을 완료했습니다.
         Returns:
             str: Appropriately truncated content
         """
-        # Telegram limit (4096 chars total) - reserve space for headers (about 500 chars)
-        max_content_length = 3500
+        # Telegram limit - reserve space for headers (about 500 chars)  
+        max_content_length = 4500  # get_telegram_max_length() - 500
         
         # Join lines first to check length
         full_content = '\n'.join(cleaned_lines)
