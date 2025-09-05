@@ -24,14 +24,14 @@ class ImprovedWaitTimeTracker:
     def __init__(self, 
                  completion_path: Optional[str] = None,
                  state_path: Optional[str] = None,
-                 max_reasonable_wait_hours: float = 12):
+                 max_reasonable_wait_hours: float = 72):
         """
         Initialize improved tracker
         
         Args:
             completion_path: Path to store completion times
             state_path: Path to store session states
-            max_reasonable_wait_hours: Maximum reasonable wait time before using fallback
+            max_reasonable_wait_hours: Maximum reasonable wait time before using fallback (default 72h)
         """
         if completion_path is None:
             completion_path = "/tmp/claude_completion_times.json"

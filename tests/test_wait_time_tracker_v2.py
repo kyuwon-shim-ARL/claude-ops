@@ -98,7 +98,7 @@ class TestImprovedWaitTimeTracker:
         
         # Case 3: Very old completion (triggers fallback)
         session_old = "claude_old"
-        tracker.completion_times[session_old] = time.time() - (25 * 3600)  # 25 hours ago
+        tracker.completion_times[session_old] = time.time() - (80 * 3600)  # 80 hours ago (exceeds 72h limit)
         tracker._save_completions()
         wait_time, is_accurate = tracker.get_wait_time_since_completion(session_old)
         assert not is_accurate  # Should use fallback due to age

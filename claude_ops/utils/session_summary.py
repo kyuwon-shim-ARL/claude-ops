@@ -77,10 +77,15 @@ class SessionSummaryHelper:
             if state != SessionState.WORKING:
                 # Waiting session - use time since last completion
                 # Check if we're using v2 tracker with accuracy indicator
-                if hasattr(self.tracker, 'get_wait_time_since_completion') and \
-                   hasattr(self.tracker.get_wait_time_since_completion(session_name), '__iter__'):
-                    wait_time, is_accurate = self.tracker.get_wait_time_since_completion(session_name)
-                    has_record = is_accurate  # v2 tracker provides accuracy
+                if hasattr(self.tracker, 'get_wait_time_since_completion'):
+                    result = self.tracker.get_wait_time_since_completion(session_name)
+                    if isinstance(result, tuple) and len(result) == 2:
+                        wait_time, is_accurate = result
+                        has_record = is_accurate  # v2 tracker provides accuracy
+                    else:
+                        # Fallback for non-v2 tracker
+                        wait_time = result
+                        has_record = self.tracker.has_completion_record(session_name)
                 else:
                     # Original tracker
                     wait_time = self.tracker.get_wait_time_since_completion(session_name)
@@ -93,10 +98,15 @@ class SessionSummaryHelper:
             else:
                 # Working session - still show time since last completion
                 # Check if we're using v2 tracker with accuracy indicator
-                if hasattr(self.tracker, 'get_wait_time_since_completion') and \
-                   hasattr(self.tracker.get_wait_time_since_completion(session_name), '__iter__'):
-                    wait_time, is_accurate = self.tracker.get_wait_time_since_completion(session_name)
-                    has_record = is_accurate  # v2 tracker provides accuracy
+                if hasattr(self.tracker, 'get_wait_time_since_completion'):
+                    result = self.tracker.get_wait_time_since_completion(session_name)
+                    if isinstance(result, tuple) and len(result) == 2:
+                        wait_time, is_accurate = result
+                        has_record = is_accurate  # v2 tracker provides accuracy
+                    else:
+                        # Fallback for non-v2 tracker
+                        wait_time = result
+                        has_record = self.tracker.has_completion_record(session_name)
                 else:
                     # Original tracker
                     wait_time = self.tracker.get_wait_time_since_completion(session_name)
