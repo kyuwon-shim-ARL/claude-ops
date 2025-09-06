@@ -498,17 +498,18 @@ class TelegramBridge:
 • `/new_project` - 새 Claude 프로젝트 생성
 
 🚀 **워크플로우 사용법:**
-필요시 직접 슬래시 커맨드를 입력하세요:
-• /기획 - 구조적 기획 및 계획 수립
-• /구현 - DRY 원칙 기반 체계적 구현
-• /안정화 - 구조적 지속가능성 검증
-• /배포 - 최종 검증 및 배포
+**프롬프트와 함께 사용** (예: `/기획 사용자 인증 시스템 개선`):
+• `/기획 [내용]` - 구조적 기획 및 계획 수립
+• `/구현 [내용]` - DRY 원칙 기반 체계적 구현
+• `/안정화 [내용]` - 구조적 지속가능성 검증
+• `/배포 [내용]` - 최종 검증 및 배포
+• `/전체사이클 [내용]` - 전체 워크플로우 실행
 
 💡 빠른 시작:
-1. /new_project my_app 으로 프로젝트 생성
-2. 텍스트 메시지로 Claude와 대화
-3. /log 로 Claude 화면 확인
-4. 필요시 직접 워크플로우 명령어 입력
+1. `/new_project my_app` - 프로젝트 생성
+2. 일반 텍스트로 Claude와 대화
+3. `/log` - Claude 화면 확인
+4. `/전체사이클 새 기능 개발` - 워크플로우 실행
 
 ❓ 메시지에 Reply하면 해당 세션으로 명령 전송"""
         
@@ -1477,11 +1478,18 @@ class TelegramBridge:
 • /restart - 세션 재시작
 • /erase - 입력 지우기
 
+🚀 워크플로우 (프롬프트와 함께):
+• /기획 [내용] - 구조적 기획
+• /구현 [내용] - 체계적 구현
+• /안정화 [내용] - 지속가능성 검증
+• /배포 [내용] - 최종 검증 및 배포
+• /전체사이클 [내용] - 전체 워크플로우
+
 💡 빠른 시작:
-1. /new_project my_app 으로 프로젝트 생성
+1. /new_project my_app - 프로젝트 생성
 2. 텍스트 메시지로 Claude와 대화
-3. /log 로 Claude 화면 확인
-4. /fullcycle 로 개발 워크플로우 실행
+3. /log - Claude 화면 확인
+4. /전체사이클 새 기능 개발 - 워크플로우
 
 ❓ 메시지에 Reply하면 해당 세션으로 명령 전송"""
         
@@ -1557,13 +1565,7 @@ class TelegramBridge:
             BotCommand("fix_terminal", "🔧 터미널 크기 문제 자동 진단 및 복구"),
             BotCommand("status", "📊 봇 및 tmux 세션 상태 확인"),
             BotCommand("help", "❓ 도움말 보기"),
-            BotCommand("new_project", "🆕 새 Claude 프로젝트 생성"),
-            # TADD Workflow Commands
-            BotCommand("fullcycle", "🔄 TADD 전체 개발 워크플로우"),
-            BotCommand("planning", "🎯 구조적 기획 및 계획 수립"),
-            BotCommand("implementation", "⚡ DRY 원칙 기반 체계적 구현"),
-            BotCommand("stabilization", "🔧 구조적 지속가능성 검증"),
-            BotCommand("deployment", "🚀 최종 검증 및 배포")
+            BotCommand("new_project", "🆕 새 Claude 프로젝트 생성")
         ]
         
         await self.app.bot.set_my_commands(commands)
