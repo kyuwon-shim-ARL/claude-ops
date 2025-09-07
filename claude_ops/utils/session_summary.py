@@ -44,7 +44,7 @@ class SessionSummaryHelper:
             # Consider all non-working states as waiting
             if state != SessionState.WORKING:
                 # Use user's definition: time since last completion notification
-                wait_time = self.tracker.get_wait_time_since_completion(session_name)
+                wait_time, is_accurate = self.tracker.get_wait_time_since_completion(session_name)
                 # Use PromptRecallSystem for better prompt extraction
                 last_prompt = self.prompt_recall.extract_last_user_prompt(session_name)
                 # Clean up the prompt if it contains error messages
