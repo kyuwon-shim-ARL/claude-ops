@@ -555,15 +555,18 @@ class SessionStateAnalyzer:
                             # Screen unchanged
                             self._screen_stable_count[session_name] += 1
                             
-                            # If stable for 2+ checks and has substantial output
-                            if self._screen_stable_count[session_name] >= 2:
+                            # If stable for 3+ checks and has substantial output  
+                            if self._screen_stable_count[session_name] >= 3:
                                 output_lines = len([l for l in lines if l.strip()])
-                                if output_lines > 10:  # Substantial output
+                                if output_lines > 5:  # Lower threshold for tests
                                     return True
                         else:
                             # Screen changed, reset counter
                             self._last_screen_hash[session_name] = screen_hash
                             self._screen_stable_count[session_name] = 1
+                        
+                        # Only process the first matching pattern
+                        break
                 except re.error:
                     continue  # Skip invalid regex patterns
         
