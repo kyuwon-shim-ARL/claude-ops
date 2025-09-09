@@ -267,29 +267,54 @@ class SessionStateAnalyzer:
         Algorithm:
             1. Split content into lines
             2. Focus on last 10 lines (reduced from 20 to prevent false positives)
-            3. Check if we're at a prompt (which overrides working detection)
+            3. Check if we're at a REAL prompt (line ending with prompt pattern)
             4. Search for any working pattern in recent content
-            5. Return True if found and not at prompt, False otherwise
+            5. Return True if found and not at real prompt, False otherwise
             
         Returns:
             bool: True if working patterns found in recent content, False otherwise
             
         Note:
-            Reduced detection window from 20 to 10 lines to prevent false positives
-            from old working indicators that remain in scrollback buffer.
+            Improved prompt detection: only lines ENDING with prompt patterns
+            are considered real prompts, not text containing prompt characters.
         """
         if not screen_content:
             return False
         
         lines = screen_content.split('\n')
         
-        # Check if we're at a clear prompt (overrides working detection)
-        # Look at the last few non-empty lines for prompt patterns
-        last_few_lines = '\n'.join(lines[-5:])
-        if any(prompt in last_few_lines for prompt in ['$ ', '> ', '❯ ', '>>> ', 'In [', '│ >']):
-            # If we see a prompt in the last 5 lines, we're likely not working
-            # This helps with Claude Code's edit prompt: "│ >"
-            return False
+        # Check if we're at a REAL prompt (must be at line end, not in middle of text)
+        # Check last few lines for prompt patterns
+        for i in range(len(lines) - 1, max(len(lines) - 6, -1), -1):
+            line = lines[i]
+            stripped = line.strip()
+            
+            # Skip completely empty lines
+            if not stripped:
+                continue
+                
+            # Check for Claude's edit prompt (single '>' with any amount of spacing)
+            if stripped == '>':
+                # Single '>' on its own line is Claude's edit prompt
+                return False
+            
+            # Check for Claude's boxed prompt
+            if stripped == '│ >':
+                return False
+                
+            # Check if line ends with standard prompt patterns
+            is_real_prompt = (
+                line.endswith('$ ') or      # Bash prompt
+                line.endswith('> ') or      # Generic prompt  
+                line.endswith('❯ ') or      # Zsh prompt
+                line == '>>>' or            # Python prompt
+                line == '>>> ' or           # Python prompt with space
+                line.endswith(']: ')        # IPython prompt
+            )
+            
+            if is_real_prompt:
+                # We're at a real prompt, not working
+                return False
         
         # Only check the last 10 lines for working patterns (reduced from 20)
         # This prevents false positives from old completed commands
