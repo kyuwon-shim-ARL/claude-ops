@@ -28,6 +28,8 @@ show_help() {
     printf "  ${GREEN}kill-session${NC} <name>          Kill specific Claude session\n"
     printf "  ${GREEN}start-monitoring${NC}             Start multi-session monitoring\n"
     printf "  ${GREEN}stop-monitoring${NC}              Stop all monitoring processes\n"
+    printf "  ${GREEN}restart-all${NC}                  Restart all monitoring services\n"
+    printf "  ${GREEN}restart${NC}                      Alias for restart-all\n"
     printf "  ${GREEN}status${NC}                       Show system status\n"
     printf "  ${GREEN}sessions${NC}                     List all Claude sessions\n"
     printf "  ${GREEN}help${NC}                         Show this help message\n"
@@ -340,6 +342,11 @@ case "${1:-help}" in
         ;;
     "stop-monitoring")
         stop_monitoring
+        ;;
+    "restart-all"|"restart")
+        stop_monitoring
+        sleep 2
+        start_monitoring
         ;;
     "status")
         show_status

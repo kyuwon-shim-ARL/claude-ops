@@ -93,6 +93,12 @@ completion-monitor.log*
 /data/*.db
 .claude*
 
+# Debug and testing
+/tmp/claude-ops-debug/
+debug_session_*.json
+test_real_*.py
+*test_scenario*.py
+
 # uv
 .uv/
 uv.lockdata/cpu_optimized_models/
