@@ -266,26 +266,34 @@ class SessionStateAnalyzer:
             
         Algorithm:
             1. Split content into lines
-            2. Focus on last 20 lines (recent activity window)
-            3. Search for any working pattern in recent content
-            4. Return True if found, False otherwise
+            2. Focus on last 10 lines (reduced from 20 to prevent false positives)
+            3. Check if we're at a prompt (which overrides working detection)
+            4. Search for any working pattern in recent content
+            5. Return True if found and not at prompt, False otherwise
             
         Returns:
             bool: True if working patterns found in recent content, False otherwise
             
         Note:
-            This function specifically avoids looking at the entire screen history
-            to prevent false positives from old "Running…" messages that are no
-            longer relevant to current state.
+            Reduced detection window from 20 to 10 lines to prevent false positives
+            from old working indicators that remain in scrollback buffer.
         """
         if not screen_content:
             return False
         
         lines = screen_content.split('\n')
         
-        # Only check the last 20 lines for working patterns
+        # Check if we're at a clear prompt (overrides working detection)
+        # Look at the last few non-empty lines for prompt patterns
+        last_few_lines = '\n'.join(lines[-5:])
+        if any(prompt in last_few_lines for prompt in ['$ ', '> ', '❯ ', '>>> ', 'In [', '│ >']):
+            # If we see a prompt in the last 5 lines, we're likely not working
+            # This helps with Claude Code's edit prompt: "│ >"
+            return False
+        
+        # Only check the last 10 lines for working patterns (reduced from 20)
         # This prevents false positives from old completed commands
-        recent_content = '\n'.join(lines[-20:])
+        recent_content = '\n'.join(lines[-10:])
         
         return any(pattern in recent_content for pattern in self.working_patterns)
     

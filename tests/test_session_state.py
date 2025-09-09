@@ -300,9 +300,10 @@ class TestIntegration:
         
         analyzer = SessionStateAnalyzer()
         
-        # Should detect as working due to "Running…" and "esc to interrupt" in recent content
+        # With improved logic, the prompt "> " overrides working detection
+        # This is correct behavior - Claude is waiting for edit acceptance, not working
         result = analyzer._detect_working_state(screen_content)
-        assert result is True
+        assert result is False  # Changed expectation - prompt means not working
     
     def test_real_world_scenario_user_prompt(self):
         """Test detection with real user prompt scenario"""
