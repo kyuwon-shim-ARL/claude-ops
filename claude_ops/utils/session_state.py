@@ -118,6 +118,43 @@ class SessionStateAnalyzer:
             "Continue?",
         ]
         
+        # NEW: Completion message patterns
+        self.completion_patterns = [
+            "Successfully",
+            "successfully",
+            "Completed",
+            "completed", 
+            "Done!",
+            "done.",
+            "Finished",
+            "finished",
+            "✓",
+            "✅",
+            "Build succeeded",
+            "Tests passed",
+            "All tests passed",
+            "0 errors",
+            "0 failures",
+            r"took \d+\.\d+s",      # Execution time pattern
+            r"in \d+\.\d+ seconds",  # Time duration pattern
+        ]
+        
+        # NEW: Command prompt patterns (regex)
+        self.prompt_patterns = [
+            r"\$$",                     # Bash prompt (ends with $)
+            r"\$ $",                    # Bash prompt with space
+            r">$",                      # Shell prompt
+            r"> $",                     # Shell prompt with space
+            r"❯$",                      # Zsh/fancy prompt
+            r"❯ $",                     # Zsh/fancy prompt with space
+            r">>>$",                    # Python prompt
+            r">>> $",                   # Python prompt with space
+            r"In \[\d+\]:$",           # IPython prompt
+            r"In \[\d+\]: $",          # IPython prompt with space
+            r"\w+@[\w\-\.]+.*\$$",     # User@host prompt (user@host:~/path$)
+            r"\w+@[\w\-\.]+.*\$ $",    # User@host prompt with space
+        ]
+        
         # Cache for screen content to avoid repeated tmux calls
         self._screen_cache: Dict[str, tuple[str, datetime]] = {}
         self._cache_ttl_seconds = 1  # Cache for 1 second
@@ -125,6 +162,10 @@ class SessionStateAnalyzer:
         # Cache for computed states to avoid repeated analysis
         self._state_cache: Dict[str, tuple[SessionState, datetime]] = {}
         self._state_cache_ttl_seconds = 0.5  # State cache for 500ms
+        
+        # NEW: Track screen stability for quiet completion detection
+        self._last_screen_hash: Dict[str, str] = {}
+        self._screen_stable_count: Dict[str, int] = {}
     
     def get_screen_content(self, session_name: str, use_cache: bool = True) -> Optional[str]:
         """
@@ -460,6 +501,99 @@ class SessionStateAnalyzer:
     def is_idle(self, session_name: str) -> bool:
         """Check if session is idle (legacy interface)"""
         return self.get_state(session_name) == SessionState.IDLE
+    
+    def detect_quiet_completion(self, session_name: str) -> bool:
+        """
+        Detect quiet completion: work that ends without explicit indicators
+        
+        This handles cases like 'git log', 'ls', 'docker images' that output
+        results and return to prompt without showing 'Running...' or 'esc to interrupt'
+        
+        Args:
+            session_name: Name of the tmux session
+            
+        Returns:
+            bool: True if quiet completion detected
+        """
+        import re
+        import hashlib
+        
+        current_screen = self.get_current_screen_only(session_name)
+        if not current_screen:
+            return False
+        
+        # 1. Check for completion messages
+        for pattern in self.completion_patterns:
+            if pattern.startswith('r"'):
+                # Regex pattern
+                if re.search(pattern[2:-1], current_screen):
+                    return True
+            elif pattern in current_screen:
+                return True
+        
+        # 2. Check if at command prompt
+        lines = current_screen.split('\n')
+        last_non_empty = None
+        for line in reversed(lines):
+            if line.strip():
+                last_non_empty = line.strip()
+                break
+        
+        if last_non_empty:
+            for prompt_pattern in self.prompt_patterns:
+                try:
+                    if re.search(prompt_pattern, last_non_empty):
+                        # At prompt - check for screen stability
+                        screen_hash = hashlib.md5(current_screen.encode()).hexdigest()
+                        
+                        if session_name not in self._last_screen_hash:
+                            self._last_screen_hash[session_name] = screen_hash
+                            self._screen_stable_count[session_name] = 1  # Start at 1
+                            return False
+                        
+                        if self._last_screen_hash[session_name] == screen_hash:
+                            # Screen unchanged
+                            self._screen_stable_count[session_name] += 1
+                            
+                            # If stable for 2+ checks and has substantial output
+                            if self._screen_stable_count[session_name] >= 2:
+                                output_lines = len([l for l in lines if l.strip()])
+                                if output_lines > 10:  # Substantial output
+                                    return True
+                        else:
+                            # Screen changed, reset counter
+                            self._last_screen_hash[session_name] = screen_hash
+                            self._screen_stable_count[session_name] = 1
+                except re.error:
+                    continue  # Skip invalid regex patterns
+        
+        return False
+    
+    def has_completion_indicators(self, screen_content: str) -> bool:
+        """
+        Check if screen has explicit completion indicators
+        
+        Args:
+            screen_content: Screen content to check
+            
+        Returns:
+            bool: True if completion indicators found
+        """
+        import re
+        
+        if not screen_content:
+            return False
+        
+        # Check for completion patterns
+        for pattern in self.completion_patterns:
+            if pattern.startswith('r"'):
+                # Regex pattern
+                if re.search(pattern[2:-1], screen_content):
+                    return True
+            elif pattern.lower() in screen_content.lower():
+                return True
+        
+        return False
     
     def get_state_details(self, session_name: str) -> Dict[str, Any]:
         """

@@ -15,6 +15,7 @@ from typing import Dict, Set
 from ..config import ClaudeOpsConfig
 from ..session_manager import session_manager
 from ..utils.session_state import SessionStateAnalyzer, SessionState
+from ..utils.notification_debugger import get_debugger, NotificationEvent
 from ..telegram.notifier import SmartNotifier
 from ..telegram.message_queue import message_queue
 # Import improved tracker with state-based completion detection
@@ -36,6 +37,7 @@ class MultiSessionMonitor:
         self.notifier = SmartNotifier(self.config)
         self.state_analyzer = SessionStateAnalyzer()  # Unified state detection
         self.tracker = wait_tracker  # Use global wait time tracker
+        self.debugger = get_debugger()  # NEW: Debug tracking
         
         # Simplified state tracking
         self.last_screen_hash: Dict[str, str] = {}      # session -> screen_content_hash
@@ -116,9 +118,17 @@ class MultiSessionMonitor:
         return self.state_analyzer.is_working(session_name)
 
     def should_send_completion_notification(self, session_name: str) -> bool:
-        """Determine if completion notification should be sent based on state transitions"""
+        """Enhanced notification detection with quiet completion support"""
         current_state = self.get_session_state(session_name)
         previous_state = self.last_state.get(session_name, SessionState.UNKNOWN)
+        current_time = time.time()
+        
+        # Log state change for debugging
+        if previous_state != current_state:
+            self.debugger.log_state_change(
+                session_name, previous_state, current_state,
+                "State transition detected"
+            )
         
         # Update last known state
         self.last_state[session_name] = current_state
@@ -126,9 +136,7 @@ class MultiSessionMonitor:
         # Reset notification flag if currently working
         if current_state == SessionState.WORKING:
             self.notification_sent[session_name] = False
-            # Only reset wait time if state actually changed to working
             if previous_state != SessionState.WORKING:
-                # State changed to working - reset wait time
                 self.tracker.reset_session(session_name)
             return False
         
@@ -137,25 +145,50 @@ class MultiSessionMonitor:
             return False
         
         # Prevent rapid successive notifications (30-second cooldown)
-        current_time = time.time()
         last_notification_time = self.last_notification_time.get(session_name, 0)
-        
-        if current_time - last_notification_time < 30:  # 30-second cooldown
+        if current_time - last_notification_time < 30:
             logger.debug(f"Notification cooldown active for {session_name}")
             return False
         
-        # Notification triggers: WORKING->completed or any->WAITING_INPUT
-        should_notify = (
-            (previous_state == SessionState.WORKING and current_state != SessionState.WORKING) or
-            (current_state == SessionState.WAITING_INPUT and previous_state != SessionState.WAITING_INPUT)
-        )
+        # Reasons for notification
+        notification_reason = ""
+        
+        # 1. Original triggers: WORKING->completed or any->WAITING_INPUT
+        if previous_state == SessionState.WORKING and current_state != SessionState.WORKING:
+            should_notify = True
+            notification_reason = "Work completed (WORKING → {current_state})"
+        elif current_state == SessionState.WAITING_INPUT and previous_state != SessionState.WAITING_INPUT:
+            should_notify = True
+            notification_reason = "Waiting for input"
+        # 2. NEW: Quiet completion detection
+        elif self.state_analyzer.detect_quiet_completion(session_name):
+            should_notify = True
+            notification_reason = "Quiet completion detected"
+        # 3. NEW: Completion message detection
+        elif current_state == SessionState.IDLE:
+            screen = self.state_analyzer.get_current_screen_only(session_name)
+            if screen and self.state_analyzer.has_completion_indicators(screen):
+                # Check if we haven't notified recently
+                if current_time - last_notification_time > 10:
+                    should_notify = True
+                    notification_reason = "Completion message detected"
+            else:
+                should_notify = False
+        else:
+            should_notify = False
         
         if should_notify:
             self.notification_sent[session_name] = True
             self.last_notification_time[session_name] = current_time
-            logger.info(f"State transition: {session_name} {previous_state} → {current_state}")
-            return True
+            logger.info(f"📢 Notification: {session_name} - {notification_reason}")
             
+            # Log notification event
+            self.debugger.log_notification(
+                session_name, NotificationEvent.SENT,
+                notification_reason, current_state
+            )
+            return True
+        
         return False
     
     def session_exists(self, session_name: str) -> bool:
@@ -237,12 +270,19 @@ class MultiSessionMonitor:
                         # Reset activity tracking on real completion
                         self.last_activity_time[session_name] = time.time()
                     
-                    # Log state changes for debugging
+                    # Enhanced state change logging with debugger
                     if session_name in self.last_state:
                         prev_state = self.last_state[session_name]
                         curr_state = self.get_session_state(session_name)
                         if prev_state != curr_state:
                             logger.info(f"🔄 {session_name}: {prev_state} → {curr_state}")
+                            
+                            # Log to debugger for analysis
+                            self.debugger.log_state_change(
+                                session_name, prev_state, curr_state,
+                                "Monitor loop state change"
+                            )
+                            
                             # Update state in tracker for auto-completion detection
                             if hasattr(self.tracker, 'mark_state_transition'):
                                 state_name = 'working' if curr_state == SessionState.WORKING else 'waiting'
