@@ -1121,8 +1121,21 @@ class TelegramBridge:
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
-                # Send without markdown parsing to avoid errors with log content
-                await update.message.reply_text(full_message, parse_mode=None, reply_markup=reply_markup)
+                # Check message length and split if needed
+                from .message_utils import safe_send_message, get_telegram_max_length
+                
+                if len(full_message) > get_telegram_max_length():
+                    # Split long message
+                    await safe_send_message(
+                        update.message.reply_text,
+                        full_message,
+                        parse_mode=None,
+                        reply_markup=reply_markup,
+                        preserve_markdown=False  # 로그 내용이므로 마크다운 보존 불필요
+                    )
+                else:
+                    # Send as single message
+                    await update.message.reply_text(full_message, parse_mode=None, reply_markup=reply_markup)
             else:
                 await update.message.reply_text(f"❌ 세션 전환에 실패했습니다: {target_session}")
                 

@@ -46,11 +46,11 @@ class TestTelegramMessageLimits(unittest.TestCase):
         from claude_ops.telegram.message_utils import split_long_message
         
         long_text = "A" * 6000  # 6000 characters
-        result = split_long_message(long_text, max_length=5000)
+        result = split_long_message(long_text, max_length=4000)
         
         self.assertIsInstance(result, list)
         self.assertGreater(len(result), 1)  # Should be split into multiple messages
-        self.assertTrue(all(len(msg) <= 5000 for msg in result))
+        self.assertTrue(all(len(msg) <= 4000 for msg in result))
     
     def test_smart_message_splitting_preserves_lines(self):
         """스마트 분할이 줄바꿈을 기준으로 자연스럽게 분할해야 함"""

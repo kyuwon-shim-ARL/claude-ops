@@ -8,7 +8,7 @@ from typing import List, Callable, Any, Optional
 
 def split_long_message(
     text: str, 
-    max_length: int = 5000, 
+    max_length: int = 4000, 
     preserve_markdown: bool = False
 ) -> List[str]:
     """
@@ -126,7 +126,7 @@ def _balance_markdown(text: str) -> str:
 async def safe_send_message(
     send_func: Callable, 
     text: str, 
-    max_length: int = 5000,
+    max_length: int = 4000,
     preserve_markdown: bool = True,
     **kwargs
 ) -> None:
@@ -148,8 +148,15 @@ async def safe_send_message(
     # 메시지 분할 후 전송
     messages = split_long_message(text, max_length, preserve_markdown)
     
-    for message in messages:
-        await send_func(message, **kwargs)
+    # reply_markup은 마지막 메시지에만 추가
+    reply_markup = kwargs.pop('reply_markup', None)
+    
+    for i, message in enumerate(messages):
+        if i == len(messages) - 1 and reply_markup:
+            # 마지막 메시지에만 버튼 추가
+            await send_func(message, reply_markup=reply_markup, **kwargs)
+        else:
+            await send_func(message, **kwargs)
 
 
 def get_telegram_max_length() -> int:
@@ -159,7 +166,7 @@ def get_telegram_max_length() -> int:
     Returns:
         최대 메시지 길이 (문자 수)
     """
-    return 5000  # 기존 3500에서 5000으로 증가
+    return 4000  # 텔레그램 실제 제한(4096)에서 약간 여유를 둠
 
 
 def is_message_too_long(text: str, max_length: Optional[int] = None) -> bool:
