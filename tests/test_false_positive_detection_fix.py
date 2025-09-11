@@ -126,20 +126,31 @@ Modified 1 file:
         """
         analyzer = SessionStateAnalyzer()
         
-        # Simulate screen with multiple old working indicators
+        # Simulate screen with old working indicators far from current view
+        # All working indicators should be outside the 10-line detection window
         screen_content = """
-[Old task 1]
+[Very old task 1 - 20 lines up]
 · Building... (esc to interrupt)    # Old indicator 1
 [Task 1 completed]
 
-[Old task 2]  
+[Very old task 2 - 15 lines up]  
 · Testing... (esc to interrupt)     # Old indicator 2
 [Task 2 completed]
 
-[Old task 3]
+[Old task 3 - 12 lines up]
 · Installing... (esc to interrupt)  # Old indicator 3
 [Task 3 completed]
 
+Line 1
+Line 2
+Line 3
+Line 4
+Line 5
+Line 6
+Line 7
+Line 8
+Line 9
+Line 10
 [Current screen - much later]
 Session idle, waiting at prompt
 

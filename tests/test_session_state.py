@@ -300,10 +300,11 @@ class TestIntegration:
         
         analyzer = SessionStateAnalyzer()
         
-        # With improved logic, the prompt "> " overrides working detection
-        # This is correct behavior - Claude is waiting for edit acceptance, not working
+        # This screen has multiple working indicators: "Running…" and "esc to interrupt"
+        # With the priority fix, working indicators should override prompt detection
+        # This is correct - git push is still running, even with prompt visible
         result = analyzer._detect_working_state(screen_content)
-        assert result is False  # Changed expectation - prompt means not working
+        assert result is True  # Working indicators present, should be WORKING
     
     def test_real_world_scenario_user_prompt(self):
         """Test detection with real user prompt scenario"""

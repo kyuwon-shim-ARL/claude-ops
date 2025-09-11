@@ -264,25 +264,36 @@ class SessionStateAnalyzer:
             - "ctrl+b to run in background": Background execution option
             - "tokens · esc to interrupt)": AI token generation in progress
             
-        Algorithm:
+        Algorithm (PRIORITY ORDER):
             1. Split content into lines
-            2. Focus on last 10 lines (reduced from 20 to prevent false positives)
-            3. Check if we're at a REAL prompt (line ending with prompt pattern)
-            4. Search for any working pattern in recent content
-            5. Return True if found and not at real prompt, False otherwise
+            2. Focus on last 10 lines for recent activity
+            3. FIRST check for working patterns (highest priority)
+            4. If working patterns found, return True immediately
+            5. Only if NO working patterns, then check for prompts
+            6. Return False if at a real prompt, False otherwise
             
         Returns:
             bool: True if working patterns found in recent content, False otherwise
             
         Note:
-            Improved prompt detection: only lines ENDING with prompt patterns
-            are considered real prompts, not text containing prompt characters.
+            Working patterns have PRIORITY over prompt detection because
+            Claude Code may show prompts while still working on tasks.
         """
         if not screen_content:
             return False
         
         lines = screen_content.split('\n')
         
+        # Only check the last 10 lines for working patterns (reduced from 20)
+        # This prevents false positives from old completed commands
+        recent_content = '\n'.join(lines[-10:])
+        
+        # PRIORITY 1: Check for working patterns FIRST
+        # If any working pattern is found, immediately return True
+        if any(pattern in recent_content for pattern in self.working_patterns):
+            return True
+        
+        # PRIORITY 2: Only check for prompts if NO working patterns found
         # Check if we're at a REAL prompt (must be at line end, not in middle of text)
         # Check last few lines for prompt patterns
         for i in range(len(lines) - 1, max(len(lines) - 6, -1), -1):
@@ -316,11 +327,8 @@ class SessionStateAnalyzer:
                 # We're at a real prompt, not working
                 return False
         
-        # Only check the last 10 lines for working patterns (reduced from 20)
-        # This prevents false positives from old completed commands
-        recent_content = '\n'.join(lines[-10:])
-        
-        return any(pattern in recent_content for pattern in self.working_patterns)
+        # No working patterns and no prompts detected
+        return False
     
     def _detect_input_waiting(self, screen_content: str) -> bool:
         """
