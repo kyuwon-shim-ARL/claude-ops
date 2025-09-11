@@ -92,6 +92,7 @@ class SessionStateAnalyzer:
         self.working_patterns = [
             "esc to interrupt",           # Standard working indicator - 가장 신뢰할 수 있는 패턴
             "Running…",                   # Bash command execution
+            "Thinking…",                  # Claude Code thinking/analyzing
             "ctrl+b to run in background", # Background execution option
             "Building",                   # Build process
             "Testing",                    # Test execution
