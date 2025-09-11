@@ -13,11 +13,13 @@
 - ✅ **Reply-Based Targeting**: Accurate session selection via Telegram replies
 
 ### Recent Updates (2025-09-11)
-1. **Claude-Dev-Kit Compatibility**: Enhanced project_creator.py for full compatibility
-2. **Comprehensive Fallback**: Complete local structure generation when remote fails
-3. **Test Coverage Expansion**: Added 8 new tests (total 133 tests)
-4. **Error Handling**: Improved installation validation and recovery
-5. **Directory Pre-creation**: Prevents installation failures from missing paths
+1. **Prompt Priority Fix**: Fixed critical working indicator vs prompt detection priority
+2. **New UI Format Support**: Added support for Claude Code's new horizontal-line prompt format
+3. **Claude-Dev-Kit Compatibility**: Enhanced project_creator.py for full compatibility
+4. **Comprehensive Fallback**: Complete local structure generation when remote fails
+5. **Test Coverage Expansion**: Added 23 new tests for prompt detection (total 157 tests)
+6. **Error Handling**: Improved installation validation and recovery
+7. **Directory Pre-creation**: Prevents installation failures from missing paths
 
 ### Previous Updates (2025-09-09)
 - Improved prompt detection logic to distinguish real prompts from text
@@ -35,8 +37,8 @@
 | Session Recovery Time | < 10 seconds | < 30 seconds | ✅ |
 
 ### Code Quality
-- **Total Tests**: 133 (100% passing)
-- **Mock Usage**: 27.3% (under 35% limit)
+- **Total Tests**: 157 (100% passing)
+- **Mock Usage**: 23.2% (under 35% limit) 
 - **Test Coverage**: 25.78% (above 20% minimum)
 - **TADD Compliance**: Full compliance with test-first development
 - **Documentation**: Comprehensive with session archival
