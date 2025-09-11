@@ -563,6 +563,12 @@ class SessionStateAnalyzer:
         if not current_screen:
             return False
         
+        # CRITICAL: First check if work is still running
+        # Don't detect quiet completion if working indicators are present
+        for pattern in self.working_patterns:
+            if pattern in current_screen:
+                return False  # Still working, not a quiet completion!
+        
         # 1. Check for completion messages
         for pattern in self.completion_patterns:
             if pattern.startswith('r"'):
