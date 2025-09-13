@@ -13,6 +13,10 @@ from ..config import ClaudeOpsConfig
 from ..utils.session_state import SessionStateAnalyzer, SessionState
 from ..utils.prompt_recall import get_context_for_notification
 from ..utils.log_length_manager import get_current_log_length
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..utils.task_completion_detector import TaskCompletion, AlertPriority, TaskType
 
 logger = logging.getLogger(__name__)
 
@@ -317,6 +321,119 @@ Claude가 작업을 완료했습니다.
 
 💡 **답장하려면** 이 메시지에 Reply로 응답하세요!"""
             return self.send_notification_sync(message)
+    
+    def send_task_completion_notification(self, task_completion: 'TaskCompletion') -> bool:
+        """
+        Send task-specific completion notification with priority and details
+        
+        Args:
+            task_completion: TaskCompletion object with details
+            
+        Returns:
+            True if notification sent successfully
+        """
+        from ..utils.task_completion_detector import TaskType, AlertPriority, task_detector
+        
+        # Get session information
+        session_name = self.config.session_name
+        working_dir = self.config.working_directory
+        
+        # Get priority emoji
+        priority_emoji = task_detector.get_priority_emoji(task_completion.priority)
+        
+        # Get task type emoji
+        task_emojis = {
+            TaskType.BUILD_PROCESS: "🔨",
+            TaskType.TEST_EXECUTION: "🧪",
+            TaskType.FILE_OPERATION: "📄",
+            TaskType.SEARCH_OPERATION: "🔍",
+            TaskType.INSTALLATION: "📦",
+            TaskType.DEPLOYMENT: "🚀",
+            TaskType.DEBUGGING: "🐛",
+            TaskType.CODE_GENERATION: "📝",
+            TaskType.GENERAL: "📢",
+        }
+        task_emoji = task_emojis.get(task_completion.task_type, "📢")
+        
+        # Get last user prompt for context
+        prompt_context = get_context_for_notification(session_name)
+        
+        # Format message based on priority
+        if task_completion.priority == AlertPriority.CRITICAL:
+            # Critical alerts - immediate attention needed
+            message = f"""{priority_emoji} **CRITICAL ALERT** [`{session_name}`]
+
+{task_emoji} **{task_completion.message}**
+
+📁 **Project**: `{working_dir}`
+🎯 **Session**: `{session_name}`
+⏰ **Time**: {self._get_current_time()}
+
+🔴 **Details**: {task_completion.details}
+{prompt_context}
+⚠️ **Immediate attention required!**
+
+💡 **Reply** to this message to respond!"""
+        
+        elif task_completion.priority == AlertPriority.HIGH:
+            # High priority - important completion
+            message = f"""{priority_emoji} **Important Completion** [`{session_name}`]
+
+{task_emoji} **{task_completion.message}**
+
+📁 **Project**: `{working_dir}`
+🎯 **Session**: `{session_name}`
+⏰ **Time**: {self._get_current_time()}
+
+🟡 **Details**: {task_completion.details}
+{prompt_context}
+💡 **Reply** to this message to respond!"""
+        
+        elif task_completion.priority == AlertPriority.NORMAL:
+            # Normal priority - standard completion
+            message = f"""{priority_emoji} **Task Completed** [`{session_name}`]
+
+{task_emoji} **{task_completion.message}**
+
+📁 **Project**: `{working_dir}`
+🎯 **Session**: `{session_name}`
+⏰ **Time**: {self._get_current_time()}
+
+🟢 **Details**: {task_completion.details}
+{prompt_context}
+💡 **Reply** to this message to respond!"""
+        
+        else:  # LOW priority
+            # Low priority - informational only
+            message = f"""{priority_emoji} **Info** [`{session_name}`]
+
+{task_emoji} {task_completion.message}
+
+📁 Project: `{working_dir}`
+🎯 Session: `{session_name}`
+
+{task_completion.details}"""
+        
+        # Add confidence indicator for debugging
+        if task_completion.confidence < 0.8:
+            message += f"\n\n_Confidence: {task_completion.confidence:.0%}_"
+        
+        # Check for duplicate notifications
+        import hashlib
+        message_hash = hashlib.md5(message.encode()).hexdigest()
+        if message_hash == self._last_notification_hash:
+            logger.info("Duplicate task notification detected, skipping")
+            return True
+        
+        self._last_notification_hash = message_hash
+        
+        # Send with appropriate urgency
+        success = self._send_telegram_notification(message)
+        
+        if success:
+            logger.info(f"{priority_emoji} Sent {task_completion.priority.name} priority notification for {task_completion.task_type.value}")
+        
+        return success
     
     def send_response_completion_notification(self) -> bool:
         """Send response completion notification"""

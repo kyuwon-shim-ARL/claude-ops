@@ -1550,6 +1550,12 @@ class TelegramBridge:
         self.app.add_handler(CommandHandler("deployment", self.workflow_deployment_command))
         self.app.add_handler(CommandHandler("fullcycle", self.workflow_fullcycle_command))
         
+        # Detection Analysis Commands
+        self.app.add_handler(CommandHandler("detection_status", self.detection_status_command))
+        self.app.add_handler(CommandHandler("detection_report", self.detection_report_command))
+        self.app.add_handler(CommandHandler("detection_trends", self.detection_trends_command))
+        self.app.add_handler(CommandHandler("detection_improve", self.detection_improve_command))
+        
         # Callback query handler for inline buttons
         self.app.add_handler(CallbackQueryHandler(self.button_callback))
         
@@ -1577,6 +1583,8 @@ class TelegramBridge:
             BotCommand("erase", "🧹 현재 입력 지우기 (Ctrl+C 전송)"),
             BotCommand("fix_terminal", "🔧 터미널 크기 문제 자동 진단 및 복구"),
             BotCommand("status", "📊 봇 및 tmux 세션 상태 확인"),
+            BotCommand("detection_status", "🎯 Working Detection 성능 확인"),
+            BotCommand("detection_trends", "📈 탐지 트렌드 분석"),
             BotCommand("help", "❓ 도움말 보기"),
             BotCommand("new_project", "🆕 새 Claude 프로젝트 생성")
         ]
@@ -3186,6 +3194,27 @@ ARGUMENTS: {args_text}
                 await update.message.reply_text("🔄 전체사이클 명령어 전송됨 (기본 모드)")
             else:
                 await update.message.reply_text("❌ Claude 세션으로 전송 실패")
+    
+    # Detection Analysis Commands
+    async def detection_status_command(self, update, context):
+        """Handle /detection_status command"""
+        from .commands.detection_analysis import detection_status
+        await detection_status(update, context)
+    
+    async def detection_report_command(self, update, context):
+        """Handle /detection_report command"""
+        from .commands.detection_analysis import detection_report
+        await detection_report(update, context)
+    
+    async def detection_trends_command(self, update, context):
+        """Handle /detection_trends command"""
+        from .commands.detection_analysis import detection_trends
+        await detection_trends(update, context)
+    
+    async def detection_improve_command(self, update, context):
+        """Handle /detection_improve command"""
+        from .commands.detection_analysis import detection_improve
+        await detection_improve(update, context)
     
     async def _send_to_claude(self, text: str) -> bool:
         """Send text to current Claude session (legacy function - now uses _send_to_claude_with_session)"""

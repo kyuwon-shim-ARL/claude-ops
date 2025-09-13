@@ -254,6 +254,35 @@ class SessionStateAnalyzer:
     
     def _detect_working_state(self, screen_content: str) -> bool:
         """
+        CONSERVATIVE MODE: 보수적 작업 상태 감지
+        
+        사용자 피드백 반영: "esc to interrupt만 검출하고 나머지는 놓치는게 차라리 더 체감 오류가 적었어"
+        
+        새로운 접근:
+        1. 확실한 신호만 탐지 (false positive 최소화)
+        2. 놓친 케이스는 상세 로깅으로 학습
+        3. 데이터 기반 점진적 개선
+        """
+        from .conservative_detector import conservative_detector
+        
+        # 세션명이 없으면 기본값 사용
+        session_name = getattr(self, '_current_session', 'unknown')
+        
+        # 보수적 탐지기 사용
+        context = conservative_detector.detect_working_state(session_name, screen_content)
+        
+        # 상세 로깅
+        if context.patterns_found:
+            logger.debug(f"🎯 WORKING detected: {context.reasoning}")
+        elif context.prompt_found:
+            logger.debug(f"⏸️ IDLE: {context.reasoning}")
+        else:
+            logger.debug(f"❓ IDLE (conservative): {context.reasoning}")
+        
+        return context.decision
+    
+    def _detect_working_state_original(self, screen_content: str) -> bool:
+        """
         Detect if session is actively working based on recent screen content
         
         Uses context-aware detection that focuses on recent activity
@@ -267,34 +296,26 @@ class SessionStateAnalyzer:
             
         Algorithm (PRIORITY ORDER):
             1. Split content into lines
-            2. Focus on last 10 lines for recent activity
-            3. FIRST check for working patterns (highest priority)
-            4. If working patterns found, return True immediately
-            5. Only if NO working patterns, then check for prompts
-            6. Return False if at a real prompt, False otherwise
+            2. FIRST check if at a prompt (highest priority)
+            3. If at prompt, return False (not working)
+            4. Check last 10 lines for working patterns
+            5. Return True if working patterns found
+            6. Return False otherwise
             
         Returns:
-            bool: True if working patterns found in recent content, False otherwise
+            bool: True if working patterns found and NOT at prompt, False otherwise
             
         Note:
-            Working patterns have PRIORITY over prompt detection because
-            Claude Code may show prompts while still working on tasks.
+            Prompt detection has PRIORITY over working patterns to prevent
+            false positives when "esc to interrupt" text remains on screen
+            from previous operations.
         """
         if not screen_content:
             return False
         
         lines = screen_content.split('\n')
         
-        # Only check the last 10 lines for working patterns (reduced from 20)
-        # This prevents false positives from old completed commands
-        recent_content = '\n'.join(lines[-10:])
-        
-        # PRIORITY 1: Check for working patterns FIRST
-        # If any working pattern is found, immediately return True
-        if any(pattern in recent_content for pattern in self.working_patterns):
-            return True
-        
-        # PRIORITY 2: Only check for prompts if NO working patterns found
+        # PRIORITY 1: Check for prompts FIRST to avoid false positives
         # Check if we're at a REAL prompt (must be at line end, not in middle of text)
         # Check last few lines for prompt patterns
         for i in range(len(lines) - 1, max(len(lines) - 6, -1), -1):
@@ -317,7 +338,9 @@ class SessionStateAnalyzer:
             # Check if line ends with standard prompt patterns
             is_real_prompt = (
                 line.endswith('$ ') or      # Bash prompt
-                line.endswith('> ') or      # Generic prompt  
+                line.endswith('> ') or      # Generic prompt with space
+                line.endswith(' >') or      # Generic prompt space before >
+                stripped.endswith('>') or   # Any line ending with > (catch all)
                 line.endswith('❯ ') or      # Zsh prompt
                 line == '>>>' or            # Python prompt
                 line == '>>> ' or           # Python prompt with space
@@ -327,6 +350,15 @@ class SessionStateAnalyzer:
             if is_real_prompt:
                 # We're at a real prompt, not working
                 return False
+        
+        # PRIORITY 2: Check for working patterns only if NOT at a prompt
+        # Only check the last 10 lines for working patterns (reduced from 20)
+        # This prevents false positives from old completed commands
+        recent_content = '\n'.join(lines[-10:])
+        
+        # If any working pattern is found, return True
+        if any(pattern in recent_content for pattern in self.working_patterns):
+            return True
         
         # No working patterns and no prompts detected
         return False

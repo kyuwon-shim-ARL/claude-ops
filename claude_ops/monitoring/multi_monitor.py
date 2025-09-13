@@ -11,12 +11,17 @@ import logging
 import threading
 import subprocess
 import hashlib
-from typing import Dict, Set
+from typing import Dict, Set, Tuple, Optional
 from ..config import ClaudeOpsConfig
 from ..session_manager import session_manager
 from ..utils.session_state import SessionStateAnalyzer, SessionState
 from ..utils.notification_debugger import get_debugger, NotificationEvent
+from ..utils.task_completion_detector import task_detector, TaskCompletion, AlertPriority
 from ..telegram.notifier import SmartNotifier
+from .completion_event_system import (
+    CompletionEventBus, CompletionEventType, CompletionEvent,
+    CompletionTimeRecorder, CompletionNotifier, emit_completion
+)
 from ..telegram.message_queue import message_queue
 # Import improved tracker with state-based completion detection
 try:
@@ -38,6 +43,11 @@ class MultiSessionMonitor:
         self.state_analyzer = SessionStateAnalyzer()  # Unified state detection
         self.tracker = wait_tracker  # Use global wait time tracker
         self.debugger = get_debugger()  # NEW: Debug tracking
+        
+        # Initialize event-based completion system
+        self.event_bus = CompletionEventBus()
+        self.completion_recorder = CompletionTimeRecorder(self.tracker)
+        self.event_bus.subscribe(self.completion_recorder.on_completion_event)
         
         # Simplified state tracking
         self.last_screen_hash: Dict[str, str] = {}      # session -> screen_content_hash
@@ -117,8 +127,8 @@ class MultiSessionMonitor:
         """Check if session is working (using unified analyzer)"""
         return self.state_analyzer.is_working(session_name)
 
-    def should_send_completion_notification(self, session_name: str) -> bool:
-        """Enhanced notification detection with quiet completion support"""
+    def should_send_completion_notification(self, session_name: str) -> Tuple[bool, Optional[TaskCompletion]]:
+        """Enhanced notification detection with task-specific completion support"""
         current_state = self.get_session_state(session_name)
         previous_state = self.last_state.get(session_name, SessionState.UNKNOWN)
         current_time = time.time()
@@ -138,46 +148,72 @@ class MultiSessionMonitor:
             self.notification_sent[session_name] = False
             if previous_state != SessionState.WORKING:
                 self.tracker.reset_session(session_name)
-            return False
+            return False, None
         
         # Enhanced duplicate prevention
         if self.notification_sent.get(session_name, False):
-            return False
+            return False, None
         
         # Prevent rapid successive notifications (30-second cooldown)
         last_notification_time = self.last_notification_time.get(session_name, 0)
         if current_time - last_notification_time < 30:
             logger.debug(f"Notification cooldown active for {session_name}")
-            return False
+            return False, None
+        
+        # Check for task-specific completions
+        screen_content = self.state_analyzer.get_current_screen_only(session_name)
+        task_completion = None
+        if screen_content:
+            task_completion = task_detector.detect_completion(screen_content)
         
         # Reasons for notification
         notification_reason = ""
+        should_notify = False
         
-        # 1. Original triggers: WORKING->completed or any->WAITING_INPUT
-        if previous_state == SessionState.WORKING and current_state != SessionState.WORKING:
+        # 1. Task-specific completion detected (highest priority)
+        if task_completion and task_completion.confidence > 0.7:
             should_notify = True
-            notification_reason = "Work completed (WORKING → {current_state})"
+            notification_reason = f"Task completed: {task_completion.message}"
+            # Adjust cooldown based on priority
+            if task_completion.priority == AlertPriority.CRITICAL:
+                should_notify = True  # Always notify for critical
+            elif task_completion.priority == AlertPriority.LOW:
+                # More restrictive for low priority
+                if current_time - last_notification_time < 60:
+                    return False, None
+        # 2. Original triggers: WORKING->completed or any->WAITING_INPUT
+        elif previous_state == SessionState.WORKING and current_state != SessionState.WORKING:
+            should_notify = True
+            notification_reason = f"Work completed (WORKING → {current_state})"
         elif current_state == SessionState.WAITING_INPUT and previous_state != SessionState.WAITING_INPUT:
             should_notify = True
             notification_reason = "Waiting for input"
-        # 2. NEW: Quiet completion detection
+        # 3. Quiet completion detection
         elif self.state_analyzer.detect_quiet_completion(session_name):
             should_notify = True
             notification_reason = "Quiet completion detected"
-        # 3. NEW: Completion message detection
+        # 4. Completion message detection
         elif current_state == SessionState.IDLE:
-            screen = self.state_analyzer.get_current_screen_only(session_name)
-            if screen and self.state_analyzer.has_completion_indicators(screen):
+            if screen_content and self.state_analyzer.has_completion_indicators(screen_content):
                 # Check if we haven't notified recently
                 if current_time - last_notification_time > 10:
                     should_notify = True
                     notification_reason = "Completion message detected"
-            else:
-                should_notify = False
-        else:
-            should_notify = False
         
         if should_notify:
+            # EMIT COMPLETION EVENT (decoupled from notification)
+            # Event-based system ensures completion is always recorded
+            if previous_state == SessionState.WORKING and current_state != SessionState.WORKING:
+                logger.info(f"🎯 Emitting completion event for {session_name} (WORKING → {current_state})")
+                self.event_bus.emit(CompletionEvent(
+                    session_name=session_name,
+                    event_type=CompletionEventType.STATE_TRANSITION,
+                    timestamp=current_time,
+                    previous_state=previous_state.value,
+                    new_state=current_state.value,
+                    metadata={'reason': notification_reason}
+                ))
+            
             self.notification_sent[session_name] = True
             self.last_notification_time[session_name] = current_time
             logger.info(f"📢 Notification: {session_name} - {notification_reason}")
@@ -187,9 +223,9 @@ class MultiSessionMonitor:
                 session_name, NotificationEvent.SENT,
                 notification_reason, current_state
             )
-            return True
+            return True, task_completion
         
-        return False
+        return False, None
     
     def session_exists(self, session_name: str) -> bool:
         """Check if tmux session exists"""
@@ -197,8 +233,8 @@ class MultiSessionMonitor:
         return result == 0
     
     
-    def send_completion_notification(self, session_name: str, state_type: str = "completion"):
-        """Send work completion notification for a specific session"""
+    def send_completion_notification(self, session_name: str, task_completion: Optional[TaskCompletion] = None):
+        """Send work completion notification for a specific session with task details"""
         try:
             # Temporarily switch to this session for notification context
             original_session = session_manager.get_active_session()
@@ -207,18 +243,21 @@ class MultiSessionMonitor:
             # Create a notifier for this session
             session_notifier = SmartNotifier(self.config)
             
-            # With simplified detection, we primarily send work completion notifications
-            # The smart notifier will handle the specific context
-            success = session_notifier.send_work_completion_notification()
+            # Send task-specific notification if available
+            if task_completion:
+                success = session_notifier.send_task_completion_notification(task_completion)
+            else:
+                # Fallback to generic completion notification
+                success = session_notifier.send_work_completion_notification()
             
             # Switch back to original session
             session_manager.switch_session(original_session)
             
             if success:
-                logger.info(f"✅ Sent completion notification for session: {session_name}")
-                # Mark completion time for wait time tracking
-                if hasattr(self.tracker, 'mark_completion'):
-                    self.tracker.mark_completion(session_name)
+                priority_emoji = task_detector.get_priority_emoji(task_completion.priority) if task_completion else "✅"
+                logger.info(f"{priority_emoji} Sent completion notification for session: {session_name}")
+                # NOTE: Completion time is now marked in should_send_completion_notification()
+                # This ensures it's recorded even if notification fails
             else:
                 logger.debug(f"⏭️ Skipped notification for session: {session_name} (duplicate or failed)")
                 # Still mark completion if state changed (v2 tracker feature)
@@ -264,9 +303,10 @@ class MultiSessionMonitor:
                     
                     
                     # Check if we should send completion notification (state transition)
-                    if self.should_send_completion_notification(session_name):
+                    should_notify, task_completion = self.should_send_completion_notification(session_name)
+                    if should_notify:
                         logger.info(f"🎯 Sending completion notification for {session_name}")
-                        self.send_completion_notification(session_name, "completion")
+                        self.send_completion_notification(session_name, task_completion)
                         # Reset activity tracking on real completion
                         self.last_activity_time[session_name] = time.time()
                     
