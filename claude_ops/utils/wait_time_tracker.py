@@ -6,6 +6,7 @@ Simple and reliable time tracking for Claude sessions
 
 import time
 import json
+import re
 from pathlib import Path
 from typing import Dict, Optional
 import logging
@@ -174,36 +175,81 @@ class WaitTimeTracker:
     def get_wait_time_since_completion(self, session_name: str) -> float:
         """
         Get time elapsed since last completion notification
-        
+
         Args:
             session_name: Name of the session
-            
+
         Returns:
             Time in seconds since last completion (uses fallback if no record or unreasonable)
         """
-        if session_name not in self.completion_times:
+        # Try direct match first
+        completion_time = None
+        if session_name in self.completion_times:
+            completion_time = self.completion_times[session_name]
+        else:
+            # Try normalized name matching
+            base_name = self.normalize_session_name(session_name)
+            for stored_session, timestamp in self.completion_times.items():
+                if self.normalize_session_name(stored_session) == base_name:
+                    logger.debug(f"Found completion time via normalization: {stored_session} -> {base_name}")
+                    completion_time = timestamp
+                    break
+
+        if completion_time is None:
             # Use fallback mechanism: estimate based on session creation time
             return self._get_fallback_wait_time(session_name)
-        
-        wait_time = time.time() - self.completion_times[session_name]
-        
+
+        wait_time = time.time() - completion_time
+
         # Sanity check: if wait time is > 24 hours, use fallback instead
         # This handles cases where completion times are stale/incorrect
         if wait_time > 24 * 3600:  # 24 hours
             logger.warning(f"Unreasonably long wait time ({wait_time/3600:.1f}h) for {session_name}, using fallback")
             return self._get_fallback_wait_time(session_name)
-        
+
         return wait_time
     
+    def normalize_session_name(self, session_name: str) -> str:
+        """
+        Normalize session name by removing trailing number suffix
+
+        Examples:
+            claude_project-5 → claude_project
+            claude_simple_funcscan_test_run-90 → claude_simple_funcscan_test_run
+            claude_urban-microbiome-toolkit-5 → claude_urban-microbiome-toolkit
+
+        Args:
+            session_name: Session name with possible numeric suffix
+
+        Returns:
+            Normalized session name without trailing -number
+        """
+        return re.sub(r'-\d+$', '', session_name)
+
     def has_completion_record(self, session_name: str) -> bool:
         """Check if session has ANY notification record (completion or waiting)"""
-        # Check if we have either completion time OR last notification time
+        # Direct match first
         has_completion = session_name in self.completion_times
-        has_notification = session_name in self.last_notification_time
+        has_notification = hasattr(self, 'last_notification_time') and session_name in self.last_notification_time
 
-        # If we have any record of notifications being sent, return True
         if has_completion or has_notification:
             return True
+
+        # Try normalized name matching
+        base_name = self.normalize_session_name(session_name)
+
+        # Check completion_times with normalized names
+        for stored_session in self.completion_times.keys():
+            if self.normalize_session_name(stored_session) == base_name:
+                logger.debug(f"Found completion record via normalization: {stored_session} -> {base_name}")
+                return True
+
+        # Check last_notification_time if it exists
+        if hasattr(self, 'last_notification_time'):
+            for stored_session in self.last_notification_time.keys():
+                if self.normalize_session_name(stored_session) == base_name:
+                    logger.debug(f"Found notification record via normalization: {stored_session} -> {base_name}")
+                    return True
 
         return False
     
