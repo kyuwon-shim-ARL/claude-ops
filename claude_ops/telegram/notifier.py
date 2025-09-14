@@ -13,10 +13,7 @@ from ..config import ClaudeOpsConfig
 from ..utils.session_state import SessionStateAnalyzer, SessionState
 from ..utils.prompt_recall import get_context_for_notification
 from ..utils.log_length_manager import get_current_log_length
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from ..utils.task_completion_detector import TaskCompletion, AlertPriority, TaskType
+# REMOVED: Task completion imports - simplifying to 2 notification types only
 
 logger = logging.getLogger(__name__)
 
@@ -322,7 +319,9 @@ Claude가 작업을 완료했습니다.
 💡 **답장하려면** 이 메시지에 Reply로 응답하세요!"""
             return self.send_notification_sync(message)
     
-    def send_task_completion_notification(self, task_completion: 'TaskCompletion') -> bool:
+    # REMOVED: Task completion notification with priorities
+    # Only keeping work_completion and waiting_input notifications
+    def send_task_completion_notification_DEPRECATED(self, task_completion) -> bool:
         """
         Send task-specific completion notification with priority and details
         

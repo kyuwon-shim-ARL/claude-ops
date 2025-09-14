@@ -874,8 +874,9 @@ class TelegramBridge:
                 "수동으로 `claude` 명령어를 실행해주세요."
             )
     
-    async def fix_terminal_command(self, update, context):
-        """Fix terminal size issues in Claude sessions"""
+    # REMOVED: fix_terminal command - non-functional
+    async def fix_terminal_command_DEPRECATED(self, update, context):
+        """DEPRECATED: Fix terminal command removed"""
         user_id = update.effective_user.id
         
         if not self.check_user_authorization(user_id):
@@ -1541,7 +1542,8 @@ class TelegramBridge:
         self.app.add_handler(CommandHandler("sessions", self.sessions_command))
         self.app.add_handler(CommandHandler("board", self.board_command))
         self.app.add_handler(CommandHandler("summary", self.summary_command))
-        self.app.add_handler(CommandHandler("fix_terminal", self.fix_terminal_command))
+        # REMOVED: fix_terminal command handler
+        # self.app.add_handler(CommandHandler("fix_terminal", self.fix_terminal_command))
         
         # TADD Workflow Commands
         self.app.add_handler(CommandHandler("planning", self.workflow_planning_command))
@@ -1550,11 +1552,11 @@ class TelegramBridge:
         self.app.add_handler(CommandHandler("deployment", self.workflow_deployment_command))
         self.app.add_handler(CommandHandler("fullcycle", self.workflow_fullcycle_command))
         
-        # Detection Analysis Commands
-        self.app.add_handler(CommandHandler("detection_status", self.detection_status_command))
-        self.app.add_handler(CommandHandler("detection_report", self.detection_report_command))
-        self.app.add_handler(CommandHandler("detection_trends", self.detection_trends_command))
-        self.app.add_handler(CommandHandler("detection_improve", self.detection_improve_command))
+        # REMOVED: Detection analysis commands - non-functional
+        # self.app.add_handler(CommandHandler("detection_status", self.detection_status_command))
+        # self.app.add_handler(CommandHandler("detection_report", self.detection_report_command))
+        # self.app.add_handler(CommandHandler("detection_trends", self.detection_trends_command))
+        # self.app.add_handler(CommandHandler("detection_improve", self.detection_improve_command))
         
         # Callback query handler for inline buttons
         self.app.add_handler(CallbackQueryHandler(self.button_callback))
@@ -1581,10 +1583,7 @@ class TelegramBridge:
             BotCommand("log", "📺 현재 Claude 화면 실시간 확인"),
             BotCommand("stop", "⛔ Claude 작업 중단 (ESC 키 전송)"),
             BotCommand("erase", "🧹 현재 입력 지우기 (Ctrl+C 전송)"),
-            BotCommand("fix_terminal", "🔧 터미널 크기 문제 자동 진단 및 복구"),
             BotCommand("status", "📊 봇 및 tmux 세션 상태 확인"),
-            BotCommand("detection_status", "🎯 Working Detection 성능 확인"),
-            BotCommand("detection_trends", "📈 탐지 트렌드 분석"),
             BotCommand("help", "❓ 도움말 보기"),
             BotCommand("new_project", "🆕 새 Claude 프로젝트 생성")
         ]

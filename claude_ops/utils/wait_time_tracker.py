@@ -196,12 +196,16 @@ class WaitTimeTracker:
         return wait_time
     
     def has_completion_record(self, session_name: str) -> bool:
-        """Check if session has completion notification record that's still valid (< 24h)"""
-        if session_name not in self.completion_times:
-            return False
-        
-        wait_time = time.time() - self.completion_times[session_name]
-        return wait_time <= 24 * 3600  # Only consider valid if < 24 hours
+        """Check if session has ANY notification record (completion or waiting)"""
+        # Check if we have either completion time OR last notification time
+        has_completion = session_name in self.completion_times
+        has_notification = session_name in self.last_notification_time
+
+        # If we have any record of notifications being sent, return True
+        if has_completion or has_notification:
+            return True
+
+        return False
     
     def _get_fallback_wait_time(self, session_name: str) -> float:
         """

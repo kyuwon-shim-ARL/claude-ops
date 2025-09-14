@@ -254,32 +254,57 @@ class SessionStateAnalyzer:
     
     def _detect_working_state(self, screen_content: str) -> bool:
         """
-        CONSERVATIVE MODE: 보수적 작업 상태 감지
-        
-        사용자 피드백 반영: "esc to interrupt만 검출하고 나머지는 놓치는게 차라리 더 체감 오류가 적었어"
-        
-        새로운 접근:
-        1. 확실한 신호만 탐지 (false positive 최소화)
-        2. 놓친 케이스는 상세 로깅으로 학습
-        3. 데이터 기반 점진적 개선
+        FIXED PRIORITY: 'esc to interrupt' has absolute priority
+
+        Priority order:
+        1. FIRST check for 'esc to interrupt' → if found, return WORKING
+        2. THEN check for prompts → if found and no working patterns, return IDLE
+
+        This fixes the false completion notification bug where prompts
+        incorrectly override active work indicators.
         """
-        from .conservative_detector import conservative_detector
-        
-        # 세션명이 없으면 기본값 사용
-        session_name = getattr(self, '_current_session', 'unknown')
-        
-        # 보수적 탐지기 사용
-        context = conservative_detector.detect_working_state(session_name, screen_content)
-        
-        # 상세 로깅
-        if context.patterns_found:
-            logger.debug(f"🎯 WORKING detected: {context.reasoning}")
-        elif context.prompt_found:
-            logger.debug(f"⏸️ IDLE: {context.reasoning}")
-        else:
-            logger.debug(f"❓ IDLE (conservative): {context.reasoning}")
-        
-        return context.decision
+        if not screen_content:
+            return False
+
+        # PRIORITY 1: Check for 'esc to interrupt' FIRST (absolute priority)
+        if "esc to interrupt" in screen_content:
+            logger.debug("🎯 WORKING: 'esc to interrupt' detected")
+            return True
+
+        # Additional working patterns that also indicate active work
+        working_patterns = [
+            "Running…",                   # Bash command execution
+            "Thinking…",                  # Claude Code thinking/analyzing
+            "ctrl+b to run in background", # Background execution option
+            "Building",                   # Build process
+            "Testing",                    # Test execution
+            "Installing",                 # Package installation
+            "Processing",                 # General processing
+            "Analyzing",                  # Code analysis
+        ]
+
+        # Check for other working patterns
+        for pattern in working_patterns:
+            if pattern in screen_content:
+                logger.debug(f"🎯 WORKING: '{pattern}' detected")
+                return True
+
+        # Now check for prompts (only matters if no working patterns found)
+        lines = screen_content.split('\n')
+        for i in range(len(lines) - 1, max(len(lines) - 6, -1), -1):
+            line = lines[i]
+            stripped = line.strip()
+
+            if not stripped:
+                continue
+
+            # Check for various prompt patterns
+            if stripped in ['>', '│ >'] or line.endswith(('$ ', '> ', '❯ ')):
+                logger.debug("⏸️ IDLE: Prompt detected, no working patterns")
+                return False
+
+        # No working patterns and no clear prompt
+        return False
     
     def _detect_working_state_original(self, screen_content: str) -> bool:
         """
