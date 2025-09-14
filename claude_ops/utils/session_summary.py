@@ -469,7 +469,7 @@ class SessionSummaryHelper:
         
         # Add transparency notice if fallback is being used
         if fallback_count > 0:
-            message += f"⚠️ \\_추정\\_ 표시: Hook 미설정으로 {fallback_count}개 세션 시간 추정\n\n"
+            message += f"ℹ️ {fallback_count}개 세션: 첫 알림 대기 중 (세션 시작 시간 기준)\n\n"
         else:
             message += "\n"
         
@@ -492,7 +492,7 @@ class SessionSummaryHelper:
                 wait_str = self.format_wait_time(wait_time)
                 # Add transparency indicator for fallback estimates
                 if not has_record:
-                    message += f"🎯 **{display_name}** ({wait_str} 대기 ~추정~)\n"
+                    message += f"🎯 **{display_name}** ({wait_str} 대기 - 세션 시작 기준)\n"
                 else:
                     message += f"🎯 **{display_name}** ({wait_str} 대기)\n"
             

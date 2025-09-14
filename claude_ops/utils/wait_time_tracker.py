@@ -308,13 +308,14 @@ class WaitTimeTracker:
                 
             current_time = time.time()
             session_age = current_time - created_timestamp
-            
-            # Conservative estimate: assume completed relatively recently
-            # Use 80% of session age as estimated wait time (reasonable assumption)
-            estimated_wait = session_age * 0.8
-            
-            # Minimum 5 minutes to indicate this is an estimate
-            estimated_wait = max(300.0, estimated_wait)
+
+            # Use 100% of session age since tmux session creation is when Claude starts
+            # This gives more accurate wait time for first-time sessions
+            estimated_wait = session_age  # Use full time, not 80%
+
+            # No minimum enforced - show actual time even if < 5 minutes
+            # This is more accurate for recently created sessions
+            estimated_wait = max(0.0, estimated_wait)
             
             logger.info(f"Using fallback estimate for {session_name}: {estimated_wait:.0f}s (session age: {session_age:.0f}s)")
             return estimated_wait
