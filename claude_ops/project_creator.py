@@ -59,13 +59,34 @@ class ProjectCreator:
                 return self._error_result("Tmux session creation failed")
             
             # Success
+            success_message = f"✅ Project '{self.project_name}' created successfully!"
+            
+            # Add warning if git remote not configured
+            if self.results.get("git_remote_warning"):
+                success_message += "\n\n⚠️  IMPORTANT: Git remote not configured!"
+                success_message += "\n   Run: git remote add origin <your-repo-url>"
+                success_message += "\n   See GIT_REMOTE_NOT_SET.txt for details"
+            
             self.results.update({
                 "status": "success",
-                "message": f"✅ Project '{self.project_name}' created successfully!",
+                "message": success_message,
                 "created_at": datetime.now().isoformat()
             })
             
             logger.info(f"✅ Project creation completed: {self.project_name}")
+            
+            # Show prominent warning if remote not set
+            if self.results.get("git_remote_warning"):
+                logger.warning("=" * 60)
+                logger.warning("⚠️  GIT REMOTE NOT CONFIGURED - ACTION REQUIRED!")
+                logger.warning("=" * 60)
+                logger.warning("Your project was created but cannot be pushed to GitHub/GitLab.")
+                logger.warning("To fix this:")
+                logger.warning("  1. Create a repository on GitHub/GitLab")
+                logger.warning("  2. Run: git remote add origin <your-repo-url>")
+                logger.warning("  3. Push: git push -u origin main")
+                logger.warning("=" * 60)
+            
             return self.results
             
         except Exception as e:
@@ -128,6 +149,32 @@ Created: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
                 )
                 
                 logger.info("📦 Git repository initialized with .gitignore and initial commit")
+                
+                # Check for remote configuration
+                remote_check = subprocess.run(
+                    ["git", "remote", "-v"], 
+                    capture_output=True, 
+                    text=True,
+                    timeout=5
+                )
+                
+                if not remote_check.stdout.strip():
+                    # No remote configured - show warning
+                    logger.warning("⚠️  Git remote not configured!")
+                    logger.warning("   Set remote with: git remote add origin <your-repo-url>")
+                    logger.warning("   Example: git remote add origin git@github.com:USERNAME/REPO.git")
+                    
+                    # Create warning file in project directory
+                    self._create_git_remote_warning_file()
+                    
+                    # Install pre-push hook to verify remote
+                    self._install_pre_push_hook()
+                    
+                    self.results["git_remote_warning"] = True
+                else:
+                    logger.info(f"✅ Git remote configured: {remote_check.stdout.strip().split()[1]}")
+                    self.results["git_remote_configured"] = True
+                
                 self.results["git_initialized"] = True
                 return True
                 
@@ -411,6 +458,87 @@ mlruns/
                 return False
         
         return True
+    
+    def _create_git_remote_warning_file(self) -> None:
+        """Create warning file about git remote configuration"""
+        try:
+            warning_file = self.project_dir / "GIT_REMOTE_NOT_SET.txt"
+            warning_content = """⚠️  GIT REMOTE NOT CONFIGURED ⚠️
+=====================================
+
+Your Git repository has been initialized but NO REMOTE is configured.
+This means you cannot push your code to GitHub/GitLab/etc.
+
+TO FIX THIS:
+------------
+1. Create a repository on GitHub/GitLab/Bitbucket
+2. Add the remote URL to your local repository:
+   
+   git remote add origin <your-repo-url>
+   
+   Examples:
+   - GitHub SSH:   git remote add origin git@github.com:USERNAME/REPO.git
+   - GitHub HTTPS: git remote add origin https://github.com/USERNAME/REPO.git
+   - GitLab SSH:   git remote add origin git@gitlab.com:USERNAME/REPO.git
+
+3. Verify the remote is set:
+   git remote -v
+
+4. Push your code:
+   git push -u origin main
+
+⚠️  DELETE THIS FILE after setting up your remote ⚠️
+
+Note: A pre-push hook has been installed that will remind you
+      to set up the remote before your first push attempt.
+"""
+            warning_file.write_text(warning_content, encoding='utf-8')
+            logger.info(f"📝 Created git remote warning file: {warning_file.name}")
+        except Exception as e:
+            logger.error(f"Failed to create git remote warning file: {e}")
+    
+    def _install_pre_push_hook(self) -> None:
+        """Install pre-push hook to verify remote configuration"""
+        try:
+            hooks_dir = self.project_dir / ".git" / "hooks"
+            hooks_dir.mkdir(parents=True, exist_ok=True)
+            
+            pre_push_hook = hooks_dir / "pre-push"
+            hook_content = """#!/bin/bash
+# Pre-push hook to verify git remote configuration
+
+# Check if remote is configured
+if [ -z "$(git remote -v)" ]; then
+    echo "❌ ERROR: No git remote configured!"
+    echo ""
+    echo "You must set up a remote repository before pushing:"
+    echo "  git remote add origin <your-repo-url>"
+    echo ""
+    echo "Example:"
+    echo "  git remote add origin git@github.com:USERNAME/REPO.git"
+    echo ""
+    echo "After setting the remote, you can push with:"
+    echo "  git push -u origin main"
+    echo ""
+    exit 1
+fi
+
+# Check if warning file exists and remind to delete it
+if [ -f "GIT_REMOTE_NOT_SET.txt" ]; then
+    echo "⚠️  Reminder: Delete GIT_REMOTE_NOT_SET.txt after verifying remote setup"
+    echo ""
+fi
+
+exit 0
+"""
+            pre_push_hook.write_text(hook_content, encoding='utf-8')
+            
+            # Make hook executable
+            pre_push_hook.chmod(0o755)
+            
+            logger.info("🪝 Installed pre-push hook for remote verification")
+        except Exception as e:
+            logger.error(f"Failed to install pre-push hook: {e}")
     
     def _ensure_basic_structure(self) -> None:
         """Ensure basic directory structure exists"""
