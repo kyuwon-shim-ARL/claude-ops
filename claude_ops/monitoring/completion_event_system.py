@@ -141,7 +141,12 @@ class CompletionTimeRecorder:
         
         # Record completion time
         logger.info(f"📝 Recording completion for {event.session_name} (Event: {event.event_type.value})")
-        self.tracker.mark_completion(event.session_name)
+        # Use mark_completion_safe to handle session suffix changes properly
+        if hasattr(self.tracker, 'mark_completion_safe'):
+            self.tracker.mark_completion_safe(event.session_name)
+        else:
+            # Fallback for compatibility
+            self.tracker.mark_completion(event.session_name)
         self.last_recorded[event.session_name] = event.timestamp
 
 

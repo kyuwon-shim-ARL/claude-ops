@@ -171,6 +171,38 @@ class WaitTimeTracker:
         self.completion_times[session_name] = time.time()
         self._save_completions()
         logger.info(f"Marked completion time for {session_name}")
+
+    def mark_completion_safe(self, session_name: str):
+        """Mark completion with session name normalization to handle suffix changes
+        
+        This method ensures that when a session is recreated with a different suffix,
+        the old completion record is replaced with the new one, maintaining continuity.
+        
+        Args:
+            session_name: Current session name (may include suffix like -8, -29)
+        """
+        current_time = time.time()
+        base_name = self.normalize_session_name(session_name)
+        
+        # Enhanced logging for debugging
+        logger.info(f"🔔 Marking completion for: {session_name}")
+        logger.info(f"📊 Base name: {base_name}")
+        
+        # Check for existing records with same base name
+        updated = False
+        for existing_session in list(self.completion_times.keys()):
+            if self.normalize_session_name(existing_session) == base_name:
+                logger.info(f"🔄 Updating existing record: {existing_session} -> {session_name}")
+                del self.completion_times[existing_session]
+                updated = True
+                break
+        
+        # Add the new record
+        self.completion_times[session_name] = current_time
+        self._save_completions()
+        
+        action = "Updated" if updated else "Created"
+        logger.info(f"✅ {action} completion record for {session_name} at {current_time}")
     
     def get_wait_time_since_completion(self, session_name: str) -> float:
         """

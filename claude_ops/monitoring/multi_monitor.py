@@ -234,7 +234,12 @@ class MultiSessionMonitor:
     
     
     def send_completion_notification(self, session_name: str, task_completion: Optional[TaskCompletion] = None):
-        """Send work completion notification for a specific session with task details"""
+        """Send work completion notification for a specific session with task details
+        
+        Args:
+            session_name: The session to send notification for
+            task_completion: Optional task completion details
+        """
         try:
             # Temporarily switch to this session for notification context
             original_session = session_manager.get_active_session()
