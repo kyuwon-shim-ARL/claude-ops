@@ -31,9 +31,9 @@ Message: feat: enhance claude-dev-kit compatibility in project_creator
 ```
 
 ## 📁 관련 파일
-- `/home/kyuwon/claude-ops/claude_ops/project_creator.py`
-- `/home/kyuwon/claude-ops/tests/test_project_creator_claude_dev_kit_compat.py`
-- `/home/kyuwon/claude-ops/docs/archive/analysis-reports/claude-dev-kit-integration-failure-analysis-2025-09-11.md`
+- `/home/kyuwon/claude-ctb/claude_ctb/project_creator.py`
+- `/home/kyuwon/claude-ctb/tests/test_project_creator_claude_dev_kit_compat.py`
+- `/home/kyuwon/claude-ctb/docs/archive/analysis-reports/claude-dev-kit-integration-failure-analysis-2025-09-11.md`
 
 ## 🎯 달성 성과
 - ✅ `/new-project` 명령 정상 작동

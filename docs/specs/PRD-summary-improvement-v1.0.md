@@ -8,7 +8,7 @@
 
 ## 📋 Executive Summary
 
-Claude-Ops의 `/summary` 커맨드에서 발생하는 **대기시간 계산 오류**와 **비효율적인 정렬 순서** 문제를 해결하여 사용자 경험을 개선합니다. 현재 미래 타임스탬프 문제로 모든 세션이 "추정" 표시되며, 작업중 세션을 확인하기 위해 스크롤이 필요한 상황을 해결합니다.
+Claude-CTB의 `/summary` 커맨드에서 발생하는 **대기시간 계산 오류**와 **비효율적인 정렬 순서** 문제를 해결하여 사용자 경험을 개선합니다. 현재 미래 타임스탬프 문제로 모든 세션이 "추정" 표시되며, 작업중 세션을 확인하기 위해 스크롤이 필요한 상황을 해결합니다.
 
 ## 🎯 Product Vision
 
@@ -152,7 +152,7 @@ class SessionSummaryHelper:
 ```json
 {
   "claude_projects": 1756888756.0,  // 미래 타임스탬프!
-  "claude_claude-ops": 1756891750.6
+  "claude_claude-ctb": 1756891750.6
 }
 ```
 
@@ -160,7 +160,7 @@ class SessionSummaryHelper:
 ```json
 {
   "claude_projects": 1725373750.0,  // 현재 기준 과거 타임스탬프
-  "claude_claude-ops": 1725375550.0
+  "claude_claude-ctb": 1725375550.0
 }
 ```
 
@@ -248,15 +248,15 @@ class SessionSummaryHelper:
 ## 📝 Appendix
 
 ### Stakeholders
-- **Product Owner**: Claude-Ops 메인테이너
+- **Product Owner**: Claude-CTB 메인테이너
 - **Developers**: Python 개발팀
 - **QA**: 테스트 엔지니어
-- **Users**: Claude-Ops 사용자 커뮤니티
+- **Users**: Claude-CTB 사용자 커뮤니티
 
 ### References
-- [기존 기획서](/home/kyuwon/claude-ops/docs/CURRENT/planning.md)
-- [프로젝트 규칙](/home/kyuwon/claude-ops/docs/guides/project_rules.md)
-- [시스템 아키텍처](/home/kyuwon/claude-ops/CLAUDE.md)
+- [기존 기획서](/home/kyuwon/claude-ctb/docs/CURRENT/planning.md)
+- [프로젝트 규칙](/home/kyuwon/claude-ctb/docs/guides/project_rules.md)
+- [시스템 아키텍처](/home/kyuwon/claude-ctb/CLAUDE.md)
 
 ---
 

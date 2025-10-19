@@ -29,8 +29,8 @@ echo "📤 Sending completion notification for session: $SESSION_NAME"
 
 cd "$CLAUDE_OPS_DIR"
 CLAUDE_SESSION_NAME="$SESSION_NAME" python3 -c "
-from claude_ops.telegram.notifier import SmartNotifier
-from claude_ops.config import ClaudeOpsConfig
+from claude_ctb.telegram.notifier import SmartNotifier
+from claude_ctb.config import ClaudeOpsConfig
 import sys
 
 try:

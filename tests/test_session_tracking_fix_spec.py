@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 from unittest.mock import patch, MagicMock, call
 
-from claude_ops.utils.wait_time_tracker import WaitTimeTracker
+from claude_ctb.utils.wait_time_tracker import WaitTimeTracker
 
 
 class TestSessionTrackingFix(unittest.TestCase):
@@ -105,7 +105,7 @@ class TestSessionTrackingFix(unittest.TestCase):
     def test_notification_handler_integration(self):
         """Completion event system should use mark_completion_safe"""
         # Test the actual integration via event system
-        from claude_ops.monitoring.completion_event_system import (
+        from claude_ctb.monitoring.completion_event_system import (
             CompletionEventBus, CompletionEvent, CompletionEventType,
             CompletionTimeRecorder
         )
@@ -152,7 +152,7 @@ class TestSessionTrackingFix(unittest.TestCase):
         debug_log_path = "/tmp/claude_notification_debug.log"
         
         # Set up file handler
-        logger = logging.getLogger('claude_ops.utils.wait_time_tracker')
+        logger = logging.getLogger('claude_ctb.utils.wait_time_tracker')
         logger.setLevel(logging.INFO)  # Ensure logger level is also set
         handler = logging.FileHandler(debug_log_path, mode='w')
         handler.setLevel(logging.INFO)

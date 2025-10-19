@@ -3,8 +3,8 @@ Test to verify 'esc to interrupt' prevents false notifications
 """
 import unittest
 from unittest.mock import patch, MagicMock
-from claude_ops.utils.session_state import SessionStateAnalyzer, SessionState
-from claude_ops.monitoring.multi_monitor import MultiSessionMonitor
+from claude_ctb.utils.session_state import SessionStateAnalyzer, SessionState
+from claude_ctb.monitoring.multi_monitor import MultiSessionMonitor
 
 class TestEscInterruptNotificationBug(unittest.TestCase):
     """Test that 'esc to interrupt' prevents false completion notifications"""

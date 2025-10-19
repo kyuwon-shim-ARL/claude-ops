@@ -4,8 +4,8 @@ Tests for telegram message length limit improvements
 """
 import unittest
 from unittest.mock import patch, MagicMock, AsyncMock
-from claude_ops.telegram.bot import TelegramBridge
-from claude_ops.config import ClaudeOpsConfig
+from claude_ctb.telegram.bot import TelegramBridge
+from claude_ctb.config import ClaudeOpsConfig
 from telegram import Update, Message, User, Chat
 
 class TestTelegramMessageLimits(unittest.TestCase):
@@ -43,7 +43,7 @@ class TestTelegramMessageLimits(unittest.TestCase):
     def test_message_splitting_utility_exists(self):
         """메시지 분할 유틸리티 함수가 존재해야 함"""
         # This will fail initially - utility doesn't exist yet
-        from claude_ops.telegram.message_utils import split_long_message
+        from claude_ctb.telegram.message_utils import split_long_message
         
         long_text = "A" * 6000  # 6000 characters
         result = split_long_message(long_text, max_length=4000)
@@ -54,7 +54,7 @@ class TestTelegramMessageLimits(unittest.TestCase):
     
     def test_smart_message_splitting_preserves_lines(self):
         """스마트 분할이 줄바꿈을 기준으로 자연스럽게 분할해야 함"""
-        from claude_ops.telegram.message_utils import split_long_message
+        from claude_ctb.telegram.message_utils import split_long_message
         
         # Create a message with natural break points
         lines = []
@@ -71,7 +71,7 @@ class TestTelegramMessageLimits(unittest.TestCase):
     
     def test_markdown_preservation_in_split_messages(self):
         """분할된 메시지에서 마크다운 서식이 보존되어야 함"""
-        from claude_ops.telegram.message_utils import split_long_message
+        from claude_ctb.telegram.message_utils import split_long_message
         
         # Message with markdown formatting
         markdown_text = ""
@@ -87,7 +87,7 @@ class TestTelegramMessageLimits(unittest.TestCase):
             self.assertEqual(message.count("**") % 2, 0)  # Even number of **
             self.assertEqual(message.count("`") % 2, 0)  # Even number of `
     
-    @patch('claude_ops.session_manager.session_manager')
+    @patch('claude_ctb.session_manager.session_manager')
     async def test_sessions_command_handles_long_session_list(self, mock_session_manager):
         """긴 세션 목록에 대해 /sessions 명령어가 정상 동작해야 함"""
         # Create 30 sessions with long names
@@ -121,14 +121,14 @@ class TestTelegramMessageLimits(unittest.TestCase):
     def test_safe_send_message_function_exists(self):
         """안전한 메시지 전송 함수가 존재해야 함"""
         # This will fail initially - function doesn't exist yet
-        from claude_ops.telegram.message_utils import safe_send_message
+        from claude_ctb.telegram.message_utils import safe_send_message
         
         # Should be a callable function
         self.assertTrue(callable(safe_send_message))
     
     async def test_safe_send_message_auto_splits_long_content(self):
         """safe_send_message가 긴 내용을 자동으로 분할해야 함"""
-        from claude_ops.telegram.message_utils import safe_send_message
+        from claude_ctb.telegram.message_utils import safe_send_message
         
         long_content = "This is a very long message. " * 200  # ~6000 chars
         
@@ -180,7 +180,7 @@ class TestMessageUtilsIntegration(unittest.TestCase):
     def test_sessions_command_uses_safe_send(self):
         """sessions 명령어가 safe_send_message를 사용해야 함"""
         # This specific command was updated to use safe_send_message
-        from claude_ops.telegram.bot import TelegramBridge
+        from claude_ctb.telegram.bot import TelegramBridge
         import inspect
         
         # Check sessions_command specifically

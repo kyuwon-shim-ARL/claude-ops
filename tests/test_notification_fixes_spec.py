@@ -5,9 +5,9 @@ These tests are designed to FAIL until implementation is complete
 
 import pytest
 from unittest.mock import Mock, patch
-from claude_ops.utils.session_state import SessionStateAnalyzer, SessionState
-from claude_ops.utils.session_summary import SessionSummaryHelper
-from claude_ops.telegram.notifier import SmartNotifier
+from claude_ctb.utils.session_state import SessionStateAnalyzer, SessionState
+from claude_ctb.utils.session_summary import SessionSummaryHelper
+from claude_ctb.telegram.notifier import SmartNotifier
 
 
 class TestEscInterruptPriority:
@@ -143,7 +143,7 @@ class TestSimplifiedNotifications:
         no priority levels or other types
         """
         # Given: Notification manager
-        from claude_ops.config import Config
+        from claude_ctb.config import Config
         config = Config()
         notifier = SmartNotifier(config)
 
@@ -174,7 +174,7 @@ class TestSimplifiedNotifications:
         without priority indicators or levels
         """
         # Given: A work completion scenario
-        from claude_ops.config import Config
+        from claude_ctb.config import Config
         config = Config()
         notifier = SmartNotifier(config)
 
@@ -204,7 +204,7 @@ class TestBotCommandCleanup:
         User Story: When user tries to use removed commands,
         they should get an error message, not silent failure
         """
-        from claude_ops.telegram.bot import TelegramBot
+        from claude_ctb.telegram.bot import TelegramBot
 
         # Given: Bot instance
         bot = TelegramBot()
@@ -223,7 +223,7 @@ class TestBotCommandCleanup:
         """
         User Story: Essential commands should continue to work after cleanup
         """
-        from claude_ops.telegram.bot import TelegramBot
+        from claude_ctb.telegram.bot import TelegramBot
 
         # Given: Bot instance
         bot = TelegramBot()
@@ -248,7 +248,7 @@ class TestIntegrationScenarios:
         no false completion notifications should be sent
         """
         # Given: A monitoring session for active Claude work
-        from claude_ops.monitoring.multi_monitor import MultiSessionMonitor
+        from claude_ctb.monitoring.multi_monitor import MultiSessionMonitor
 
         monitor = MultiSessionMonitor()
         session_name = "claude_test"

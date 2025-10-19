@@ -10,9 +10,9 @@ Tests the enhanced detection patterns for:
 import pytest
 import time
 from unittest.mock import Mock, patch, MagicMock
-from claude_ops.utils.session_state import SessionStateAnalyzer, SessionState
-from claude_ops.monitoring.multi_monitor import MultiSessionMonitor
-from claude_ops.utils.notification_debugger import NotificationDebugger, NotificationEvent
+from claude_ctb.utils.session_state import SessionStateAnalyzer, SessionState
+from claude_ctb.monitoring.multi_monitor import MultiSessionMonitor
+from claude_ctb.utils.notification_debugger import NotificationDebugger, NotificationEvent
 
 
 class TestQuietCompletionDetection:
@@ -131,8 +131,8 @@ class TestCompletionMessageDetection:
 class TestEnhancedNotificationLogic:
     """Test the enhanced notification trigger logic"""
     
-    @patch('claude_ops.monitoring.multi_monitor.subprocess.run')
-    @patch('claude_ops.monitoring.multi_monitor.os.system')
+    @patch('claude_ctb.monitoring.multi_monitor.subprocess.run')
+    @patch('claude_ctb.monitoring.multi_monitor.os.system')
     def test_quiet_completion_triggers_notification(self, mock_system, mock_run):
         """Test that quiet completions trigger notifications"""
         monitor = MultiSessionMonitor()
@@ -156,7 +156,7 @@ class TestEnhancedNotificationLogic:
                 # Should trigger notification for quiet completion
                 assert result == True
     
-    @patch('claude_ops.monitoring.multi_monitor.subprocess.run')
+    @patch('claude_ctb.monitoring.multi_monitor.subprocess.run')
     def test_completion_message_triggers_notification(self, mock_run):
         """Test that completion messages trigger notifications"""
         monitor = MultiSessionMonitor()
@@ -249,8 +249,8 @@ class TestNotificationDebugger:
 class TestIntegration:
     """Integration tests for the complete notification system"""
     
-    @patch('claude_ops.monitoring.multi_monitor.subprocess.run')
-    @patch('claude_ops.monitoring.multi_monitor.os.system')
+    @patch('claude_ctb.monitoring.multi_monitor.subprocess.run')
+    @patch('claude_ctb.monitoring.multi_monitor.os.system')
     def test_full_workflow_quiet_completion(self, mock_system, mock_run):
         """Test complete workflow for quiet completion detection"""
         monitor = MultiSessionMonitor()

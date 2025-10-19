@@ -1,8 +1,8 @@
-# Claude-Ops 텔레그램 봇 수정 및 Reply 파싱 개선 튜토리얼
+# Claude-CTB 텔레그램 봇 수정 및 Reply 파싱 개선 튜토리얼
 
 ## 개요
 
-Claude-Ops 시스템에서 텔레그램 입력 전송 기능이 작동하지 않는 문제와 Reply 기능 파싱 오류를 해결하는 과정입니다.
+Claude-CTB 시스템에서 텔레그램 입력 전송 기능이 작동하지 않는 문제와 Reply 기능 파싱 오류를 해결하는 과정입니다.
 
 ## 문제 증상
 
@@ -47,7 +47,7 @@ ls scripts/start_telegram_bridge.sh
 
 #### start_monitoring() 함수 수정
 ```bash
-# scripts/claude-ops.sh 수정
+# scripts/claude-ctb.sh 수정
 start_monitoring() {
     # ... 기존 모니터링 로직 ...
     
@@ -55,7 +55,7 @@ start_monitoring() {
     if ! tmux has-session -t telegram-bot 2>/dev/null; then
         printf "${GREEN}Starting Telegram Bot...${NC}\n"
         tmux new-session -d -s telegram-bot \
-            "cd $(pwd) && uv run python -m claude_ops.telegram.bot"
+            "cd $(pwd) && uv run python -m claude_ctb.telegram.bot"
         sleep 2
         
         if tmux has-session -t telegram-bot 2>/dev/null; then
@@ -85,7 +85,7 @@ stop_monitoring() {
 
 #### 현재 알림 메시지 형식 확인
 ```python
-# claude_ops/telegram/notifier.py에서 확인
+# claude_ctb/telegram/notifier.py에서 확인
 message = f"""✅ **작업 완료** [`{session_name}`]
 
 📁 **프로젝트**: `{working_dir}`
@@ -99,7 +99,7 @@ message = f"""✅ **작업 완료** [`{session_name}`]
 
 #### 파싱 패턴 개선
 ```python
-# claude_ops/telegram/bot.py 수정
+# claude_ctb/telegram/bot.py 수정
 def extract_session_from_message(self, message_text: str) -> Optional[str]:
     patterns = [
         r'\*\*🎯 세션 이름\*\*: `([^`]+)`',  # From start command
@@ -149,9 +149,9 @@ show_status() {
 # 테스트 스크립트로 패턴 검증
 test_messages = [
     # Current notification format
-    """✅ **작업 완료** [`claude_claude-ops`]
-📁 **프로젝트**: `/home/kyuwon/claude-ops`
-🎯 **세션**: `claude_claude-ops`
+    """✅ **작업 완료** [`claude_claude-ctb`]
+📁 **프로젝트**: `/home/kyuwon/claude-ctb`
+🎯 **세션**: `claude_claude-ctb`
 ⏰ **완료 시간**: 13:40:30
 Claude가 작업을 완료했습니다.
 💡 **답장하려면** 이 메시지에 Reply로 응답하세요!""",
@@ -168,9 +168,9 @@ Claude가 작업을 완료했습니다.
 
 ```python
 # 테스트 알림 전송
-test_message = """✅ **작업 완료** [`claude_claude-ops`]
-📁 **프로젝트**: `/home/kyuwon/claude-ops`
-🎯 **세션**: `claude_claude-ops`
+test_message = """✅ **작업 완료** [`claude_claude-ctb`]
+📁 **프로젝트**: `/home/kyuwon/claude-ctb`
+🎯 **세션**: `claude_claude-ctb`
 ⏰ **완료 시간**: 13:45:00
 🧪 **테스트 알림**: Reply 파싱 테스트용 메시지입니다.
 💡 **답장하려면** 이 메시지에 Reply로 응답하세요!"""
@@ -181,17 +181,17 @@ test_message = """✅ **작업 완료** [`claude_claude-ops`]
 ```bash
 # 텔레그램 봇 로그에서 확인된 정상 동작
 2025-08-01 13:45:24,919 - __main__ - INFO - 사용자 985052105로부터 입력 수신: 여기로 보내지나보자...
-2025-08-01 13:45:24,919 - __main__ - INFO - 📍 Reply 기반 세션 타겟팅: claude_claude-ops
-2025-08-01 13:45:24,930 - __main__ - INFO - 성공적으로 전송됨: 여기로 보내지나보자 -> claude_claude-ops
+2025-08-01 13:45:24,919 - __main__ - INFO - 📍 Reply 기반 세션 타겟팅: claude_claude-ctb
+2025-08-01 13:45:24,930 - __main__ - INFO - 성공적으로 전송됨: 여기로 보내지나보자 -> claude_claude-ctb
 ```
 
 ## 최종 동작 확인
 
 ### 통합 서비스 상태
 ```bash
-claude-ops status
+claude-ctb status
 
-📊 Claude-Ops Status
+📊 Claude-CTB Status
 
 Monitoring:
   ✅ Multi-session monitoring: Running
@@ -200,16 +200,16 @@ Monitoring:
 Claude Sessions:
   🎯 claude-multi-monitor  
   🎯 claude_PaperFlow
-  🎯 claude_claude-ops
+  🎯 claude_claude-ctb
 ```
 
 ### 서비스 제어
 ```bash
 # 모든 서비스 시작 (모니터링 + 텔레그램 봇)
-claude-ops start-monitoring
+claude-ctb start-monitoring
 
 # 모든 서비스 중지
-claude-ops stop-monitoring
+claude-ctb stop-monitoring
 ```
 
 ## 핵심 개선사항
@@ -229,13 +229,13 @@ claude-ops stop-monitoring
 ## 사용법
 
 ### 기본 사용
-1. `claude-ops start-monitoring`로 모든 서비스 시작
+1. `claude-ctb start-monitoring`로 모든 서비스 시작
 2. 텔레그램에서 작업 완료 알림 수신
 3. 알림 메시지에 Reply로 답장하여 해당 세션에 명령 전달
 
 ### 문제 해결
-- **봇 미실행**: `claude-ops status`로 상태 확인 후 `claude-ops start-monitoring` 재실행
+- **봇 미실행**: `claude-ctb status`로 상태 확인 후 `claude-ctb start-monitoring` 재실행
 - **세션 타겟팅 실패**: 알림 메시지에 올바른 세션명이 포함되어 있는지 확인
 - **연결 문제**: `tmux attach -t telegram-bot`로 봇 로그 직접 확인
 
-이제 Claude-Ops의 텔레그램 통합이 완전히 복구되어 다중 세션 환경에서 정확한 Reply 기반 제어가 가능합니다.
+이제 Claude-CTB의 텔레그램 통합이 완전히 복구되어 다중 세션 환경에서 정확한 Reply 기반 제어가 가능합니다.

@@ -1,4 +1,4 @@
-# 🎯 Claude-Ops 알림 시스템 최종 솔루션
+# 🎯 Claude-CTB 알림 시스템 최종 솔루션
 
 ## 📊 Executive Summary
 

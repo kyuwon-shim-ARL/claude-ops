@@ -17,7 +17,7 @@ claude_SMILES_property_webapp-4
 claude_UMT_opt-16
 claude_claude-dev-kit-1
 claude_urban-microbiome-toolkit-5
-claude_claude-ops-2
+claude_claude-ctb-2
 ```
 
 **저장된 completion_times:**
@@ -37,7 +37,7 @@ claude_claude-ops-2
   "claude_simple_smiles_PCA_PRD_refine-8",
   "claude_claude-dev-kit-1",
   "claude_urban-microbiome-toolkit-5",
-  "claude_claude-ops-2",
+  "claude_claude-ctb-2",
   "claude_UMT_opt-16"
 ]
 ```
@@ -165,7 +165,7 @@ class NotificationHistory:
 - **운영 효율성**: 세션 관리 간소화
 
 ## 🔗 관련 파일
-- `claude_ops/utils/wait_time_tracker.py:198-207` - has_completion_record()
-- `claude_ops/utils/session_summary.py:493-497` - 추정 표시 로직
+- `claude_ctb/utils/wait_time_tracker.py:198-207` - has_completion_record()
+- `claude_ctb/utils/session_summary.py:493-497` - 추정 표시 로직
 - `/tmp/claude_completion_times.json` - 알림 시간 저장소
-- `/tmp/claude_ops_active_session.json` - 세션 이력
+- `/tmp/claude_ctb_active_session.json` - 세션 이력

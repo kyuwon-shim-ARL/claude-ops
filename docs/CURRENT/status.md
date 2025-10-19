@@ -1,4 +1,4 @@
-# Current System Status - Claude-Ops
+# Current System Status - Claude-CTB
 
 **Last Updated**: 2025-09-11 11:30:00
 **Version**: v2.2.0 (Claude-Dev-Kit Enhanced Compatibility)
@@ -74,7 +74,7 @@ Currently no active development tasks. System is in stable operational state.
 ### Component Integration
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Telegram      │◄──►│   Claude-Ops    │◄──►│  Claude Code    │
+│   Telegram      │◄──►│   Claude-CTB    │◄──►│  Claude Code    │
 │     Bot         │    │     Bridge      │    │   Sessions      │
 │   (Running)     │    │   (Stable)      │    │  (Multi-Sess)   │
 └─────────────────┘    └─────────────────┘    └─────────────────┘

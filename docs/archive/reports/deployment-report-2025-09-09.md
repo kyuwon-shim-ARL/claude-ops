@@ -1,7 +1,7 @@
-# 🚀 Deployment Report - Claude-Ops v2.0.2
+# 🚀 Deployment Report - Claude-CTB v2.0.2
 
 **Deployment Date**: 2025-09-09  
-**Project**: Claude-Ops Telegram Bridge System  
+**Project**: Claude-CTB Telegram Bridge System  
 **Version**: v2.0.2 → v2.0.2 (Post-Cleanup Deployment)
 
 ---
@@ -25,7 +25,7 @@
 + docs/archive/reports/           # Moved test and weekly reports  
 + repository-cleanup-report.md    # Comprehensive cleanup documentation
 ~ .gitignore                     # Enhanced with debug patterns
-~ scripts/claude-ops.sh          # Updated with latest changes
+~ scripts/claude-ctb.sh          # Updated with latest changes
 ```
 
 ### 2. Notification System Fixes

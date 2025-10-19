@@ -1,6 +1,6 @@
 # 🎯 알림 감지 시스템 개선 계획
 
-**프로젝트**: Claude-Ops Notification Detection Enhancement  
+**프로젝트**: Claude-CTB Notification Detection Enhancement  
 **생성일**: 2025-09-09  
 **버전**: 1.0.0  
 **목적**: 조용히 완료되는 작업 및 엣지 케이스 알림 감지 개선

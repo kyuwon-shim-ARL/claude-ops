@@ -60,10 +60,10 @@ else:
 ### 구현 변경사항
 
 #### 수정된 파일
-1. **`claude_ops/telegram/bot.py`**
+1. **`claude_ctb/telegram/bot.py`**
    - `_switch_to_session()` 메서드에 길이 체크 및 분할 로직 추가
 
-2. **`claude_ops/telegram/message_utils.py`**
+2. **`claude_ctb/telegram/message_utils.py`**
    - `safe_send_message()` 개선 - reply_markup 처리
    - 제한값 5000 → 4000 조정
    - 마지막 메시지에만 버튼 표시
@@ -99,9 +99,9 @@ else:
 - 없음 (기존 기능 유지하며 개선만 추가)
 
 ## 🔗 관련 파일
-- `/home/kyuwon/claude-ops/claude_ops/telegram/bot.py`
-- `/home/kyuwon/claude-ops/claude_ops/telegram/message_utils.py`
-- `/home/kyuwon/claude-ops/tests/test_telegram_message_limits.py`
+- `/home/kyuwon/claude-ctb/claude_ctb/telegram/bot.py`
+- `/home/kyuwon/claude-ctb/claude_ctb/telegram/message_utils.py`
+- `/home/kyuwon/claude-ctb/tests/test_telegram_message_limits.py`
 
 ## ✅ 권장 조치
 1. **즉시 배포**: 사용자 경험 즉시 개선

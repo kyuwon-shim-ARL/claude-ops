@@ -1,23 +1,23 @@
-# Claude-Ops 모니터링 시작 오류 해결 - 대화 흐름 기록
+# Claude-CTB 모니터링 시작 오류 해결 - 대화 흐름 기록
 
 ## 세션 정보
 
 - **날짜**: 2025-08-01
 - **시간**: 11:10 KST
-- **프로젝트**: claude-ops
+- **프로젝트**: claude-ctb
 - **주제**: 모니터링 서비스 시작 타임아웃 오류 해결
 - **Git 브랜치**: main
 - **작업자**: kyuwon@arl
 
 ## 문제 상황
 
-사용자가 `claude-ops start-monitoring` 명령을 실행했으나 2분 타임아웃으로 실패하는 상황이 발생했습니다.
+사용자가 `claude-ctb start-monitoring` 명령을 실행했으나 2분 타임아웃으로 실패하는 상황이 발생했습니다.
 
 ## 대화 흐름 및 의사결정 과정
 
 ### 1. 초기 문제 진단 (11:10)
 
-**사용자 요청**: `claude-ops start-monitoring` 실행 요청
+**사용자 요청**: `claude-ctb start-monitoring` 실행 요청
 
 **AI 접근법**:
 - 직접 명령 실행을 시도
@@ -41,7 +41,7 @@
 
 **AI 결정**: 직접 tmux 세션 생성
 ```bash
-tmux new-session -d -s claude-multi-monitor "uv run python -m claude_ops.telegram.multi_monitor"
+tmux new-session -d -s claude-multi-monitor "uv run python -m claude_ctb.telegram.multi_monitor"
 ```
 
 **결과**: 임시적으로 성공했지만 근본 원인 해결이 필요
@@ -51,7 +51,7 @@ tmux new-session -d -s claude-multi-monitor "uv run python -m claude_ops.telegra
 **사용자 질문**: "뭐가 문제였던거야? 이런일이 생기지 않으려면 무엇을 고쳐야해?"
 
 **AI 분석 접근**:
-- 스크립트 호출 구조 분석 (`claude-ops.sh` → `start_multi_monitoring.sh`)
+- 스크립트 호출 구조 분석 (`claude-ctb.sh` → `start_multi_monitoring.sh`)
 - 백그라운드 프로세스 대기 방식의 문제점 파악
 - 타임아웃 발생 메커니즘 이해
 
@@ -85,7 +85,7 @@ d) **디버깅**: `bash -x` 옵션으로 스크립트 실행 과정 추적
 - 환경변수 로딩과 에러 핸들링의 불안정성
 - 디버깅과 유지보수의 어려움
 
-**최종 접근**: `claude-ops.sh`의 `start_monitoring()` 함수에 모든 로직 통합
+**최종 접근**: `claude-ctb.sh`의 `start_monitoring()` 함수에 모든 로직 통합
 
 ### 8. 구현 및 테스트 (11:22)
 
@@ -102,7 +102,7 @@ d) **디버깅**: `bash -x` 옵션으로 스크립트 실행 과정 추적
 
 **최종 확인**:
 ```bash
-claude-ops status
+claude-ctb status
 # 결과: ✅ Multi-session monitoring: Running
 ```
 

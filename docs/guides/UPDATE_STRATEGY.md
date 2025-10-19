@@ -1,8 +1,8 @@
-# Update Deployment Strategy for Claude-Ops
+# Update Deployment Strategy for Claude-CTB
 
 ## Overview
 
-This document outlines the strategy for deploying updates to multiple Claude-Ops users (~10 team members) while maintaining stability and minimizing disruption.
+This document outlines the strategy for deploying updates to multiple Claude-CTB users (~10 team members) while maintaining stability and minimizing disruption.
 
 ## 🎯 Update Philosophy
 
@@ -100,9 +100,9 @@ uv sync
 ### Update Notifications
 
 #### Telegram Channel (Recommended)
-Create a dedicated Claude-Ops updates channel:
+Create a dedicated Claude-CTB updates channel:
 ```
-Claude-Ops Updates Channel
+Claude-CTB Updates Channel
 - Release announcements
 - Breaking changes warnings
 - Tips and best practices
@@ -115,7 +115,7 @@ For teams preferring email:
 
 ### Update Message Template
 ```markdown
-🚀 Claude-Ops Update Available: v2.1.0
+🚀 Claude-CTB Update Available: v2.1.0
 
 **Type**: [Feature/Bugfix/Security]
 **Priority**: [Low/Medium/High/Critical]
@@ -188,7 +188,7 @@ Create `scripts/check-updates.sh` for users:
 #!/bin/bash
 
 # Check for updates
-echo "Checking for Claude-Ops updates..."
+echo "Checking for Claude-CTB updates..."
 
 # Fetch latest tags
 git fetch --tags
@@ -245,8 +245,8 @@ import json
 
 def check_user_versions():
     users = [
-        {"name": "User1", "repo": "/path/to/user1/claude-ops"},
-        {"name": "User2", "repo": "/path/to/user2/claude-ops"},
+        {"name": "User1", "repo": "/path/to/user1/claude-ctb"},
+        {"name": "User2", "repo": "/path/to/user2/claude-ctb"},
         # Add all users
     ]
     
@@ -309,7 +309,7 @@ python scripts/migrate_config.py config.json.backup
 
 ### 4. Verify and Test
 ```bash
-uv run python -m claude_ops.telegram.bot --test
+uv run python -m claude_ctb.telegram.bot --test
 ```
 ```
 

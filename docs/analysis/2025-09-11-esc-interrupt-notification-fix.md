@@ -42,7 +42,7 @@ esc to interrupt
 ## 🛠️ 해결 방안
 
 ### 수정 내용
-`claude_ops/utils/session_state.py`의 `detect_quiet_completion()`:
+`claude_ctb/utils/session_state.py`의 `detect_quiet_completion()`:
 
 ```python
 def detect_quiet_completion(self, session_name: str) -> bool:

@@ -4,7 +4,7 @@ Tests for context window remaining display in summary command
 """
 import unittest
 from unittest.mock import patch, MagicMock
-from claude_ops.utils.session_summary import SessionSummaryHelper
+from claude_ctb.utils.session_summary import SessionSummaryHelper
 
 class TestContextDisplaySpec(unittest.TestCase):
     """컨텍스트 잔량 표시 기능 테스트 스펙"""

@@ -132,9 +132,9 @@ graph TD
 ```
 
 ## 💾 관련 파일
-- 핵심 로직: `claude_ops/utils/session_summary.py`
-- 시간 추적: `claude_ops/utils/wait_time_tracker_v2.py`
-- UI 구현: `claude_ops/telegram/bot.py`
+- 핵심 로직: `claude_ctb/utils/session_summary.py`
+- 시간 추적: `claude_ctb/utils/wait_time_tracker_v2.py`
+- UI 구현: `claude_ctb/telegram/bot.py`
 - 데이터 저장: `/tmp/claude_completion_times.json`
 
 ## 🔗 관련 분석

@@ -8,8 +8,8 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 import pytest
 
-from claude_ops.utils.wait_time_tracker import WaitTimeTracker
-from claude_ops.utils.session_summary import SessionSummaryHelper
+from claude_ctb.utils.wait_time_tracker import WaitTimeTracker
+from claude_ctb.utils.session_summary import SessionSummaryHelper
 
 
 class TestTimestampValidation:
@@ -200,8 +200,8 @@ class TestSortingLogic:
 class TestIntegration:
     """Integration tests for the complete improvement"""
     
-    @patch('claude_ops.utils.session_summary.session_manager.get_all_claude_sessions')
-    @patch('claude_ops.utils.session_summary.SessionStateAnalyzer.get_state_for_notification')
+    @patch('claude_ctb.utils.session_summary.session_manager.get_all_claude_sessions')
+    @patch('claude_ctb.utils.session_summary.SessionStateAnalyzer.get_state_for_notification')
     def test_summary_with_corrected_timestamps(self, mock_get_state, mock_get_sessions, tmp_path):
         """Test complete flow with timestamp correction and new sorting"""
         # Setup mock sessions
@@ -212,7 +212,7 @@ class TestIntegration:
         ]
         
         # Mock states
-        from claude_ops.utils.session_state import SessionState
+        from claude_ctb.utils.session_state import SessionState
         def get_state_side_effect(session_name):
             if "working" in session_name:
                 return SessionState.WORKING

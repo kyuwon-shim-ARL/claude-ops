@@ -1,4 +1,4 @@
-# Claude-Ops 업데이트 로드맵: MCP & Sub-Agent 통합
+# Claude-CTB 업데이트 로드맵: MCP & Sub-Agent 통합
 
 ## 📋 현재 상태 분석
 

@@ -7,7 +7,7 @@ from previous operations but Claude is actually at a prompt (not working).
 """
 
 import pytest
-from claude_ops.utils.session_state import SessionStateAnalyzer, SessionState
+from claude_ctb.utils.session_state import SessionStateAnalyzer, SessionState
 
 
 class TestEscInterruptFalsePositiveFix:

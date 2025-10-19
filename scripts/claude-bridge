@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# Claude-Telegram-Bridge CLI (Medium alias: claude-bridge)
+# This is an alias for claude-ops.sh with a more descriptive name
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Execute the main script
+exec "$SCRIPT_DIR/claude-ops.sh" "$@"

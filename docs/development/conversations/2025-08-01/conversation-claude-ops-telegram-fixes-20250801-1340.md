@@ -1,10 +1,10 @@
-# Claude-Ops 텔레그램 봇 수정 및 Reply 파싱 개선 - 대화 흐름 기록
+# Claude-CTB 텔레그램 봇 수정 및 Reply 파싱 개선 - 대화 흐름 기록
 
 ## 세션 정보
 
 - **날짜**: 2025-08-01
 - **시간**: 13:40 KST
-- **프로젝트**: claude-ops
+- **프로젝트**: claude-ctb
 - **주제**: 텔레그램 봇 실행 문제 및 Reply 파싱 오류 해결
 - **Git 브랜치**: main
 - **작업자**: kyuwon@arl
@@ -57,20 +57,20 @@
 
 **AI 조치**: 수정 전 임시로 텔레그램 봇 시작
 ```bash
-tmux new-session -d -s telegram-bot "uv run python -m claude_ops.telegram.bot"
+tmux new-session -d -s telegram-bot "uv run python -m claude_ctb.telegram.bot"
 ```
 
 **새로운 문제 발견**: 세션 이름 파싱 오류
-- 로그: `📍 Reply 기반 세션 타겟팅: claude_claude-ops` (올바름)
-- 하지만 이전에는 `claude_`claude_claude-ops`` 형태로 잘못 파싱됨
+- 로그: `📍 Reply 기반 세션 타겟팅: claude_claude-ctb` (올바름)
+- 하지만 이전에는 `claude_`claude_claude-ctb`` 형태로 잘못 파싱됨
 
 ### 5. Reply 파싱 문제 심화 분석 (13:44)
 
 **사용자 보고**: "telegram 의 reply 기능으로 답장을 하면 파싱이 제대로 안되더라고, 확인 가능해?"
 
 **AI 분석 접근**:
-- 텔레그램 알림 메시지 형식 확인 (`claude_ops/telegram/notifier.py`)
-- 파싱 패턴 검토 (`claude_ops/telegram/bot.py`)
+- 텔레그램 알림 메시지 형식 확인 (`claude_ctb/telegram/notifier.py`)
+- 파싱 패턴 검토 (`claude_ctb/telegram/bot.py`)
 - 실제 알림 메시지와 패턴 불일치 발견
 
 **핵심 문제**:
@@ -101,8 +101,8 @@ r'🎯 \*\*세션\*\*: `([^`]+)`',  # From notification (with markdown bold)
 
 **결과 검증**:
 ```
-2025-08-01 13:45:24,919 - __main__ - INFO - 📍 Reply 기반 세션 타겟팅: claude_claude-ops
-2025-08-01 13:45:24,930 - __main__ - INFO - 성공적으로 전송됨: 여기로 보내지나보자 -> claude_claude-ops
+2025-08-01 13:45:24,919 - __main__ - INFO - 📍 Reply 기반 세션 타겟팅: claude_claude-ctb
+2025-08-01 13:45:24,930 - __main__ - INFO - 성공적으로 전송됨: 여기로 보내지나보자 -> claude_claude-ctb
 ```
 
 ## 주요 의사결정 포인트
@@ -150,13 +150,13 @@ r'🎯 \*\*세션\*\*: `([^`]+)`',  # From notification (with markdown bold)
 
 ### 통합 서비스 관리
 ```bash
-claude-ops start-monitoring
+claude-ctb start-monitoring
 # → 멀티 세션 모니터링 + 텔레그램 봇 동시 시작
 
-claude-ops stop-monitoring  
+claude-ctb stop-monitoring  
 # → 모든 서비스 동시 중지
 
-claude-ops status
+claude-ctb status
 # → 모든 서비스 상태 통합 표시
 ```
 

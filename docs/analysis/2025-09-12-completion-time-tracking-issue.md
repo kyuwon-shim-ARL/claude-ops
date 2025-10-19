@@ -16,7 +16,7 @@
 {
   "claude_simple_funcscan_test_run-90": 1757603682.2774467,  // 46분 전
   "claude_urban-microbiome-toolkit-5": 1757658785.4075875,   // 5분 전
-  "claude_claude-ops-2": 1757659079.496795                   // 방금 (삭제됨?)
+  "claude_claude-ctb-2": 1757659079.496795                   // 방금 (삭제됨?)
 }
 ```
 
@@ -98,9 +98,9 @@ def should_send_completion_notification(self, session_name: str):
    - 히스토리 기반 재구성
 
 ## 💾 관련 파일
-- 핵심 문제: `/home/kyuwon/claude-ops/claude_ops/monitoring/multi_monitor.py:234-239`
-- 중복 감지: `/home/kyuwon/claude-ops/claude_ops/telegram/notifier.py:299-301`
-- 트래커: `/home/kyuwon/claude-ops/claude_ops/utils/wait_time_tracker_v2.py`
+- 핵심 문제: `/home/kyuwon/claude-ctb/claude_ctb/monitoring/multi_monitor.py:234-239`
+- 중복 감지: `/home/kyuwon/claude-ctb/claude_ctb/telegram/notifier.py:299-301`
+- 트래커: `/home/kyuwon/claude-ctb/claude_ctb/utils/wait_time_tracker_v2.py`
 - 데이터: `/tmp/claude_completion_times.json`
 
 ## 🎯 액션 아이템

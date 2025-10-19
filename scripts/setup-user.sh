@@ -235,7 +235,7 @@ setup_hooks() {
         print_success "Claude Code hooks configured"
     else
         # Fallback to Python module
-        uv run python -m claude_ops.hook_manager setup
+        uv run python -m claude_ctb.hook_manager setup
         print_success "Claude Code hooks configured via Python"
     fi
     echo
@@ -247,7 +247,7 @@ test_bot() {
     
     # Start bot in test mode
     print_info "Starting bot for testing (will run for 10 seconds)..."
-    timeout 10 uv run python -m claude_ops.telegram.bot 2>&1 | head -20 &
+    timeout 10 uv run python -m claude_ctb.telegram.bot 2>&1 | head -20 &
     
     sleep 5
     
@@ -265,7 +265,7 @@ create_test_project() {
         project_name=${project_name:-test-app}
         
         print_step "Creating test project: $project_name"
-        uv run python -m claude_ops.project_creator "$project_name"
+        uv run python -m claude_ctb.project_creator "$project_name"
         
         print_success "Test project created!"
         print_info "Session name: claude_$project_name"
@@ -290,11 +290,11 @@ NC='\033[0m'
 echo -e "${BLUE}Starting Claude-Ops...${NC}"
 
 # Check if already running
-if pgrep -f "claude_ops.telegram.bot" > /dev/null; then
+if pgrep -f "claude_ctb.telegram.bot" > /dev/null; then
     echo -e "${GREEN}Claude-Ops bot is already running${NC}"
 else
     # Start in tmux session
-    tmux new -d -s claude-ops-bot 'uv run python -m claude_ops.telegram.bot'
+    tmux new -d -s claude-ops-bot 'uv run python -m claude_ctb.telegram.bot'
     echo -e "${GREEN}Claude-Ops bot started in tmux session 'claude-ops-bot'${NC}"
 fi
 
@@ -313,7 +313,7 @@ main() {
     echo
     
     # Verify we're in the right directory
-    if [ ! -f "pyproject.toml" ] || [ ! -d "claude_ops" ]; then
+    if [ ! -f "pyproject.toml" ] || [ ! -d "claude_ctb" ]; then
         print_error "This script must be run from the claude-ops directory"
         print_info "Please cd to claude-ops directory and run again"
         exit 1

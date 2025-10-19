@@ -136,7 +136,7 @@ def mark_completion(session_name):
 
 ```bash
 # 현재 세션에서 완료 알림 발생 시 로그 확인
-tail -f /var/log/claude-ops/notifications.log | grep "mark_completion"
+tail -f /var/log/claude-ctb/notifications.log | grep "mark_completion"
 
 # 또는 실시간 모니터링
 tmux attach -t claude-multi-monitor
@@ -154,6 +154,6 @@ tmux attach -t claude-multi-monitor
 **우선 조치**: 알림 발생 시점의 세션명 로깅을 강화하여 정확한 원인 파악 필요
 
 ## 🔗 관련 파일
-- `claude_ops/utils/wait_time_tracker.py:168-173` - mark_completion()
-- `claude_ops/monitoring/multi_monitor.py` - 알림 발생 로직
+- `claude_ctb/utils/wait_time_tracker.py:168-173` - mark_completion()
+- `claude_ctb/monitoring/multi_monitor.py` - 알림 발생 로직
 - `/tmp/claude_completion_times.json` - 알림 기록 저장소

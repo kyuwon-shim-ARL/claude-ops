@@ -7,7 +7,7 @@ Tests for ClaudeOpsConfig and environment variable handling
 import os
 import tempfile
 from unittest.mock import patch
-from claude_ops.config import ClaudeOpsConfig
+from claude_ctb.config import ClaudeOpsConfig
 
 
 class TestClaudeOpsConfig:
@@ -39,7 +39,7 @@ class TestClaudeOpsConfig:
         expected = [123, 456, 789]
         assert config.allowed_user_ids == expected
     
-    @patch('claude_ops.config.load_dotenv')
+    @patch('claude_ctb.config.load_dotenv')
     def test_missing_required_config(self, mock_load_dotenv):
         """Test behavior with missing required configuration"""
         with patch.dict(os.environ, {}, clear=True):
@@ -102,7 +102,7 @@ class TestConfigIntegration:
             assert config.allowed_user_ids == [111, 222, 333]
             assert config.check_interval == 10
     
-    @patch('claude_ops.config.load_dotenv')
+    @patch('claude_ctb.config.load_dotenv')
     def test_config_defaults(self, mock_load_dotenv):
         """Test default configuration values"""
         with patch.dict(os.environ, {}, clear=True):

@@ -145,7 +145,7 @@ wheels = [
 ]
 
 [[package]]
-name = "claude-ops"
+name = "claude-telegram-bridge"
 version = "2.0.1"
 source = { editable = "." }
 dependencies = [

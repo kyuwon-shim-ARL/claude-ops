@@ -1,7 +1,7 @@
-# 🧹 Post-Deployment Cleanup Report - Claude-Ops v2.0.2
+# 🧹 Post-Deployment Cleanup Report - Claude-CTB v2.0.2
 
 **Cleanup Date**: 2025-09-09  
-**Project**: Claude-Ops Telegram Bridge System  
+**Project**: Claude-CTB Telegram Bridge System  
 **Version**: v2.0.2 (Post-Deployment Maintenance)
 
 ---
@@ -49,8 +49,8 @@ find . -name "*.pyc" -delete
 
 ### 📁 Current Structure
 ```
-claude-ops/
-├── 📁 claude_ops/           # Main application code (51 Python files)
+claude-ctb/
+├── 📁 claude_ctb/           # Main application code (51 Python files)
 ├── 📁 tests/               # Test suite (125 tests, 100% passing)
 ├── 📁 docs/                # Documentation (648KB, well-organized)
 │   ├── 📁 archive/         # Historical documents and reports

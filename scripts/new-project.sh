@@ -53,7 +53,7 @@ cd "$CLAUDE_OPS_DIR"
 uv run python -c "
 import sys
 sys.path.insert(0, '.')
-from claude_ops.project_creator import ProjectCreator
+from claude_ctb.project_creator import ProjectCreator
 
 try:
     project_path = '$PROJECT_PATH' if '$PROJECT_PATH' else None

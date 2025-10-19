@@ -6,7 +6,7 @@ Tests for the enhanced task completion detection system.
 
 import pytest
 from datetime import datetime
-from claude_ops.utils.task_completion_detector import (
+from claude_ctb.utils.task_completion_detector import (
     TaskCompletionDetector,
     TaskType,
     AlertPriority,

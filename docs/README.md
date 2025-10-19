@@ -1,6 +1,6 @@
-# 📚 Claude-Ops Documentation
+# 📚 Claude-CTB Documentation
 
-This directory contains comprehensive documentation for Claude-Ops.
+This directory contains comprehensive documentation for Claude-CTB.
 
 ## 📁 Documentation Structure
 

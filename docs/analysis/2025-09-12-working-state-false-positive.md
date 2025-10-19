@@ -107,7 +107,7 @@ def test_esc_interrupt_in_old_output():
 ```
 
 ## 💾 관련 파일
-- 핵심 로직: `claude_ops/utils/session_state.py:255-332`
+- 핵심 로직: `claude_ctb/utils/session_state.py:255-332`
 - 테스트: `tests/test_esc_interrupt_notification_bug.py`
 - 관련 수정: commit `061aae4`
 
@@ -151,5 +151,5 @@ def test_esc_interrupt_in_old_output():
 - ✅ 다양한 프롬프트 형식에서 정확한 탐지
 - ✅ 기존 시스템 호환성 유지
 
-**파일**: `claude_ops/utils/session_state.py:255-333`  
+**파일**: `claude_ctb/utils/session_state.py:255-333`  
 **테스트**: `tests/test_esc_interrupt_false_positive_fix.py`

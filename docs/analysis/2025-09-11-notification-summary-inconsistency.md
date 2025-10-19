@@ -42,7 +42,7 @@ def get_state_for_notification(self, session_name: str) -> SessionState:
 ### 즉시 확인 필요
 실제 모니터 재시작 후에도 문제 지속되는지 확인:
 ```bash
-claude-ops restart-all
+claude-ctb restart-all
 ```
 
 ### 만약 문제 지속 시 추가 수정 필요

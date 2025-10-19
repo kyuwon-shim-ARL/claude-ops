@@ -45,13 +45,13 @@
 ## 🔧 Technical Changes
 
 ### Modified Files:
-1. `claude_ops/telegram/bot.py`
+1. `claude_ctb/telegram/bot.py`
    - Korean command conversion
    - Log display fix
    - Direct text sending feature
    - /logs alias
 
-2. `claude_ops/utils/wait_time_tracker.py`
+2. `claude_ctb/utils/wait_time_tracker.py`
    - Dynamic year calculation
    - Removed redundant imports
    - Improved fallback estimation

@@ -2,7 +2,7 @@
 
 **검증일:** 2025-08-13  
 **검증자:** Claude  
-**시스템:** Claude-Ops Session State Detection Unified System
+**시스템:** Claude-CTB Session State Detection Unified System
 
 ## 📋 MECE 검증 프레임워크
 

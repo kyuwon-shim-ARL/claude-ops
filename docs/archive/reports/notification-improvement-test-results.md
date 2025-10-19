@@ -150,18 +150,18 @@ Failed: 3 (25%)
 
 ### 1. 디버그 모드 활성화
 ```python
-from claude_ops.utils.notification_debugger import enable_debug_mode
+from claude_ctb.utils.notification_debugger import enable_debug_mode
 enable_debug_mode(verbose=True)
 ```
 
 ### 2. 리포트 생성
 ```python
-from claude_ops.utils.notification_debugger import generate_report
+from claude_ctb.utils.notification_debugger import generate_report
 print(generate_report("session_name"))
 ```
 
 ### 3. 문제 발생 시 확인 사항
-- `/tmp/claude-ops-debug/` 디렉토리의 로그 파일
+- `/tmp/claude-ctb-debug/` 디렉토리의 로그 파일
 - `debug_session_*.json` 파일로 상태 히스토리 분석
 - 놓친 알림 분석 기능 사용
 

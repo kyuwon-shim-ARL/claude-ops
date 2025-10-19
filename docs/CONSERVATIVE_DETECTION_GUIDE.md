@@ -129,7 +129,7 @@ low_confidence = ["Thinking", "Processing"]  # 학습용
 
 ### 민감도 조정 (향후 구현 예정)
 ```python
-# claude_ops/config.py
+# claude_ctb/config.py
 WORKING_DETECTION_STRATEGY = "conservative"  # conservative | balanced | aggressive
 
 STRATEGIES = {

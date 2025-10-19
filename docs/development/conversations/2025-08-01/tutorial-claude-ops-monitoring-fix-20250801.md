@@ -1,19 +1,19 @@
-# Claude-Ops 모니터링 시작 오류 해결 튜토리얼
+# Claude-CTB 모니터링 시작 오류 해결 튜토리얼
 
 ## 개요
 
-Claude-Ops의 `start-monitoring` 명령어에서 2분 타임아웃 오류가 발생하는 문제를 해결하는 과정입니다.
+Claude-CTB의 `start-monitoring` 명령어에서 2분 타임아웃 오류가 발생하는 문제를 해결하는 과정입니다.
 
 ## 문제 증상
 
 ```bash
-claude-ops start-monitoring
+claude-ctb start-monitoring
 # 결과: Command timed out after 2m 0.0s
 ```
 
 ## 근본 원인 분석
 
-1. **복잡한 스크립트 구조**: `claude-ops.sh` → `start_multi_monitoring.sh` → tmux 세션 생성
+1. **복잡한 스크립트 구조**: `claude-ctb.sh` → `start_multi_monitoring.sh` → tmux 세션 생성
 2. **에러 핸들링 부족**: `set -e`로 인해 `pkill` 명령 실패 시 스크립트 중단
 3. **환경변수 로딩 이슈**: `.env` 파일 파싱 중 오류 발생
 
@@ -34,7 +34,7 @@ tmux has-session -t claude-multi-monitor 2>/dev/null && echo "Session exists" ||
 
 ### 2단계: 스크립트 통합 및 단순화
 
-기존의 복잡한 구조를 단순화하여 `claude-ops.sh`의 `start_monitoring()` 함수에 모든 로직을 통합:
+기존의 복잡한 구조를 단순화하여 `claude-ctb.sh`의 `start_monitoring()` 함수에 모든 로직을 통합:
 
 ```bash
 # Start monitoring
@@ -76,7 +76,7 @@ start_monitoring() {
     # Start the multi-session monitor in tmux
     printf "${GREEN}Starting Multi-Session Claude Code Monitor...${NC}\n"
     tmux new-session -d -s claude-multi-monitor \
-        "cd $(pwd) && uv run python -m claude_ops.telegram.multi_monitor"
+        "cd $(pwd) && uv run python -m claude_ctb.telegram.multi_monitor"
     
     # Give tmux a moment to start
     sleep 3
@@ -102,10 +102,10 @@ start_monitoring() {
 
 ```bash
 # 모니터링 서비스 시작
-claude-ops start-monitoring
+claude-ctb start-monitoring
 
 # 상태 확인
-claude-ops status
+claude-ctb status
 
 # 예상 결과:
 # ✅ Multi-session monitoring: Running
@@ -121,18 +121,18 @@ claude-ops status
 ## 추가 고려사항
 
 - **로그 모니터링**: `tmux attach -t claude-multi-monitor`로 실시간 로그 확인 가능
-- **서비스 재시작**: 문제 발생 시 `claude-ops stop-monitoring` 후 재시작
+- **서비스 재시작**: 문제 발생 시 `claude-ctb stop-monitoring` 후 재시작
 - **환경변수 검증**: `.env` 파일의 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` 설정 필수
 
 ## 관련 파일
 
-- `scripts/claude-ops.sh`: 메인 스크립트 (start_monitoring 함수)
-- `claude_ops/telegram/multi_monitor.py`: 모니터링 Python 모듈
+- `scripts/claude-ctb.sh`: 메인 스크립트 (start_monitoring 함수)
+- `claude_ctb/telegram/multi_monitor.py`: 모니터링 Python 모듈
 - `.env`: 환경변수 설정 파일
 
 ## 재현 단계
 
-1. 문제 상황 재현: `claude-ops start-monitoring` (타임아웃 발생)
+1. 문제 상황 재현: `claude-ctb start-monitoring` (타임아웃 발생)
 2. 스크립트 수정 적용
-3. 테스트 실행: `claude-ops start-monitoring` (정상 동작)
-4. 상태 확인: `claude-ops status`
+3. 테스트 실행: `claude-ctb start-monitoring` (정상 동작)
+4. 상태 확인: `claude-ctb status`

@@ -109,7 +109,7 @@ else:  # 알림 시간이 없을 때만
 - **데이터 정확성**: Session Summary의 부정확한 정보 표시
 
 ## 🔗 관련 파일
-- `claude_ops/utils/session_state.py:313-365` - 프롬프트 우선순위 로직
-- `claude_ops/utils/conservative_detector.py:45-47` - Conservative 패턴
-- `claude_ops/utils/session_summary.py:493-497` - 추정 표시 로직
-- `claude_ops/monitoring/multi_monitor.py:320-330` - 상태 전환 추적
+- `claude_ctb/utils/session_state.py:313-365` - 프롬프트 우선순위 로직
+- `claude_ctb/utils/conservative_detector.py:45-47` - Conservative 패턴
+- `claude_ctb/utils/session_summary.py:493-497` - 추정 표시 로직
+- `claude_ctb/monitoring/multi_monitor.py:320-330` - 상태 전환 추적

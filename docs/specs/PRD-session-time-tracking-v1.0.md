@@ -199,7 +199,7 @@ def test_user_friendly_messages():
 - 사용자 이해도: 향상
 
 ## 🔗 Related Files
-- `claude_ops/utils/wait_time_tracker.py` - 시간 추적 로직
-- `claude_ops/utils/session_summary.py` - 메시지 표시
-- `claude_ops/project_creator.py` - 세션 생성 시점
+- `claude_ctb/utils/wait_time_tracker.py` - 시간 추적 로직
+- `claude_ctb/utils/session_summary.py` - 메시지 표시
+- `claude_ctb/project_creator.py` - 세션 생성 시점
 - `/tmp/claude_session_start_times.json` - 시작 시간 저장 (신규)

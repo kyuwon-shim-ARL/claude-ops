@@ -78,7 +78,7 @@ completion_times = {
 # 현재 활성 세션들
 active_sessions = [
     "claude_urban-microbiome-toolkit-5",
-    "claude_claude-ops-2",
+    "claude_claude-ctb-2",
     "claude_UMT_opt-16"
 ]
 # → 매칭 실패: 접미사가 달라서 기록 찾을 수 없음
@@ -193,8 +193,8 @@ has_record = has_completion_record_flexible("claude_urban-microbiome-toolkit-5")
 - 데이터 일관성 확보
 
 ## 🔗 관련 파일
-- `claude_ops/utils/wait_time_tracker.py` - 알림 기록 관리
-- `claude_ops/project_creator.py:424` - 세션 생성 로직
-- `claude_ops/utils/session_summary.py` - 요약 표시 로직
+- `claude_ctb/utils/wait_time_tracker.py` - 알림 기록 관리
+- `claude_ctb/project_creator.py:424` - 세션 생성 로직
+- `claude_ctb/utils/session_summary.py` - 요약 표시 로직
 
 **결론**: 당신 말씀이 정확합니다. tmux의 자동 세션 그룹핑 메커니즘으로 인해 접미사가 생성되며, 정규화(접미사 제거)가 가장 실용적인 해결책입니다!

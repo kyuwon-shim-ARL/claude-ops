@@ -5,7 +5,7 @@
 ### ✅ Phase 1: 수동 복구 도구 (완료)
 
 #### 1. 터미널 건강 체크 모듈
-**파일**: `claude_ops/utils/terminal_health.py`
+**파일**: `claude_ctb/utils/terminal_health.py`
 
 **주요 기능**:
 - **TerminalHealthChecker**: 터미널 상태 진단
@@ -23,7 +23,7 @@
 - ✅ 자동 복구: claude_PaperFlow 세션 성공적 복구 (154x72)
 
 #### 2. 텔레그램 /fix-terminal 명령어
-**파일**: `claude_ops/telegram/bot.py`
+**파일**: `claude_ctb/telegram/bot.py`
 
 **기능**:
 - Reply-based 세션 타겟팅 지원
@@ -36,7 +36,7 @@
 ### ✅ Phase 2: 자동 모니터링 시스템 (완료)
 
 #### 3. 자동 터미널 건강 모니터
-**파일**: `claude_ops/monitoring/terminal_monitor.py`
+**파일**: `claude_ctb/monitoring/terminal_monitor.py`
 
 **주요 기능**:
 - **TerminalHealthMonitor**: 30초 간격 자동 모니터링
@@ -49,7 +49,7 @@
 - 비정상 세션 목록, 복구 쿨다운 상태
 
 #### 4. 알림 시스템 강화
-**파일**: `claude_ops/telegram/notifier.py`
+**파일**: `claude_ctb/telegram/notifier.py`
 
 **추가된 기능**:
 - `send_manual_notification()`: 제목, 내용, 긴급도 설정 가능
@@ -134,8 +134,8 @@
 ### 자동 모니터링
 ```python
 # 자동 모니터링 시작 (향후 통합 예정)
-from claude_ops.monitoring.terminal_monitor import TerminalHealthMonitor
-from claude_ops.config import ClaudeOpsConfig
+from claude_ctb.monitoring.terminal_monitor import TerminalHealthMonitor
+from claude_ctb.config import ClaudeOpsConfig
 
 config = ClaudeOpsConfig()
 monitor = TerminalHealthMonitor(config)

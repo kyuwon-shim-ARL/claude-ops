@@ -1,4 +1,4 @@
-# PRD: Claude-Ops Notification System Fixes v1.0
+# PRD: Claude-CTB Notification System Fixes v1.0
 
 ## 📋 Executive Summary
 Fix critical notification timing issues and simplify the system by removing unnecessary complexity.
@@ -101,26 +101,26 @@ else:
 
 ### File Changes Required:
 
-#### 1. `claude_ops/utils/session_state.py`
+#### 1. `claude_ctb/utils/session_state.py`
 - Line 313-365: Reorder detection priority
 - Add "esc to interrupt" as absolute first check
 - Move prompt detection after working pattern detection
 
-#### 2. `claude_ops/utils/conservative_detector.py`
+#### 2. `claude_ctb/utils/conservative_detector.py`
 - Strengthen "esc to interrupt" detection
 - Add context awareness for TODO lists
 
-#### 3. `claude_ops/telegram/notifier.py`
+#### 3. `claude_ctb/telegram/notifier.py`
 - Remove all priority-related code
 - Simplify to 2 notification types only
 - Remove TaskCompletion complexity
 
-#### 4. `claude_ops/telegram/bot.py`
+#### 4. `claude_ctb/telegram/bot.py`
 - Remove detect_status, detect_trend, fix_terminal handlers
 - Clean up command list in help menu
 - Update command registration
 
-#### 5. `claude_ops/utils/session_summary.py`
+#### 5. `claude_ctb/utils/session_summary.py`
 - Lines 493-497: Fix "추정" display logic
 - Simplify has_record checking
 - Use actual notification times when available

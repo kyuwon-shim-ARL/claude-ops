@@ -1,4 +1,4 @@
-# Claude-Ops 프로젝트 요약
+# Claude-CTB 프로젝트 요약
 
 <!-- 
 Git 컨텍스트:
@@ -15,8 +15,8 @@ Claude Code, Notion, GitHub, Telegram을 통합한 AI 기반 프로젝트 자동
 ## 구현 현황
 
 ### ✅ 완료된 기능
-- **멀티 세션 모니터링**: 모든 `claude_*` 세션 동시 감시 (`claude_ops/telegram/multi_monitor.py`)
-- **텔레그램 봇 통합**: Reply 기반 세션 타겟팅 및 명령어 전달 (`claude_ops/telegram/bot.py`)
+- **멀티 세션 모니터링**: 모든 `claude_*` 세션 동시 감시 (`claude_ctb/telegram/multi_monitor.py`)
+- **텔레그램 봇 통합**: Reply 기반 세션 타겟팅 및 명령어 전달 (`claude_ctb/telegram/bot.py`)
 - **슬래시 명령어 지원**: `/project-plan`, `/task-start` 등 Claude Code 명령어 자동 전달
 - **특수 대기 상태 감지**: 13개 패턴의 무한대기 상황 감지 및 알림 (`multi_monitor.py`)
 - **파라미터화된 로그**: `/log [lines]` 명령어로 10-2000줄 가변 로그 확인
@@ -77,7 +77,7 @@ Claude Code, Notion, GitHub, Telegram을 통합한 AI 기반 프로젝트 자동
 ### 즉시 시작 가능 (Dependencies Met)
 1. [x] 특수 대기 상태 감지 시스템 구축 - 예상 시간: 완료
    - 선행 조건: 모두 충족
-   - 시작 지점: `claude_ops/telegram/multi_monitor.py`
+   - 시작 지점: `claude_ctb/telegram/multi_monitor.py`
 
 2. [ ] 실제 무한대기 패턴 수집 및 정제 - 예상 시간: 1주
    - 선행 조건: 사용자 피드백 수집
@@ -95,9 +95,9 @@ Claude Code, Notion, GitHub, Telegram을 통합한 AI 기반 프로젝트 자동
 
 ### 파일 구조
 ```
-claude-ops/
-├── scripts/claude-ops.sh           # CLI 메인 스크립트
-├── claude_ops/telegram/             # 텔레그램 봇 시스템
+claude-ctb/
+├── scripts/claude-ctb.sh           # CLI 메인 스크립트
+├── claude_ctb/telegram/             # 텔레그램 봇 시스템
 │   ├── bot.py                      # 메인 봇 로직
 │   ├── multi_monitor.py            # 멀티 세션 모니터링
 │   └── notifier.py                 # 알림 시스템
@@ -109,18 +109,18 @@ claude-ops/
 ### 주요 명령어
 ```bash
 # 시스템 관리
-claude-ops start-monitoring         # 모든 서비스 시작
-claude-ops stop-monitoring          # 모든 서비스 중지
-claude-ops status                    # 전체 시스템 상태
+claude-ctb start-monitoring         # 모든 서비스 시작
+claude-ctb stop-monitoring          # 모든 서비스 중지
+claude-ctb status                    # 전체 시스템 상태
 
 # 개발 환경
 uv sync                             # 의존성 설치
-uv run python -m claude_ops.telegram.bot  # 봇 실행
+uv run python -m claude_ctb.telegram.bot  # 봇 실행
 ```
 
 ### 관련 문서
-- 최근 튜토리얼: `docs/development/conversations/2025-08-11/tutorial-claude-ops-special-waiting-states-20250811-2059.md`
-- 최근 대화록: `docs/development/conversations/2025-08-11/conversation-claude-ops-special-waiting-states-20250811-2059.md`
+- 최근 튜토리얼: `docs/development/conversations/2025-08-11/tutorial-claude-ctb-special-waiting-states-20250811-2059.md`
+- 최근 대화록: `docs/development/conversations/2025-08-11/conversation-claude-ctb-special-waiting-states-20250811-2059.md`
 - 이전 프로젝트 요약: `docs/core/project-summary.md`
 - 환경 설정: `.env.example`
 
@@ -129,7 +129,7 @@ uv run python -m claude_ops.telegram.bot  # 봇 실행
 ### 실행 중인 서비스
 - ✅ Multi-session monitoring: 정상 실행
 - ✅ Telegram bot: 정상 실행 (특수 상태 감지 포함)
-- ✅ 활성 Claude 세션: 5개 (claude-multi-monitor, claude_claude-ops, claude_MC, claude_PaperFlow, claude-monitor)
+- ✅ 활성 Claude 세션: 5개 (claude-multi-monitor, claude_claude-ctb, claude_MC, claude_PaperFlow, claude-monitor)
 
 ### 최근 개선 사항 (2025-08-11)
 - **특수 대기 상태 감지**: 13개 패턴으로 무한대기 상황 감지
@@ -152,4 +152,4 @@ uv run python -m claude_ops.telegram.bot  # 봇 실행
 4. **통합성**: 단일 명령어로 모든 서비스 제어 가능
 5. **신뢰성**: 기존 기능 100% 유지하며 새 기능 추가
 
-Claude-Ops는 이제 Claude Code 사용 중 발생할 수 있는 대부분의 대기 상황에서 적절한 알림을 제공하는 완전한 자동화 시스템으로 발전했습니다.
+Claude-CTB는 이제 Claude Code 사용 중 발생할 수 있는 대부분의 대기 상황에서 적절한 알림을 제공하는 완전한 자동화 시스템으로 발전했습니다.
