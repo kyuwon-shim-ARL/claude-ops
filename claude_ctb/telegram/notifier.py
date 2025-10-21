@@ -133,15 +133,60 @@ class SmartNotifier:
                     logger.error(f"Rate limit hit but handling disabled: {response.status_code} - {response.text}")
                     return False
 
+            # T047: Handle other API errors (400 Bad Request)
+            if response.status_code == 400:
+                logger.error(f"Bad Request (400): Invalid parameters - {response.text}")
+                # Don't retry bad requests - they won't succeed
+                return False
+
             if response.status_code == 200:
                 logger.info("Telegram notification sent successfully")
                 return True
             else:
-                logger.error(f"Failed to send Telegram notification: {response.status_code} - {response.text}")
-                return False
+                # T047: Generic error handling with retry for transient errors
+                if response.status_code >= 500:
+                    # Server errors - worth retrying
+                    logger.warning(f"Server error ({response.status_code}). Enqueuing for retry.")
+                    if rate_limit_enabled:
+                        self._message_queue.enqueue(
+                            chat_id=int(chat_id),
+                            text=message,
+                            priority="NORMAL"
+                        )
+                    return False
+                else:
+                    logger.error(f"Failed to send Telegram notification: {response.status_code} - {response.text}")
+                    return False
 
+        except requests.exceptions.Timeout as e:
+            # T047: Handle timeout errors
+            logger.warning(f"Telegram API timeout: {str(e)}. Enqueuing for retry.")
+            if rate_limit_enabled:
+                self._message_queue.enqueue(
+                    chat_id=int(chat_id),
+                    text=message,
+                    priority="NORMAL"
+                )
+            return False
+        except requests.exceptions.ConnectionError as e:
+            # T047: Handle network connection errors
+            logger.warning(f"Network connection error: {str(e)}. Enqueuing for retry.")
+            if rate_limit_enabled:
+                self._message_queue.enqueue(
+                    chat_id=int(chat_id),
+                    text=message,
+                    priority="NORMAL"
+                )
+            return False
         except requests.exceptions.RequestException as e:
+            # T047: Generic network errors
             logger.error(f"Network error sending Telegram notification: {str(e)}")
+            if rate_limit_enabled:
+                self._message_queue.enqueue(
+                    chat_id=int(chat_id),
+                    text=message,
+                    priority="NORMAL"
+                )
             return False
         except Exception as e:
             logger.error(f"Error sending Telegram notification: {str(e)}")
