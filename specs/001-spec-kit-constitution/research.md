@@ -217,6 +217,76 @@ def get_screen_content(session_name: str, lines: int = 200) -> str:
 
 ---
 
+---
+
+## 6. API Compatibility During Refactoring (Post-Implementation Discovery)
+
+### Problem Identified
+During `claude_ops` → `claude_ctb` refactoring (commit 1b1abf3), improvements from bb6478c to v1 tracker were not propagated to v2, causing wait time tracking failures.
+
+### Root Cause Analysis
+1. **Dual version maintenance**: v1 (`wait_time_tracker.py`) and v2 (`wait_time_tracker_v2.py`) exist simultaneously
+2. **v1-only fix**: commit bb6478c added `mark_completion_safe()` to v1 only (handles session suffix changes like `claude_project-5` → `claude_project-6`)
+3. **Refactoring gap**: simple file moves (`claude_ops/` → `claude_ctb/`) didn't trigger cross-version sync
+4. **Runtime failure**: system uses v2 (via `migrate_to_v2()`), but v2 lacks suffix handling → completion times not tracked
+
+### Decision
+Two-pronged solution:
+1. **Immediate fix**: Port missing methods from v1 to v2
+2. **Prevention**: Automated API compatibility checker
+
+### Implementation Approach
+
+#### Missing Methods (v1 → v2)
+```python
+# 1. Session suffix normalization
+def normalize_session_name(session_name: str) -> str:
+    """Remove trailing -\d+ suffix for continuity tracking"""
+    return re.sub(r'-\d+$', '', session_name)
+
+# 2. Suffix-aware completion marking
+def mark_completion_safe(session_name: str):
+    """Update existing record if base name matches"""
+    base_name = normalize_session_name(session_name)
+    # Replace old suffix record with new suffix
+
+# 3. API compatibility aliases
+def cleanup_old_sessions(max_age_hours=24):
+    """Alias for cleanup_stale_data() - used by multi_monitor.py:584"""
+    return cleanup_stale_data(max_age_hours)
+
+def remove_session(session_name: str):
+    """Alias for reset_session() - used by multi_monitor.py:503"""
+    return reset_session(session_name)
+```
+
+#### Automated Compatibility Check
+```bash
+# scripts/check_api_compatibility.py
+# - Extracts public methods from v1 and v2
+# - Finds usages in codebase (grep-based)
+# - Excludes self-references (v1 internal calls)
+# - Exit code 0 (safe) or 1 (incompatible)
+```
+
+### Rationale
+- **Suffix handling critical**: Claude sessions recreate with incremented suffixes on restart
+- **Backwards compatibility**: Existing code calls `cleanup_old_sessions()` and `remove_session()`
+- **Prevention > cure**: Automated check catches future API drift before deployment
+- **CI/CD integration**: Script suitable for pre-commit hooks or GitHub Actions
+
+### Alternatives Considered
+- **Deprecate v1**: Rejected - requires extensive testing, higher risk
+- **Manual review**: Rejected - error-prone, doesn't scale
+- **Merge v1+v2**: Rejected - v2 has architectural improvements worth keeping
+
+### References
+- Original fix: commit bb6478c "fix: critical notification tracking with session suffix changes"
+- Refactoring: commit 1b1abf3 "refactor: rename claude_ops to claude_ctb"
+- Usage locations: `multi_monitor.py` lines 503 (remove_session), 584 (cleanup_old_sessions)
+
+---
+
 ## Summary
 
 All research complete. No unknowns remain. Ready for Phase 1 (Design & Contracts).
@@ -228,3 +298,4 @@ All research complete. No unknowns remain. Ready for Phase 1 (Design & Contracts
 | Rate Limiting | In-memory queue + backoff | Leverages built-in limiter, handles sustained overload |
 | Dangerous Commands | InlineKeyboard confirmation | Clear intent, follows Telegram UX, non-blocking |
 | Screen History | 200-line scrollback | Sufficient context per clarification, low overhead |
+| API Compatibility | Port missing methods + automated check | Prevents refactoring regressions, ensures v1/v2 parity |

@@ -11,6 +11,7 @@ Key improvements:
 import time
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 from datetime import datetime
@@ -284,19 +285,42 @@ class ImprovedWaitTimeTracker:
         """Remove data older than max_age_hours"""
         current_time = time.time()
         max_age_seconds = max_age_hours * 3600
-        
+
         # Clean completion times
         to_remove = []
         for session_name, timestamp in self.completion_times.items():
             if current_time - timestamp > max_age_seconds:
                 to_remove.append(session_name)
-        
+
         for session_name in to_remove:
             del self.completion_times[session_name]
             logger.info(f"Removed stale completion time for {session_name}")
-        
+
         if to_remove:
             self._save_completions()
+
+    def cleanup_old_sessions(self, max_age_hours: float = 24):
+        """
+        Remove sessions older than max_age_hours (alias for cleanup_stale_data)
+
+        This method provides API compatibility with the original tracker.
+
+        Args:
+            max_age_hours: Maximum age in hours before removing session data
+        """
+        return self.cleanup_stale_data(max_age_hours)
+
+    def remove_session(self, session_name: str):
+        """
+        Remove a session from tracking
+
+        This method provides API compatibility with the original tracker.
+        It's an alias for reset_session.
+
+        Args:
+            session_name: Name of the session to remove
+        """
+        return self.reset_session(session_name)
     
     def get_all_wait_times(self) -> Dict[str, Tuple[float, bool]]:
         """
@@ -318,6 +342,55 @@ class ImprovedWaitTimeTracker:
         if session_name in self.session_states:
             del self.session_states[session_name]
             self._save_states()
+
+    def normalize_session_name(self, session_name: str) -> str:
+        """
+        Normalize session name by removing trailing number suffix
+
+        Examples:
+            claude_project-5 → claude_project
+            claude_simple_funcscan_test_run-90 → claude_simple_funcscan_test_run
+            claude_urban-microbiome-toolkit-5 → claude_urban-microbiome-toolkit
+
+        Args:
+            session_name: Session name with possible numeric suffix
+
+        Returns:
+            Normalized session name without trailing -number
+        """
+        return re.sub(r'-\d+$', '', session_name)
+
+    def mark_completion_safe(self, session_name: str):
+        """Mark completion with session name normalization to handle suffix changes
+
+        This method ensures that when a session is recreated with a different suffix,
+        the old completion record is replaced with the new one, maintaining continuity.
+
+        Args:
+            session_name: Current session name (may include suffix like -8, -29)
+        """
+        current_time = time.time()
+        base_name = self.normalize_session_name(session_name)
+
+        # Enhanced logging for debugging
+        logger.info(f"🔔 Marking completion for: {session_name}")
+        logger.info(f"📊 Base name: {base_name}")
+
+        # Check for existing records with same base name
+        updated = False
+        for existing_session in list(self.completion_times.keys()):
+            if self.normalize_session_name(existing_session) == base_name:
+                logger.info(f"🔄 Updating existing record: {existing_session} -> {session_name}")
+                del self.completion_times[existing_session]
+                updated = True
+                break
+
+        # Add the new record
+        self.completion_times[session_name] = current_time
+        self._save_completions()
+
+        action = "Updated" if updated else "Created"
+        logger.info(f"✅ {action} completion record for {session_name} at {current_time}")
 
 
 # Migration helper to upgrade existing tracker

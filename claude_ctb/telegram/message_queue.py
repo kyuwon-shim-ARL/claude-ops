@@ -186,6 +186,11 @@ class MessageQueue:
         """Mark message as processed."""
         return True
 
+    def cleanup_old_messages(self, max_age_hours: float = 24) -> None:
+        """Clean up old messages (no-op for legacy queue)."""
+        # Legacy queue is deprecated, no cleanup needed
+        pass
+
 
 # Global legacy queue instance
 message_queue = MessageQueue()
