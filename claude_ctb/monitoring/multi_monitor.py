@@ -75,6 +75,42 @@ class MultiSessionMonitor:
     def discover_sessions(self) -> Set[str]:
         """Discover all active Claude sessions"""
         return set(session_manager.get_all_claude_sessions())
+
+    def get_monitoring_status(self) -> Dict[str, any]:
+        """
+        Get monitoring session health status (T049).
+
+        Returns:
+            Status dict with session_count, uptime, last_check_time, is_active
+        """
+        try:
+            # Get all Claude sessions
+            sessions = self.discover_sessions()
+            session_count = len(sessions)
+
+            # Check if monitoring is active (has active threads)
+            is_active = self.running and len(self.active_threads) > 0
+
+            # Get current time
+            current_time = time.time()
+
+            return {
+                "session_count": session_count,
+                "is_active": is_active,
+                "active_threads": len(self.active_threads),
+                "last_check_time": current_time,
+                "sessions": list(sessions)
+            }
+        except Exception as e:
+            logger.error(f"Failed to get monitoring status: {e}")
+            return {
+                "session_count": 0,
+                "is_active": False,
+                "active_threads": 0,
+                "last_check_time": time.time(),
+                "sessions": [],
+                "error": str(e)
+            }
     
     def get_status_file_for_session(self, session_name: str) -> str:
         """Get status file path for a session"""

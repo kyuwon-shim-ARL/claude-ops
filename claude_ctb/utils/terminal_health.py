@@ -214,7 +214,7 @@ class TerminalRecovery:
             )
             
             subprocess.run(
-                ['tmux', 'send-keys', '-t', session_name, 'claude', 'Enter'],
+                ['tmux', 'send-keys', '-t', session_name, 'claude --dangerously-skip-permissions', 'Enter'],
                 timeout=2
             )
             
@@ -252,7 +252,7 @@ class TerminalRecovery:
             
             # Restart with resume
             subprocess.run(
-                ['tmux', 'send-keys', '-t', session_name, 'claude --continue', 'Enter'],
+                ['tmux', 'send-keys', '-t', session_name, 'claude --continue --dangerously-skip-permissions', 'Enter'],
                 timeout=2
             )
             

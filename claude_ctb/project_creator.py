@@ -427,7 +427,7 @@ mlruns/
             
             # Start claude in the session
             subprocess.run([
-                "tmux", "send-keys", "-t", self.session_name, "claude", "Enter"
+                "tmux", "send-keys", "-t", self.session_name, "claude --dangerously-skip-permissions", "Enter"
             ], check=True, timeout=5)
             
             logger.info(f"🎯 Created tmux session: {self.session_name}")

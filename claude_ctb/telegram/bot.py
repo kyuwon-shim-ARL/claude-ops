@@ -119,7 +119,7 @@ class TelegramBridge:
         if not session_ok:
             logger.info("Claude 세션을 자동 생성합니다...")
             os.system(f"tmux new-session -d -s {self.config.session_name}")
-            os.system(f"tmux send-keys -t {self.config.session_name} -l 'claude'")
+            os.system(f"tmux send-keys -t {self.config.session_name} -l 'claude --dangerously-skip-permissions'")
             os.system(f"tmux send-keys -t {self.config.session_name} Enter")
             return "🆕 Claude 세션을 새로 시작했습니다"
         return None
@@ -295,7 +295,7 @@ class TelegramBridge:
                 os.makedirs(target_directory, exist_ok=True)
                 
                 os.system(f"cd {target_directory} && tmux new-session -d -s {target_session}")
-                os.system(f"tmux send-keys -t {target_session} -l 'claude'")
+                os.system(f"tmux send-keys -t {target_session} -l 'claude --dangerously-skip-permissions'")
                 os.system(f"tmux send-keys -t {target_session} Enter")
                 
                 await update.message.reply_text(f"🆕 {target_session} 세션을 새로 시작했습니다")
@@ -321,26 +321,44 @@ class TelegramBridge:
             await update.message.reply_text("❌ 내부 오류가 발생했습니다.")
     
     async def status_command(self, update, context):
-        """Bot status check command"""
+        """Bot status check command (T050: includes monitoring session state)"""
         user_id = update.effective_user.id
-        
+
         if not self.check_user_authorization(user_id):
             await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
             return
-        
+
         result = os.system(f"tmux has-session -t {self.config.session_name}")
         session_status = "✅ 활성" if result == 0 else "❌ 비활성"
-        
+
+        # T050: Get monitoring session status
+        monitoring_status = "❓ 알 수 없음"
+        session_count = 0
+        try:
+            from ..monitoring.multi_monitor import MultiSessionMonitor
+            monitor = MultiSessionMonitor(self.config)
+            status_data = monitor.get_monitoring_status()
+
+            if status_data.get("is_active", False):
+                session_count = status_data.get("session_count", 0)
+                monitoring_status = f"✅ 활성 ({session_count} 세션)"
+            else:
+                monitoring_status = "⚠️ 비활성"
+        except Exception as e:
+            logger.error(f"Failed to get monitoring status: {e}")
+            monitoring_status = "❌ 오류"
+
         status_message = f"""
 🤖 **Telegram-Claude Bridge 상태**
 
 • tmux 세션: {session_status}
 • 세션 이름: `{self.config.session_name}`
+• 모니터링: {monitoring_status}
 • 작업 디렉토리: `{self.config.working_directory}`
 • 인증된 사용자: {len(self.config.allowed_user_ids)}명
 • 사용자 ID: `{user_id}`
         """
-        
+
         await update.message.reply_text(status_message, parse_mode='Markdown')
     
     async def start_claude_command(self, update, context):
@@ -868,7 +886,7 @@ class TelegramBridge:
             
             # Step 3: Resume with conversation continuity
             logger.info(f"Resuming Claude Code with --continue: {target_session}")
-            resume_result = os.system(f"tmux send-keys -t {target_session} 'claude --continue' Enter")
+            resume_result = os.system(f"tmux send-keys -t {target_session} 'claude --continue --dangerously-skip-permissions' Enter")
             
             if resume_result == 0:
                 # Wait a moment for Claude to start
@@ -887,7 +905,7 @@ class TelegramBridge:
             else:
                 # Fallback to regular restart
                 logger.warning(f"Resume failed, falling back to regular restart: {target_session}")
-                fallback_result = os.system(f"tmux send-keys -t {target_session} 'claude' Enter")
+                fallback_result = os.system(f"tmux send-keys -t {target_session} 'claude --dangerously-skip-permissions' Enter")
                 
                 if fallback_result == 0:
                     await progress_msg.edit_text(
@@ -1377,15 +1395,8 @@ class TelegramBridge:
         # No path provided - show project list
         try:
             # Get project scan directories from config
+            # Only scan ~/projects by default (don't add session parent dirs)
             scan_dirs = [os.path.expanduser("~/projects")]
-
-            # Add current working directories from active sessions
-            for session in session_manager.get_all_claude_sessions():
-                session_path = session_manager.get_session_path(session)
-                if session_path:
-                    parent_dir = os.path.dirname(session_path)
-                    if parent_dir and parent_dir not in scan_dirs:
-                        scan_dirs.append(parent_dir)
 
             projects = session_manager.get_available_projects(scan_dirs)
 
@@ -1403,7 +1414,7 @@ class TelegramBridge:
             message += "프로젝트를 선택하거나 `/connect <경로>`로 직접 지정하세요.\n\n"
 
             keyboard = []
-            for idx, project in enumerate(projects[:20]):  # Limit to 20 projects
+            for idx, project in enumerate(projects[:50]):  # Show up to 50 projects
                 status_icon = "🟢" if project['has_session'] else "⚪"
                 button_text = f"{status_icon} {project['name']}"
 
@@ -1542,9 +1553,18 @@ class TelegramBridge:
             await self._session_menu_callback(query, context, session_name)
         elif callback_data.startswith("direct_"):
             await self._direct_action_callback(query, context, callback_data)
-        elif callback_data.startswith("session_grid:"):
-            session_name = callback_data.split(":", 1)[1]
-            await self._session_grid_callback(query, context, session_name)
+        elif callback_data.startswith("sg:"):
+            # Extract session index from callback data
+            try:
+                session_idx = int(callback_data.replace("sg:", ""))
+                sessions = context.user_data.get('session_grid_sessions', [])
+                if 0 <= session_idx < len(sessions):
+                    session_name = sessions[session_idx]
+                    await self._session_grid_callback(query, context, session_name)
+                else:
+                    await query.answer("❌ 세션 정보를 찾을 수 없습니다. /board를 다시 실행해주세요.")
+            except (ValueError, IndexError):
+                await query.answer("❌ 잘못된 세션 인덱스입니다.")
         elif callback_data.startswith("session_log:"):
             session_name = callback_data.split(":", 1)[1]
             await self._session_log_callback(query, context, session_name)
@@ -1937,7 +1957,7 @@ class TelegramBridge:
                 logger.info("사용자 요청으로 Claude 세션을 시작합니다...")
                 # Start tmux session in the configured working directory
                 os.system(f"cd {self.config.working_directory} && tmux new-session -d -s {self.config.session_name}")
-                os.system(f"tmux send-keys -t {self.config.session_name} -l 'claude'")
+                os.system(f"tmux send-keys -t {self.config.session_name} -l 'claude --dangerously-skip-permissions'")
                 os.system(f"tmux send-keys -t {self.config.session_name} Enter")
                 
                 # Initialize session for compatibility  
@@ -2016,7 +2036,7 @@ class TelegramBridge:
     
     async def _back_to_menu_callback(self, query, context):
         """Back to one-click session menu (no longer needed - redirect to session grid)"""
-        await self._show_session_action_grid(query.edit_message_text, query)
+        await self._show_session_action_grid(query.edit_message_text, query, context)
 
     async def _connect_project_callback(self, query, context, project_path: str):
         """Connect to project callback"""
@@ -2247,40 +2267,44 @@ class TelegramBridge:
     
     async def _session_actions_callback(self, query, context):
         """Show one-click session action grid (same as menu command now)"""
-        await self._show_session_action_grid(query.edit_message_text, query)
+        await self._show_session_action_grid(query.edit_message_text, query, context)
     
-    async def _show_session_action_grid(self, reply_func, query=None):
+    async def _show_session_action_grid(self, reply_func, query=None, context=None):
         """Show one-click session action grid with all sessions and direct actions"""
         try:
             # Use same session list as summary for consistency (ALL sessions)
             from ..utils.session_summary import summary_helper
             all_sessions = summary_helper.get_all_sessions_with_status()
-            
+
             # Extract session info - unpack 5-tuple correctly
             # Reverse order for board: recent sessions (short wait time) at bottom
             sessions_info = [(session_name, wait_time, status, has_record) for session_name, wait_time, _, status, has_record in reversed(all_sessions)]
-            
+
             if not sessions_info:
                 await reply_func(
                     "❌ **세션 없음**\n\nClaude 세션을 찾을 수 없습니다.\n\n/new_project 명령으로 새 세션을 시작하세요.",
                     parse_mode='Markdown'
                 )
                 return
-            
+
+            # Store session list in context to avoid 64-byte callback_data limit
+            if context:
+                context.user_data['session_grid_sessions'] = [s[0] for s in sessions_info]
+
             keyboard = []
-            
+
             # Session rows with direct actions (2 sessions per row max)
             for i in range(0, len(sessions_info), 2):
                 row_sessions = sessions_info[i:i+2]
                 session_row = []
-                
-                for session_name, wait_time, status, has_record in row_sessions:
+
+                for idx_in_row, (session_name, wait_time, status, has_record) in enumerate(row_sessions):
                     display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
                     current_icon = "⭐" if session_name == self.config.session_name else ""
-                    
+
                     # Use status from summary helper for consistency
                     status_icon = "🔨" if status == 'working' else "💤"
-                    
+
                     # Format wait time for button
                     if status == 'waiting' and wait_time > 0:
                         wait_str = summary_helper.format_wait_time(wait_time)
@@ -2289,23 +2313,25 @@ class TelegramBridge:
                             wait_str = f"~{wait_str}"
                     else:
                         wait_str = ""
-                    
+
                     # Get very short prompt hint for button
                     hint = await self._get_session_hint_short(session_name)
-                    
+
                     # Build button text with wait time
                     if wait_str:
                         button_text = f"{current_icon}{status_icon} {display_name} ({wait_str}){hint}"
                     else:
                         button_text = f"{current_icon}{status_icon} {display_name}{hint}"
-                    
+
+                    # Use index to avoid 64-byte callback_data limit
+                    session_idx = i + idx_in_row
                     session_row.append(
                         InlineKeyboardButton(
                             button_text,
-                            callback_data=f"session_grid:{session_name}"
+                            callback_data=f"sg:{session_idx}"  # Shortened from session_grid
                         )
                     )
-                
+
                 keyboard.append(session_row)
             
             # No utility buttons needed - sessions are the main content
@@ -2762,7 +2788,6 @@ class TelegramBridge:
                     f"⏸️ ESC 키를 전송했습니다.\n\n"
                     f"Claude 작업이 중단됩니다.",
                     reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("🔙 세션 액션으로", callback_data=f"session_grid:{session_name}")],
                         [InlineKeyboardButton("🏠 메인 메뉴로", callback_data="back_to_menu")]
                     ]),
                     parse_mode='Markdown'
