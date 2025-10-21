@@ -13,7 +13,7 @@ class SessionManager:
     """Manages multiple Claude Code sessions"""
     
     def __init__(self):
-        self.state_file = "/tmp/claude_ops_active_session.json"
+        self.state_file = "/tmp/claude_ctb_active_session.json"
         self.ensure_state_file()
     
     def ensure_state_file(self) -> None:
@@ -234,7 +234,8 @@ class SessionManager:
     def get_available_projects(self, scan_dirs: List[str] = None) -> List[Dict]:
         """Get list of available projects from running sessions and scan directories.
 
-        Returns list of dicts with 'path', 'name', and 'has_session' keys.
+        Returns list of dicts with 'path', 'name', 'has_session', and 'mtime' keys.
+        Sorted by modification time (oldest first, so newest appear at bottom in Telegram).
         """
         if scan_dirs is None:
             scan_dirs = [os.path.expanduser("~/projects")]
@@ -245,10 +246,16 @@ class SessionManager:
         for session in self.get_all_claude_sessions():
             path = self.get_session_path(session)
             if path and os.path.isdir(path):
+                try:
+                    mtime = os.path.getmtime(path)
+                except Exception:
+                    mtime = 0
+
                 projects[path] = {
                     "path": path,
                     "name": os.path.basename(path),
-                    "has_session": True
+                    "has_session": True,
+                    "mtime": mtime
                 }
 
         # Scan configured directories
@@ -262,16 +269,22 @@ class SessionManager:
                     full_path = os.path.join(scan_dir, entry)
                     if os.path.isdir(full_path) and not entry.startswith('.'):
                         if full_path not in projects:
+                            try:
+                                mtime = os.path.getmtime(full_path)
+                            except Exception:
+                                mtime = 0
+
                             projects[full_path] = {
                                 "path": full_path,
                                 "name": entry,
-                                "has_session": False
+                                "has_session": False,
+                                "mtime": mtime
                             }
             except Exception:
                 continue
 
-        # Sort by name
-        return sorted(projects.values(), key=lambda x: x['name'])
+        # Sort by modification time (oldest first, so newest appear at bottom in Telegram)
+        return sorted(projects.values(), key=lambda x: x['mtime'])
 
     def connect_to_project(self, project_path: str) -> Dict:
         """Connect to an existing project directory.
@@ -327,7 +340,7 @@ class SessionManager:
 
             # Start claude
             subprocess.run(
-                ["tmux", "send-keys", "-t", session_name, "claude", "Enter"],
+                ["tmux", "send-keys", "-t", session_name, "claude --dangerously-skip-permissions", "Enter"],
                 check=True
             )
 
