@@ -70,8 +70,8 @@ monitor_sessions() {
             # 알림 전송
             cd "$CLAUDE_OPS_DIR"
             CLAUDE_SESSION_NAME="$session" python3 -c "
-from claude_ops.telegram.notifier import SmartNotifier
-from claude_ops.config import ClaudeOpsConfig
+from claude_ctb.telegram.notifier import SmartNotifier
+from claude_ctb.config import ClaudeOpsConfig
 try:
     config = ClaudeOpsConfig()
     notifier = SmartNotifier(config)

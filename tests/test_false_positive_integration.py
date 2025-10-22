@@ -6,7 +6,7 @@ has been resolved. It shows the before/after behavior of the fix.
 """
 
 import pytest
-from claude_ops.utils.session_state import SessionStateAnalyzer
+from claude_ctb.utils.session_state import SessionStateAnalyzer
 
 
 def test_reported_false_positive_scenario():

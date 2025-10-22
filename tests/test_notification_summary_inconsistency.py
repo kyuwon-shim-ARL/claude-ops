@@ -4,9 +4,9 @@ Verifies that both systems use consistent state detection logic
 """
 import unittest
 from unittest.mock import patch, MagicMock
-from claude_ops.utils.session_state import SessionStateAnalyzer, SessionState
-from claude_ops.utils.session_summary import SessionSummaryHelper
-from claude_ops.monitoring.multi_monitor import MultiSessionMonitor
+from claude_ctb.utils.session_state import SessionStateAnalyzer, SessionState
+from claude_ctb.utils.session_summary import SessionSummaryHelper
+from claude_ctb.monitoring.multi_monitor import MultiSessionMonitor
 
 class TestNotificationSummaryConsistency(unittest.TestCase):
     """Test consistency between notification and summary systems"""
@@ -71,7 +71,7 @@ esc to interrupt
         """
         
         # Mock session manager to return test session
-        with patch('claude_ops.utils.session_summary.session_manager') as mock_manager:
+        with patch('claude_ctb.utils.session_summary.session_manager') as mock_manager:
             mock_manager.get_all_claude_sessions.return_value = ['test_session']
             
             # Mock state analyzer to detect working state
@@ -175,7 +175,7 @@ class TestSummaryWaitTimeAccuracy(unittest.TestCase):
         # calculated from genuine completion notifications, not false positives
         
         # Mock a session that appears idle but actually has recent work
-        with patch('claude_ops.utils.session_summary.session_manager') as mock_manager:
+        with patch('claude_ctb.utils.session_summary.session_manager') as mock_manager:
             mock_manager.get_all_claude_sessions.return_value = ['test_session']
             
             # Mock state as idle (which would trigger wait time calculation)

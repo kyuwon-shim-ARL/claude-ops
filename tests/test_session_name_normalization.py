@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from claude_ops.utils.wait_time_tracker import WaitTimeTracker
+from claude_ctb.utils.wait_time_tracker import WaitTimeTracker
 
 
 class TestSessionNameNormalization(unittest.TestCase):

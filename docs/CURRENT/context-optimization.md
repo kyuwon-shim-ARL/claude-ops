@@ -33,16 +33,16 @@ git push origin main
 ```bash
 # Generate architecture.md
 cat > architecture.md << 'EOF'
-# Claude-Ops Architecture
+# Claude-CTB Architecture
 
 ## System Overview
-Claude-Ops is a Telegram-based bridge system for managing Claude Code sessions.
+Claude-CTB is a Telegram-based bridge system for managing Claude Code sessions.
 
 ## Core Components
-- **Telegram Bot** (claude_ops/telegram/)
-- **Session Manager** (claude_ops/session_manager.py)
-- **Monitoring System** (claude_ops/monitoring/)
-- **Utilities** (claude_ops/utils/)
+- **Telegram Bot** (claude_ctb/telegram/)
+- **Session Manager** (claude_ctb/session_manager.py)
+- **Monitoring System** (claude_ctb/monitoring/)
+- **Utilities** (claude_ctb/utils/)
 
 ## Data Flow
 Telegram → Bot → Session Manager → tmux → Claude Code
@@ -105,7 +105,7 @@ echo "✅ Context sync complete"
 
 ### 3. Context Search Implementation
 ```python
-# claude_ops/utils/context_search.py
+# claude_ctb/utils/context_search.py
 class ContextSearcher:
     """Intelligent context search across all layers"""
     

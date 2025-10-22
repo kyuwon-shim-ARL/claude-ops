@@ -7,7 +7,7 @@ and ensures backward compatibility with the old boxed format.
 
 import pytest
 from unittest.mock import patch
-from claude_ops.utils.session_state import SessionStateAnalyzer, SessionState
+from claude_ctb.utils.session_state import SessionStateAnalyzer, SessionState
 
 
 class TestNewPromptUIFormat:

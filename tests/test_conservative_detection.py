@@ -6,7 +6,7 @@ Test Conservative Working Detection
 
 import pytest
 from unittest.mock import Mock, patch
-from claude_ops.utils.conservative_detector import ConservativeWorkingDetector, DetectionContext
+from claude_ctb.utils.conservative_detector import ConservativeWorkingDetector, DetectionContext
 
 
 class TestConservativeDetection:
@@ -175,7 +175,7 @@ class TestConservativeIntegration:
     
     def test_session_state_integration(self):
         """SessionStateAnalyzer와의 통합"""
-        from claude_ops.utils.session_state import SessionStateAnalyzer
+        from claude_ctb.utils.session_state import SessionStateAnalyzer
         
         analyzer = SessionStateAnalyzer()
         
@@ -189,7 +189,7 @@ class TestConservativeIntegration:
     
     def test_backwards_compatibility(self):
         """기존 인터페이스 호환성"""
-        from claude_ops.utils.session_state import SessionStateAnalyzer
+        from claude_ctb.utils.session_state import SessionStateAnalyzer
         
         analyzer = SessionStateAnalyzer()
         

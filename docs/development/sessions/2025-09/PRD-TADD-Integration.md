@@ -1,5 +1,5 @@
 # Product Requirements Document (PRD)
-## Claude-Ops TADD Integration Project
+## Claude-CTB TADD Integration Project
 
 **Version**: 1.0.0  
 **Date**: 2025-08-30  
@@ -11,7 +11,7 @@
 ## 📋 Executive Summary
 
 ### Mission Statement
-Transform Claude-Ops into a fully TADD-compliant system that provides structured task management, automatic documentation, and verifiable development workflows for Claude Code sessions.
+Transform Claude-CTB into a fully TADD-compliant system that provides structured task management, automatic documentation, and verifiable development workflows for Claude Code sessions.
 
 ### Project Scale
 **🎯 Strategic Level** - Complete system architecture transformation requiring PRD, comprehensive planning, and full TodoWrite integration.
@@ -83,13 +83,13 @@ Transform Claude-Ops into a fully TADD-compliant system that provides structured
 
 ### Component Hierarchy
 ```
-claude-ops/
+claude-ctb/
 ├── tadd/                          # NEW: TADD Integration Layer
 │   ├── task_manager.py           # TodoWrite integration
 │   ├── document_generator.py     # Auto-documentation
 │   ├── prd_manager.py           # PRD lifecycle management
 │   └── session_archiver.py      # Session archiving
-├── claude_ops/
+├── claude_ctb/
 │   ├── telegram/                 # Enhanced with TADD hooks
 │   │   ├── bot.py               # + TADD command handlers
 │   │   └── workflow_executor.py # NEW: Workflow with TodoWrite

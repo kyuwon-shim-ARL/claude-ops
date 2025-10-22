@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from claude_ops.utils.log_length_manager import (
+from claude_ctb.utils.log_length_manager import (
     LogLengthManager, 
     get_current_log_length,
     set_log_length,
@@ -118,7 +118,7 @@ class TestLogLengthManager:
             
             assert options == [100, 150, 200, 300]
     
-    @patch('claude_ops.utils.log_length_manager.json.dump')
+    @patch('claude_ctb.utils.log_length_manager.json.dump')
     def test_save_error_handling(self, mock_dump):
         """설정 저장 오류 처리 테스트"""
         mock_dump.side_effect = IOError("파일 쓰기 실패")
@@ -146,7 +146,7 @@ class TestLogLengthManager:
 class TestGlobalFunctions:
     """전역 함수들 테스트"""
     
-    @patch('claude_ops.utils.log_length_manager.log_length_manager')
+    @patch('claude_ctb.utils.log_length_manager.log_length_manager')
     def test_get_current_log_length(self, mock_manager):
         """전역 get_current_log_length 함수 테스트"""
         mock_manager.get_current_length.return_value = 150
@@ -155,7 +155,7 @@ class TestGlobalFunctions:
         assert result == 150
         mock_manager.get_current_length.assert_called_once()
     
-    @patch('claude_ops.utils.log_length_manager.log_length_manager')
+    @patch('claude_ctb.utils.log_length_manager.log_length_manager')
     def test_set_log_length_function(self, mock_manager):
         """전역 set_log_length 함수 테스트"""
         mock_manager.set_log_length.return_value = True
@@ -164,7 +164,7 @@ class TestGlobalFunctions:
         assert result is True
         mock_manager.set_log_length.assert_called_once_with(200)
     
-    @patch('claude_ops.utils.log_length_manager.log_length_manager')
+    @patch('claude_ctb.utils.log_length_manager.log_length_manager')
     def test_cycle_log_length_function(self, mock_manager):
         """전역 cycle_log_length 함수 테스트"""
         mock_manager.increase_log_length.return_value = 300

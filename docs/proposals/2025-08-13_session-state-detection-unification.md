@@ -1,9 +1,9 @@
-# PRD: Claude-Ops 작업 상태 감지 시스템 통합
+# PRD: Claude-CTB 작업 상태 감지 시스템 통합
 
 **작성일:** 2025-08-13  
 **작성자:** Claude & Kyuwon  
 **상태:** In Progress  
-**프로젝트:** Claude-Ops Session State Detection Unification
+**프로젝트:** Claude-CTB Session State Detection Unification
 
 ## 🔍 문제 분석: 어쩌다 이렇게 되었나?
 
@@ -69,7 +69,7 @@
 ### Phase 1: 통합 모듈 설계
 
 ```python
-# claude_ops/utils/session_state.py
+# claude_ctb/utils/session_state.py
 from enum import Enum
 from typing import Optional, Dict, Any
 
@@ -130,7 +130,7 @@ class SessionStateAnalyzer:
 
 #### 2.1 Monitor 리팩토링
 ```python
-# claude_ops/telegram/multi_monitor.py
+# claude_ctb/telegram/multi_monitor.py
 from ..utils.session_state import SessionStateAnalyzer, SessionState
 
 class MultiSessionMonitor:
@@ -150,7 +150,7 @@ class MultiSessionMonitor:
 
 #### 2.2 Notifier 리팩토링
 ```python
-# claude_ops/telegram/notifier.py
+# claude_ctb/telegram/notifier.py
 from ..utils.session_state import SessionStateAnalyzer
 
 class SmartNotifier:
@@ -170,7 +170,7 @@ class SmartNotifier:
 ### Phase 3: 상태 전이 관리
 
 ```python
-# claude_ops/utils/state_tracker.py
+# claude_ctb/utils/state_tracker.py
 class SessionStateTracker:
     """상태 변화 추적 및 알림 트리거"""
     
@@ -334,8 +334,8 @@ STATE_PRIORITY = {
 - [DRY Principle](https://en.wikipedia.org/wiki/Don%27t_repeat_yourself)
 - [Single Source of Truth](https://en.wikipedia.org/wiki/Single_source_of_truth)
 - [State Pattern](https://refactoring.guru/design-patterns/state)
-- Current Claude-Ops codebase analysis (2025-08-13)
+- Current Claude-CTB codebase analysis (2025-08-13)
 
 ---
 
-*이 문서는 Claude-Ops 프로젝트의 작업 상태 감지 시스템을 통합하고 개선하기 위한 제품 요구사항 문서입니다.*
+*이 문서는 Claude-CTB 프로젝트의 작업 상태 감지 시스템을 통합하고 개선하기 위한 제품 요구사항 문서입니다.*

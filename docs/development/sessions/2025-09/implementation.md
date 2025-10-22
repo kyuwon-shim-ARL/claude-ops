@@ -18,7 +18,7 @@
 
 ### Code Analysis Results
 ✅ **TADD 모듈 구조화**
-- 기존 claude_ops 패키지와 분리된 독립적인 tadd/ 모듈
+- 기존 claude_ctb 패키지와 분리된 독립적인 tadd/ 모듈
 - 각 컴포넌트별 단일 책임 원칙 적용
 - 공통 인터페이스 및 상속 구조 활용
 

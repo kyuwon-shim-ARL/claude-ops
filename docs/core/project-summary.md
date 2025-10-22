@@ -1,17 +1,17 @@
-# Claude-Ops 프로젝트 요약
+# Claude-CTB 프로젝트 요약
 
 ## 프로젝트 개요
 
-**Claude-Ops**는 Claude Code, Notion, GitHub, Telegram을 통합한 AI 기반 프로젝트 자동화 시스템입니다. 홈 폴더에서 여러 Claude 프로젝트를 중앙 관리하며, 완전 자동화된 워크플로우를 제공합니다.
+**Claude-CTB**는 Claude Code, Notion, GitHub, Telegram을 통합한 AI 기반 프로젝트 자동화 시스템입니다. 홈 폴더에서 여러 Claude 프로젝트를 중앙 관리하며, 완전 자동화된 워크플로우를 제공합니다.
 
 ## 현재 상태 (2025-08-01 기준)
 
 ### 최근 해결된 주요 이슈
 
 **모니터링 서비스 시작 오류 해결 (2025-08-01 11:10)**
-- **문제**: `claude-ops start-monitoring` 명령어에서 2분 타임아웃 발생
-- **원인**: 복잡한 스크립트 구조와 오류 처리 부족 (`claude-ops.sh` → `start_multi_monitoring.sh`)
-- **해결**: 로직을 `claude-ops.sh`의 `start_monitoring()` 함수에 통합하여 안정성 확보
+- **문제**: `claude-ctb start-monitoring` 명령어에서 2분 타임아웃 발생
+- **원인**: 복잡한 스크립트 구조와 오류 처리 부족 (`claude-ctb.sh` → `start_multi_monitoring.sh`)
+- **해결**: 로직을 `claude-ctb.sh`의 `start_monitoring()` 함수에 통합하여 안정성 확보
 - **결과**: 타임아웃 없이 정상 작동, 유지보수성 향상
 
 **텔레그램 봇 통합 및 Reply 파싱 개선 (2025-08-01 13:40)**
@@ -27,7 +27,7 @@
 ### 핵심 시스템 구성요소
 
 #### 1. 멀티 프로젝트 관리
-- **홈 폴더 중앙 관리**: `~/claude-ops`에서 모든 프로젝트 제어
+- **홈 폴더 중앙 관리**: `~/claude-ctb`에서 모든 프로젝트 제어
 - **Reply 기반 타겟팅**: Telegram Reply로 정확한 세션 선택
 - **멀티 세션 모니터링**: 모든 `claude_*` 세션 동시 감시
 - **원격 프로젝트 생성**: Telegram에서 `/start new-project` 지원
@@ -47,13 +47,13 @@
 
 ```bash
 # 시스템 관리
-claude-ops start-monitoring    # 멀티 세션 모니터링 시작
-claude-ops stop-monitoring     # 모니터링 종료
-claude-ops status             # 전체 시스템 상태
-claude-ops sessions           # 활성 세션 목록
+claude-ctb start-monitoring    # 멀티 세션 모니터링 시작
+claude-ctb stop-monitoring     # 모니터링 종료
+claude-ctb status             # 전체 시스템 상태
+claude-ctb sessions           # 활성 세션 목록
 
 # 프로젝트 관리
-claude-ops new-project <name> [path]  # 새 프로젝트 생성
+claude-ctb new-project <name> [path]  # 새 프로젝트 생성
 
 # Claude Code 슬래시 명령어
 /project-plan <file>          # Notion에 프로젝트 구조 생성
@@ -74,13 +74,13 @@ claude-ops new-project <name> [path]  # 새 프로젝트 생성
 ### 프로젝트 구조
 
 ```
-claude-ops/
+claude-ctb/
 ├── 🤖 CLAUDE.md                 # Claude Code 지침
 ├── 🚀 scripts/                  # CLI 도구
-│   └── claude-ops.sh           # 메인 스크립트 (모니터링 통합 로직)
+│   └── claude-ctb.sh           # 메인 스크립트 (모니터링 통합 로직)
 ├── 💻 src/                      # 소스 코드
 │   ├── workflow_manager.py      # 핵심 워크플로우 시스템
-│   └── claude_ops/             # Python 패키지
+│   └── claude_ctb/             # Python 패키지
 │       └── telegram/           # Telegram 통합
 │           └── multi_monitor.py # 멀티 세션 모니터링
 ├── ⚡ slash_commands/           # Claude Code 명령어 정의
@@ -103,7 +103,7 @@ claude-ops/
 
 - **Technical Improvements**:
   - `start_multi_monitoring.sh` 의존성 제거
-  - `claude-ops.sh`에 통합된 모니터링 로직
+  - `claude-ctb.sh`에 통합된 모니터링 로직
   - 환경변수 로딩 방식 개선 (`set -a; source .env; set +a`)
   - 고아 프로세스 정리 로직 강화
 

@@ -44,7 +44,7 @@
 - 계속 작업 중이거나 대기 상태 유지
 
 #### 가능성 2: 시스템 재시작
-- claude-ops 재시작 시 일부 알림 기록 손실
+- claude-ctb 재시작 시 일부 알림 기록 손실
 - 특히 장기 실행 세션의 경우 초기 알림 누락 가능
 
 #### 가능성 3: 알림 시스템 미작동
@@ -132,5 +132,5 @@ def recover_missing_records():
 
 ## 🔗 관련 파일
 - `/tmp/claude_completion_times.json` - 알림 시간 저장
-- `claude_ops/utils/wait_time_tracker.py` - 시간 계산 로직
+- `claude_ctb/utils/wait_time_tracker.py` - 시간 계산 로직
 - `docs/specs/PRD-session-time-tracking-v1.0.md` - 개선 계획

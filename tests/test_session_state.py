@@ -10,7 +10,7 @@ import subprocess
 from unittest.mock import patch, MagicMock
 from datetime import datetime
 
-from claude_ops.utils.session_state import (
+from claude_ctb.utils.session_state import (
     SessionStateAnalyzer, 
     SessionState, 
     StateTransition
@@ -75,7 +75,7 @@ class TestSessionStateAnalyzer:
         """Setup test fixtures"""
         self.analyzer = SessionStateAnalyzer()
     
-    @patch('claude_ops.utils.session_state.subprocess.run')
+    @patch('claude_ctb.utils.session_state.subprocess.run')
     def test_get_screen_content_success(self, mock_run):
         """Test successful screen content retrieval"""
         mock_result = MagicMock()
@@ -94,7 +94,7 @@ class TestSessionStateAnalyzer:
             timeout=5
         )
     
-    @patch('claude_ops.utils.session_state.subprocess.run')
+    @patch('claude_ctb.utils.session_state.subprocess.run')
     def test_get_screen_content_failure(self, mock_run):
         """Test screen content retrieval failure"""
         mock_result = MagicMock()
@@ -179,7 +179,7 @@ class TestSessionStateAnalyzer:
             result = self.analyzer._detect_error_state(screen_content)
             assert result is False, f"Failed for: {screen_content}"
     
-    @patch('claude_ops.utils.session_state.SessionStateAnalyzer.get_screen_content')
+    @patch('claude_ctb.utils.session_state.SessionStateAnalyzer.get_screen_content')
     def test_get_state_priority_resolution(self, mock_get_content):
         """Test state priority resolution when multiple states detected"""
         # Screen content that has both working and waiting patterns
@@ -197,7 +197,7 @@ class TestSessionStateAnalyzer:
         # WAITING_INPUT should win over WORKING due to higher priority
         assert state == SessionState.WAITING_INPUT
     
-    @patch('claude_ops.utils.session_state.SessionStateAnalyzer.get_screen_content')
+    @patch('claude_ctb.utils.session_state.SessionStateAnalyzer.get_screen_content')
     def test_get_state_idle(self, mock_get_content):
         """Test idle state when no specific patterns found"""
         mock_get_content.return_value = "Normal idle content\nNo special patterns\nJust text"
@@ -205,7 +205,7 @@ class TestSessionStateAnalyzer:
         state = self.analyzer.get_state("test_session")
         assert state == SessionState.IDLE
     
-    @patch('claude_ops.utils.session_state.SessionStateAnalyzer.get_screen_content')
+    @patch('claude_ctb.utils.session_state.SessionStateAnalyzer.get_screen_content')
     def test_get_state_unknown(self, mock_get_content):
         """Test unknown state when screen content unavailable"""
         mock_get_content.return_value = None
@@ -213,7 +213,7 @@ class TestSessionStateAnalyzer:
         state = self.analyzer.get_state("test_session")
         assert state == SessionState.UNKNOWN
     
-    @patch('claude_ops.utils.session_state.SessionStateAnalyzer.get_state')
+    @patch('claude_ctb.utils.session_state.SessionStateAnalyzer.get_state')
     def test_legacy_functions(self, mock_get_state):
         """Test legacy compatibility functions"""
         # Test is_working
@@ -241,18 +241,18 @@ class TestSessionStateAnalyzer:
 class TestGlobalFunctions:
     """Test global compatibility functions"""
     
-    @patch('claude_ops.utils.session_state.session_state_analyzer.is_working')
+    @patch('claude_ctb.utils.session_state.session_state_analyzer.is_working')
     def test_is_session_working(self, mock_is_working):
         """Test global is_session_working function"""
         mock_is_working.return_value = True
         
-        from claude_ops.utils.session_state import is_session_working
+        from claude_ctb.utils.session_state import is_session_working
         result = is_session_working("test_session")
         
         assert result is True
         mock_is_working.assert_called_once_with("test_session")
     
-    @patch('claude_ops.utils.session_state.session_state_analyzer.get_state_details')
+    @patch('claude_ctb.utils.session_state.session_state_analyzer.get_state_details')
     def test_get_session_working_info(self, mock_get_details):
         """Test global get_session_working_info function"""
         mock_get_details.return_value = {
@@ -262,7 +262,7 @@ class TestGlobalFunctions:
             "analysis": {"decision_logic": "test logic"}
         }
         
-        from claude_ops.utils.session_state import get_session_working_info
+        from claude_ctb.utils.session_state import get_session_working_info
         result = get_session_working_info("test_session")
         
         expected = {
@@ -349,7 +349,7 @@ Do you want to proceed with deployment?
         analyzer = SessionStateAnalyzer()
         
         # Empty content should not crash and should return unknown state
-        with patch('claude_ops.utils.session_state.SessionStateAnalyzer.get_screen_content') as mock_get_content:
+        with patch('claude_ctb.utils.session_state.SessionStateAnalyzer.get_screen_content') as mock_get_content:
             mock_get_content.return_value = ""
             state = analyzer.get_state("test_session")
             assert state == SessionState.IDLE
@@ -359,7 +359,7 @@ Do you want to proceed with deployment?
         analyzer = SessionStateAnalyzer()
         
         # Null content should return unknown state
-        with patch('claude_ops.utils.session_state.SessionStateAnalyzer.get_screen_content') as mock_get_content:
+        with patch('claude_ctb.utils.session_state.SessionStateAnalyzer.get_screen_content') as mock_get_content:
             mock_get_content.return_value = None
             state = analyzer.get_state("test_session")
             assert state == SessionState.UNKNOWN
@@ -369,7 +369,7 @@ Do you want to proceed with deployment?
         analyzer = SessionStateAnalyzer()
         
         # Should handle gracefully when session doesn't exist
-        with patch('claude_ops.utils.session_state.subprocess.run') as mock_run:
+        with patch('claude_ctb.utils.session_state.subprocess.run') as mock_run:
             mock_result = MagicMock()
             mock_result.returncode = 1  # Session not found
             mock_result.stderr = "session not found"
@@ -409,7 +409,7 @@ Do you want to proceed with deployment?
         results = []
         
         def check_state(session_name):
-            with patch('claude_ops.utils.session_state.SessionStateAnalyzer.get_screen_content') as mock_get_content:
+            with patch('claude_ctb.utils.session_state.SessionStateAnalyzer.get_screen_content') as mock_get_content:
                 mock_get_content.return_value = "● Test\n  ⎿  Running…\n"
                 state = analyzer.get_state(session_name)
                 results.append((session_name, state))
@@ -443,7 +443,7 @@ Do you want to proceed with deployment?
         ]
         
         for screen_content, expected_state in states_sequence:
-            with patch('claude_ops.utils.session_state.SessionStateAnalyzer.get_screen_content') as mock_get_content:
+            with patch('claude_ctb.utils.session_state.SessionStateAnalyzer.get_screen_content') as mock_get_content:
                 mock_get_content.return_value = screen_content
                 actual_state = analyzer.get_state("test_session", use_cache=False)
                 assert actual_state == expected_state, f"Expected {expected_state}, got {actual_state} for content: {screen_content}"
@@ -456,7 +456,7 @@ class TestErrorHandling:
         """Test handling of subprocess timeout"""
         analyzer = SessionStateAnalyzer()
         
-        with patch('claude_ops.utils.session_state.subprocess.run') as mock_run:
+        with patch('claude_ctb.utils.session_state.subprocess.run') as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired("tmux", 5)
             
             state = analyzer.get_state("test_session")
@@ -466,7 +466,7 @@ class TestErrorHandling:
         """Test handling of subprocess exceptions"""
         analyzer = SessionStateAnalyzer()
         
-        with patch('claude_ops.utils.session_state.subprocess.run') as mock_run:
+        with patch('claude_ctb.utils.session_state.subprocess.run') as mock_run:
             mock_run.side_effect = Exception("Unexpected error")
             
             state = analyzer.get_state("test_session")
@@ -485,7 +485,7 @@ class TestErrorHandling:
         ]
         
         for malformed_input in malformed_inputs:
-            with patch('claude_ops.utils.session_state.SessionStateAnalyzer.get_screen_content') as mock_get_content:
+            with patch('claude_ctb.utils.session_state.SessionStateAnalyzer.get_screen_content') as mock_get_content:
                 mock_get_content.return_value = malformed_input
                 # Should not crash and should return a valid state
                 state = analyzer.get_state("test_session")

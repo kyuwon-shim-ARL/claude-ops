@@ -1,6 +1,6 @@
-# 🚀 Claude-Ops: Pure Telegram Bridge
+# 🌉 Claude-Telegram-Bridge
 
-**순수 텔레그램 브리지 - Claude Code 세션 원격 제어 및 모니터링**
+**Claude Code와 Telegram을 연결하는 원격 제어 및 모니터링 브리지**
 
 [![Setup Time](https://img.shields.io/badge/Setup-1_minute-green)](./QUICK_START.md)
 [![Architecture](https://img.shields.io/badge/Architecture-Pure_Bridge-purple)](./CLAUDE.md)
@@ -25,7 +25,11 @@ cp .env.example .env
 # .env에 TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID 설정
 
 # 3. 실행
-uv sync && python -m claude_ops.telegram.bot
+uv sync && python -m claude_ctb.telegram.bot
+
+# 4. CLI 설치 (선택사항)
+./scripts/ctb install
+# 이후 ctb, claude-bridge, claude-telegram-bridge 명령 사용 가능
 ```
 
 ## 📱 기본 사용법
@@ -47,10 +51,10 @@ uv sync && python -m claude_ops.telegram.bot
 ## 🏗️ 아키텍처
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Telegram      │◄──►│   Claude-Ops    │◄──►│  Claude Code    │
-│     Bot         │    │     Bridge      │    │   Sessions      │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
+┌─────────────────┐    ┌──────────────────────┐    ┌─────────────────┐
+│   Telegram      │◄──►│ Claude-Telegram-     │◄──►│  Claude Code    │
+│     Bot         │    │      Bridge          │    │   Sessions      │
+└─────────────────┘    └──────────────────────┘    └─────────────────┘
                               │
                               ▼
                        ┌─────────────────┐
@@ -75,10 +79,17 @@ tmux new-session -d -s claude_my-project -c ~/projects/my-project
 tmux send-keys -t claude_my-project 'claude' Enter
 ```
 
+### CLI 명령어 (설치 후)
+```bash
+ctb new-project my-app              # 짧은 명령 (권장)
+claude-bridge sessions              # 중간 길이
+claude-telegram-bridge status       # 전체 이름
+```
+
 ### 시스템 관리
 ```bash
 # 봇 상태 확인
-ps aux | grep claude_ops
+ps aux | grep claude_ctb
 
 # 세션 관리
 tmux list-sessions | grep claude
@@ -99,4 +110,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Claude-Ops v2.0.1** - Pure Telegram Bridge for Claude Code Sessions
+**Claude-Telegram-Bridge v2.0.1** - Telegram ↔ Claude Code Bridge System

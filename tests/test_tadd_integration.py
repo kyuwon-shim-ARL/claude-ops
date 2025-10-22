@@ -18,8 +18,8 @@ from tadd.prd_manager import TADDPRDManager
 from tadd.session_archiver import TADDSessionArchiver
 
 # Import Telegram bot components  
-from claude_ops.telegram.bot import TelegramBridge
-from claude_ops.config import ClaudeOpsConfig
+from claude_ctb.telegram.bot import TelegramBridge
+from claude_ctb.config import ClaudeOpsConfig
 
 
 class TADDIntegrationTest(unittest.TestCase):

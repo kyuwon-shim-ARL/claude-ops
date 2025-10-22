@@ -8,7 +8,7 @@ import json
 import unittest.mock
 from pathlib import Path
 from datetime import datetime, timedelta
-from claude_ops.utils.wait_time_tracker import WaitTimeTracker
+from claude_ctb.utils.wait_time_tracker import WaitTimeTracker
 
 
 class TestWaitTimeEdgeCases:

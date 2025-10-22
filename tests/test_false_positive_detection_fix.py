@@ -7,7 +7,7 @@ old "esc to interrupt" messages in scrollback cause false positives.
 
 import pytest
 from unittest.mock import patch, MagicMock
-from claude_ops.utils.session_state import SessionStateAnalyzer, SessionState
+from claude_ctb.utils.session_state import SessionStateAnalyzer, SessionState
 
 
 class TestFalsePositiveDetectionFix:
@@ -226,7 +226,7 @@ class TestRegressionPrevention:
         Verify that the transition from WORKING to IDLE still triggers
         notifications correctly
         """
-        from claude_ops.monitoring.multi_monitor import MultiSessionMonitor
+        from claude_ctb.monitoring.multi_monitor import MultiSessionMonitor
         
         monitor = MultiSessionMonitor()
         session = "test_session"

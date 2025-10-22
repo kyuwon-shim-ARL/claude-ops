@@ -36,7 +36,7 @@ fi
 # Start the bridge in tmux
 echo -e "${GREEN}Starting Telegram Bridge...${NC}"
 tmux new-session -d -s claude-telegram-bridge \
-    "cd $(pwd) && uv run python -m claude_ops.telegram.bot"
+    "cd $(pwd) && uv run python -m claude_ctb.telegram.bot"
 
 sleep 2
 

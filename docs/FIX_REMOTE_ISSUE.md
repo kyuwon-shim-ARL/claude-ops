@@ -2,7 +2,7 @@
 
 ## 🚨 문제점
 
-`claude-ops new-project` 명령이 git remote를 설정하지 않아 발생하는 문제:
+`claude-ctb new-project` 명령이 git remote를 설정하지 않아 발생하는 문제:
 - 새 프로젝트 생성 시 remote 없음
 - 기존 디렉토리 재사용 시 잘못된 remote 사용 위험
 - 수동 설정 필요로 실수 가능성
@@ -13,7 +13,7 @@
 
 ```bash
 # 프로젝트 생성
-claude-ops new-project my-app
+claude-ctb new-project my-app
 
 # 디렉토리 이동
 cd my-app
@@ -93,7 +93,7 @@ project_creator.py가 이제 git remote 미설정 시 명확한 경고를 제공
 
 ```bash
 # 프로젝트 생성 시
-$ claude-ops new-project my-app
+$ claude-ctb new-project my-app
 
 ✅ Project 'my-app' created successfully!
 

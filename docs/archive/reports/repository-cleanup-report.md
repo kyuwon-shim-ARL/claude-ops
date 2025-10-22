@@ -1,7 +1,7 @@
 # 📋 Repository Cleanup Report
 
 **Cleanup Date**: 2025-09-09  
-**Project**: Claude-Ops Telegram Bridge System  
+**Project**: Claude-CTB Telegram Bridge System  
 **Repository Size**: 114MB (excluding .venv)
 
 ---
@@ -17,7 +17,7 @@
 
 ### 📁 Directory Organization
 - **Analysis Reports**: Moved to `docs/archive/analysis-reports/`
-  - `analysis-claude-ops-monitoring-logic.md`
+  - `analysis-claude-ctb-monitoring-logic.md`
   - `analysis-quick-completion-detection-gap.md`
 - **Test Reports**: Moved to `docs/archive/reports/`
   - `notification-improvement-test-results.md`
@@ -27,7 +27,7 @@
 - **Enhanced .gitignore**: Added debug and testing patterns
   - Debug session files: `debug_session_*.json`
   - Temporary test files: `test_real_*.py`, `*test_scenario*.py`
-  - Debug directories: `/tmp/claude-ops-debug/`
+  - Debug directories: `/tmp/claude-ctb-debug/`
 
 ---
 
@@ -55,8 +55,8 @@ Total Files: 109 (excluding .venv)
 ## 🗂️ Current Directory Structure
 
 ```
-claude-ops/
-├── 📁 claude_ops/          # Main Python package (51 files)
+claude-ctb/
+├── 📁 claude_ctb/          # Main Python package (51 files)
 │   ├── monitoring/         # Session monitoring
 │   ├── telegram/           # Telegram bot integration
 │   ├── ui/                 # User interface components

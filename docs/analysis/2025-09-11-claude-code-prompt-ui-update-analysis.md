@@ -92,8 +92,8 @@ def _detect_working_state(self, screen_content: str) -> bool:
 3. **향후 개선**: 다음 업데이트 시 우선순위 로직 개선
 
 ## 📁 관련 파일
-- `/home/kyuwon/claude-ops/claude_ops/utils/session_state.py`
-- `/home/kyuwon/claude-ops/tests/test_new_prompt_ui_format.py`
+- `/home/kyuwon/claude-ctb/claude_ctb/utils/session_state.py`
+- `/home/kyuwon/claude-ctb/tests/test_new_prompt_ui_format.py`
 
 ## 🔗 관련 분석
 - [2025-09-09 프롬프트 검출 개선](2025-09-09-prompt-detection-improvements.md)

@@ -213,7 +213,7 @@ def generate_report(results: List[Dict]) -> Dict:
             mock_target = usage.get('mock_target', '')
             
             # 전체 경로에서 실제 mock 대상만 확인
-            # 예: 'claude_ops.utils.session_state.subprocess.run' -> 'subprocess.run'
+            # 예: 'claude_ctb.utils.session_state.subprocess.run' -> 'subprocess.run'
             is_allowed = any(pattern in mock_target for pattern in allowed_patterns)
             
             # Mock() 같은 직접 생성도 체크 - 이름에서 판단

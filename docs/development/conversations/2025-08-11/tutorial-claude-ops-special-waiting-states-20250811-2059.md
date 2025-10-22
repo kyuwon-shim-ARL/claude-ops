@@ -1,4 +1,4 @@
-# Claude-Ops 특수 대기 상태 감지 시스템 구축 튜토리얼
+# Claude-CTB 특수 대기 상태 감지 시스템 구축 튜토리얼
 
 <!-- 
 Git 컨텍스트:
@@ -25,13 +25,13 @@ Git 컨텍스트:
 
 ```bash
 # 현재 모니터링 상태 확인
-claude-ops status
+claude-ctb status
 
 # 멀티 모니터 로그 확인
 tmux capture-pane -t claude-multi-monitor -p | tail -20
 
 # 기존 상태 감지 코드 확인
-grep -A 10 -B 5 "esc to interrupt" claude_ops/telegram/multi_monitor.py
+grep -A 10 -B 5 "esc to interrupt" claude_ctb/telegram/multi_monitor.py
 ```
 
 #### 핵심 설명
@@ -50,7 +50,7 @@ grep -A 10 -B 5 "esc to interrupt" claude_ops/telegram/multi_monitor.py
 #### 실행 블록
 
 ```python
-# claude_ops/telegram/multi_monitor.py 수정
+# claude_ctb/telegram/multi_monitor.py 수정
 waiting_patterns = [
     "ready to code",           # 기본 준비 상태
     "bash command",            # Bash 도구 대기
@@ -116,10 +116,10 @@ def send_waiting_input_notification(self) -> bool:
 ```bash
 # 텔레그램 봇 연결 유지하면서 멀티 모니터만 재시작
 tmux kill-session -t claude-multi-monitor
-tmux new-session -d -s claude-multi-monitor "uv run python -c 'from claude_ops.telegram.multi_monitor import MultiSessionMonitor; monitor = MultiSessionMonitor(); monitor.start_monitoring()'"
+tmux new-session -d -s claude-multi-monitor "uv run python -c 'from claude_ctb.telegram.multi_monitor import MultiSessionMonitor; monitor = MultiSessionMonitor(); monitor.start_monitoring()'"
 
 # 시스템 상태 확인
-claude-ops status
+claude-ctb status
 
 # 멀티 모니터 로그 확인
 tmux capture-pane -t claude-multi-monitor -p | tail -10
@@ -132,7 +132,7 @@ tmux capture-pane -t claude-multi-monitor -p | tail -10
 #### 트러블슈팅
 
 ```
-❌ 시도했지만 안 된 것: claude-ops stop-monitoring → 텔레그램 봇까지 중지됨
+❌ 시도했지만 안 된 것: claude-ctb stop-monitoring → 텔레그램 봇까지 중지됨
 ✅ 대신 성공한 방법: 멀티 모니터 세션만 개별적으로 재시작
 ```
 
@@ -142,13 +142,13 @@ tmux capture-pane -t claude-multi-monitor -p | tail -10
 
 ```bash
 # 복잡한 작업으로 상태 전환 유도
-tmux send-keys -t claude_claude-ops "여러 옵션이 있는 복잡한 작업을 해줘" Enter
+tmux send-keys -t claude_claude-ctb "여러 옵션이 있는 복잡한 작업을 해줘" Enter
 
 # 상태 변화 모니터링
 tmux capture-pane -t claude-multi-monitor -p | tail -5
 
 # 실제 감지된 상태 확인
-# 예상 로그: "🔄 State change in claude_claude-ops: working -> responding"
+# 예상 로그: "🔄 State change in claude_claude-ctb: working -> responding"
 ```
 
 #### 핵심 설명
@@ -181,7 +181,7 @@ tmux capture-pane -t claude-multi-monitor -p | tail -5
 ## 즉시 실행 체크리스트
 
 ```
-□ 사전 준비: claude-ops 시스템 정상 작동 확인 - 예상 시간: 2분
+□ 사전 준비: claude-ctb 시스템 정상 작동 확인 - 예상 시간: 2분
 □ Step 1: 패턴 감지 로직 구현 (multi_monitor.py 수정) - 예상 시간: 10분
 □ Step 2: 알림 시스템 확장 (notifier.py 수정) - 예상 시간: 15분
 □ Step 3: 안전한 핫 리로드로 적용 - 예상 시간: 5분

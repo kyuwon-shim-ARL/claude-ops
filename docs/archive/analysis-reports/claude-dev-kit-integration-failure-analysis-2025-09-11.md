@@ -51,16 +51,16 @@ project/
 └── scripts/
 ```
 
-**Claude-Ops project_creator.py 기대 구조**:
+**Claude-CTB project_creator.py 기대 구조**:
 ```python
-# 기존 claude-ops 코드에서는 단순한 구조 예상
+# 기존 claude-ctb 코드에서는 단순한 구조 예상
 self.project_dir = Path.home() / "projects" / project_name
 # 특별한 src/ 구조나 복잡한 하위 디렉토리 처리 없음
 ```
 
 #### 3. **설치 명령 실행 오류** ⚙️
 
-**현재 claude-ops project_creator.py**:
+**현재 claude-ctb project_creator.py**:
 ```python
 install_command = (
     f"curl -sSL https://raw.githubusercontent.com/kyuwon-shim-ARL/claude-dev-kit/main/install.sh | "
@@ -78,13 +78,13 @@ install_command = (
 ## 🔍 근본 원인 분석
 
 ### 1. **스크립트 진화와 동기화 문제** 📈
-**발견**: claude-dev-kit이 새로운 폴더 구조로 진화했으나 claude-ops는 구버전 기준
+**발견**: claude-dev-kit이 새로운 폴더 구조로 진화했으나 claude-ctb는 구버전 기준
 
 **타임라인 추정**:
 1. **초기**: 단순한 프로젝트 구조
 2. **중기**: `src/` 기반 모듈화 구조 도입
 3. **현재**: `docs/development/guides/` 포함한 완전한 구조
-4. **문제**: claude-ops는 중기 버전 기준으로 구현됨
+4. **문제**: claude-ctb는 중기 버전 기준으로 구현됨
 
 ### 2. **디렉토리 생성 로직 불완전** 🚩
 **원격 스크립트 분석**:
@@ -113,7 +113,7 @@ cat > "docs/development/guides/claude-code-workflow.md" << 'EOF'
 ## 💡 해결 방안
 
 ### 1. **즉시 해결 (Hot Fix)** 🔥
-**claude-ops project_creator.py 수정**:
+**claude-ctb project_creator.py 수정**:
 ```python
 def _install_remote_claude_dev_kit(self) -> bool:
     """Install claude-dev-kit with improved error handling"""
@@ -249,7 +249,7 @@ class DevKitManager:
 ## 📋 액션 아이템
 
 ### 🔥 긴급 (즉시 수행)
-1. **claude-ops project_creator.py 수정**: 디렉토리 사전 생성 로직 추가
+1. **claude-ctb project_creator.py 수정**: 디렉토리 사전 생성 로직 추가
 2. **에러 처리 강화**: 부분 실패 시에도 사용 가능한 프로젝트 생성
 3. **fallback 개선**: 로컬 템플릿으로 완전한 구조 생성
 
@@ -275,14 +275,14 @@ curl -sSL https://raw.githubusercontent.com/kyuwon-shim-ARL/claude-dev-kit/main/
 ```
 
 ### 2. **개발팀 액션**:
-- claude-ops의 project_creator.py 즉시 수정
+- claude-ctb의 project_creator.py 즉시 수정
 - 원격 claude-dev-kit 스크립트 디렉토리 생성 부분 수정
 - 통합 테스트 실행
 
 ---
 
 ## 💾 관련 파일
-- 프로젝트 생성기: `claude_ops/project_creator.py:218-280`
+- 프로젝트 생성기: `claude_ctb/project_creator.py:218-280`
 - 원격 설치 스크립트: `https://raw.githubusercontent.com/kyuwon-shim-ARL/claude-dev-kit/main/install.sh:436`
 - 테스트 결과: `~/projects/test_project/` (부분 성공 상태)
 
@@ -292,4 +292,4 @@ curl -sSL https://raw.githubusercontent.com/kyuwon-shim-ARL/claude-dev-kit/main/
 
 ---
 
-**최종 결론**: 원격 claude-dev-kit 스크립트의 디렉토리 생성 누락과 claude-ops의 에러 처리 부족이 주요 원인입니다. 즉시 수정 가능한 문제입니다.
+**최종 결론**: 원격 claude-dev-kit 스크립트의 디렉토리 생성 누락과 claude-ctb의 에러 처리 부족이 주요 원인입니다. 즉시 수정 가능한 문제입니다.

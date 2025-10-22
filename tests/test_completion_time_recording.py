@@ -7,10 +7,10 @@ Ensures completion times are recorded correctly regardless of notification statu
 import pytest
 import time
 from unittest.mock import Mock, patch, MagicMock
-from claude_ops.monitoring.multi_monitor import MultiSessionMonitor
-from claude_ops.utils.session_state import SessionState
-from claude_ops.utils.wait_time_tracker_v2 import ImprovedWaitTimeTracker
-from claude_ops.monitoring.completion_event_system import CompletionEventType
+from claude_ctb.monitoring.multi_monitor import MultiSessionMonitor
+from claude_ctb.utils.session_state import SessionState
+from claude_ctb.utils.wait_time_tracker_v2 import ImprovedWaitTimeTracker
+from claude_ctb.monitoring.completion_event_system import CompletionEventType
 
 
 class TestCompletionTimeRecording:
@@ -57,7 +57,7 @@ class TestCompletionTimeRecording:
         self.monitor.tracker = mock_tracker
         
         # Mock notifier to fail
-        with patch('claude_ops.telegram.notifier.SmartNotifier') as mock_notifier_class:
+        with patch('claude_ctb.telegram.notifier.SmartNotifier') as mock_notifier_class:
             mock_notifier = Mock()
             mock_notifier.send_work_completion_notification.return_value = False  # Notification fails
             mock_notifier_class.return_value = mock_notifier

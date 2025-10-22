@@ -10,9 +10,9 @@ import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from claude_ops.utils.conservative_detector import conservative_detector
-from claude_ops.monitoring.missed_case_analyzer import MissedCaseAnalyzer
-from claude_ops.utils.session_state import SessionStateAnalyzer
+from claude_ctb.utils.conservative_detector import conservative_detector
+from claude_ctb.monitoring.missed_case_analyzer import MissedCaseAnalyzer
+from claude_ctb.utils.session_state import SessionStateAnalyzer
 
 
 class TestConservativeSystemIntegration:
@@ -151,7 +151,7 @@ class TestTelegramCommandIntegration:
     @pytest.mark.asyncio
     async def test_detection_commands_exist(self):
         """명령어 함수들이 존재하는지 확인"""
-        from claude_ops.telegram.commands.detection_analysis import DETECTION_COMMANDS
+        from claude_ctb.telegram.commands.detection_analysis import DETECTION_COMMANDS
         
         expected_commands = [
             'detection_status',

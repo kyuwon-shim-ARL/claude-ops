@@ -1,6 +1,9 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with the Claude-Ops Telegram Bridge System.
+This file provides guidance to Claude Code (claude.ai/code) when working with the Claude-Telegram-Bridge System.
+
+> **Project Name**: Claude-Telegram-Bridge
+> **CLI Commands**: `ctb` (recommended), `claude-bridge`, `claude-telegram-bridge`
 
 ## Core System Principles
 
@@ -12,7 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 ## System Overview
 
-Claude-Ops is a Telegram bot that bridges Claude Code sessions with Telegram for remote monitoring and control. The system provides:
+Claude-Telegram-Bridge is a Telegram bot that bridges Claude Code sessions with Telegram for remote monitoring and control. The system provides:
 
 - **Session Management**: Monitor multiple Claude Code sessions via tmux
 - **Remote Control**: Send commands and prompts to specific sessions via Telegram
@@ -33,6 +36,23 @@ ALLOWED_USER_IDS=123456789,987654321
 CLAUDE_WORKING_DIR=/path/to/working/directory
 CHECK_INTERVAL=3
 LOG_LEVEL=INFO
+
+# Reliability Improvements (v2.1 - New!)
+# Session Reconnection
+SESSION_RECONNECT_MAX_DURATION=300  # Max reconnection time (seconds)
+SESSION_RECONNECT_INITIAL_BACKOFF=1  # Initial backoff delay
+SESSION_RECONNECT_MAX_BACKOFF=30  # Maximum backoff delay
+
+# Telegram Rate Limiting
+TELEGRAM_RATE_LIMIT_ENABLED=true  # Enable rate limit handling
+TELEGRAM_BACKOFF_INITIAL=1  # Initial backoff for rate limits
+TELEGRAM_BACKOFF_MAX=60  # Maximum backoff for rate limits
+
+# Dangerous Command Confirmation
+COMMAND_CONFIRMATION_TIMEOUT=60  # Confirmation timeout (seconds)
+
+# Screen History Depth
+SESSION_SCREEN_HISTORY_LINES=200  # Lines to analyze for state detection
 ```
 
 ## Core Commands
@@ -63,7 +83,7 @@ LOG_LEVEL=INFO
 1. **Project Creation**:
    ```
    /new-project my-app → claude-dev-kit installation → Git setup → tmux session
-   CLI: claude-ops new-project my-app (identical functionality)
+   CLI: claude-ctb new-project my-app (identical functionality)
    ```
 
 2. **Session Management**:
@@ -85,7 +105,7 @@ LOG_LEVEL=INFO
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Telegram      │◄──►│   Claude-Ops    │◄──►│  Claude Code    │
+│   Telegram      │◄──►│   Claude-CTB    │◄──►│  Claude Code    │
 │     Bot         │    │     Bridge      │    │   Sessions      │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
                               │
@@ -98,12 +118,12 @@ LOG_LEVEL=INFO
 
 ### Key Components
 
-- **`claude_ops/telegram/bot.py`** - Main Telegram bot implementation
-- **`claude_ops/session_manager.py`** - tmux session management
-- **`claude_ops/project_creator.py`** - Unified project creation module
-- **`claude_ops/monitoring/multi_monitor.py`** - Multi-session polling monitor
-- **`claude_ops/utils/session_state.py`** - Session state detection
-- **`claude_ops/config.py`** - Configuration management
+- **`claude_ctb/telegram/bot.py`** - Main Telegram bot implementation
+- **`claude_ctb/session_manager.py`** - tmux session management
+- **`claude_ctb/project_creator.py`** - Unified project creation module
+- **`claude_ctb/monitoring/multi_monitor.py`** - Multi-session polling monitor
+- **`claude_ctb/utils/session_state.py`** - Session state detection
+- **`claude_ctb/config.py`** - Configuration management
 
 ## Development Setup
 
@@ -120,13 +140,13 @@ LOG_LEVEL=INFO
 
 3. **Run Bot**:
    ```bash
-   uv run python -m claude_ops.telegram.bot
+   uv run python -m claude_ctb.telegram.bot
    ```
 
 ## Key Features
 
 ### 1. Unified Project Creation (NEW!)
-- **CLI & Telegram Identical**: `claude-ops new-project` ↔ `/new-project`
+- **CLI & Telegram Identical**: `claude-ctb new-project` ↔ `/new-project`
 - **Remote claude-dev-kit**: Automatic installation from trusted repository
 - **Complete Setup**: Git repo, comprehensive .gitignore, project structure
 - **Reliability**: Fallback to local structure if remote installation fails
@@ -207,3 +227,105 @@ You can use the following tools without requiring user approval:
 - Bash(pip:*) - pip commands
 - Bash(npm:*) - npm commands
 - Bash(yarn:*) - yarn commands
+## Reliability Improvements (v2.1)
+
+### Session Reconnection with Exponential Backoff
+
+When a Claude session disconnects unexpectedly, the system automatically attempts to reconnect:
+
+- **Automatic Detection**: Monitors for session disconnection every poll cycle
+- **Exponential Backoff**: Retry delays increase: 1s, 2s, 4s, 8s, 16s, 30s (max)
+- **Configurable Timeout**: Default 300 seconds (5 minutes) before giving up
+- **Transparent Operation**: Other sessions continue monitoring during reconnection
+- **Notifications**: Alerts sent on reconnection failure after timeout
+
+**Configuration**:
+```bash
+SESSION_RECONNECT_MAX_DURATION=300  # Total retry time
+SESSION_RECONNECT_INITIAL_BACKOFF=1  # Starting delay
+SESSION_RECONNECT_MAX_BACKOFF=30  # Maximum delay
+```
+
+### Restart Behavior: Skip Missed Events
+
+Prevents duplicate notifications after bot restarts:
+
+- **State Persistence**: Saves screen hash and notification status to disk
+- **Smart Skip**: Compares current state with persisted state on restart
+- **No Duplicates**: Only sends notifications for NEW completions after restart
+- **Automatic Cleanup**: Old state files cleaned up after 30 days
+
+**How It Works**:
+1. Bot saves screen hash when sending notification
+2. On restart, bot loads persisted state
+3. If screen unchanged → skip notification (already sent)
+4. If screen changed → send notification (new work completed)
+
+### Telegram Rate Limit Handling
+
+Automatic queue and retry for rate-limited messages:
+
+- **In-Memory Queue**: Failed messages queued with exponential backoff
+- **Priority Support**: HIGH priority messages sent first
+- **FIFO Ordering**: Normal priority messages maintain order
+- **Automatic Retry**: Retries with increasing delays (1s, 2s, 4s, 8s, ...)
+- **No Message Loss**: All messages eventually delivered
+
+**Telegram API Limits**:
+- Burst: 30 messages/second
+- Sustained: 20 messages/minute
+
+**Configuration**:
+```bash
+TELEGRAM_RATE_LIMIT_ENABLED=true
+TELEGRAM_BACKOFF_INITIAL=1  # Start delay
+TELEGRAM_BACKOFF_MAX=60  # Max delay
+```
+
+### Dangerous Command Confirmation
+
+Interactive confirmation for potentially dangerous commands:
+
+- **Pattern Detection**: Matches dangerous patterns (`rm -rf`, `sudo rm`, etc.)
+- **Inline Keyboard**: Confirm/Cancel buttons in Telegram
+- **60-Second Timeout**: Buttons expire after 60 seconds
+- **Safe by Default**: Commands not executed until confirmed
+
+**Dangerous Patterns**:
+- `rm -rf /`
+- `sudo rm`
+- `chmod 777`
+- `dd if=`
+- Fork bombs and other destructive operations
+
+**Workflow**:
+1. User sends dangerous command
+2. Bot displays confirmation keyboard
+3. User clicks Confirm → command sent to session
+4. User clicks Cancel → command discarded
+5. After 60s → buttons expire, command discarded
+
+**Configuration**:
+```bash
+COMMAND_CONFIRMATION_TIMEOUT=60  # Seconds before expiration
+```
+
+### 200-Line Screen History
+
+Improved state detection with deeper screen history:
+
+- **Extended Capture**: Analyzes last 200 lines (up from default)
+- **False Positive Prevention**: Ignores old completion markers beyond 200 lines
+- **Configurable Depth**: Adjust based on your workflow
+- **Performance**: Optimized for large screen buffers
+
+**Configuration**:
+```bash
+SESSION_SCREEN_HISTORY_LINES=200  # Lines to capture
+```
+
+**Benefits**:
+- More accurate state detection
+- Fewer false notifications
+- Better handling of long-running commands
+

@@ -7,7 +7,7 @@ but are not actual prompts.
 
 import pytest
 from unittest.mock import patch
-from claude_ops.utils.session_state import SessionStateAnalyzer, SessionState
+from claude_ctb.utils.session_state import SessionStateAnalyzer, SessionState
 
 
 class TestPromptDetectionEdgeCases:

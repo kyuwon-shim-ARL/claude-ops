@@ -68,7 +68,7 @@
 ### **2. 타이밍 문제**
 - **문제**: Hook이 트리거되는 시점에 Claude가 아직 작업 중으로 표시됨
 - **영향**: `is_session_working()` 항상 True 반환
-- **증거**: `Hook notification skipped for session: claude_claude-ops (still working)`
+- **증거**: `Hook notification skipped for session: claude_claude-ctb (still working)`
 
 ### **3. Hook 설정 문제**
 - **문제**: `MainAgentStop` 대신 `Stop`으로 잘못 설정됨
@@ -90,14 +90,14 @@
   "hooks": {
     "MainAgentStop": [  // Stop → MainAgentStop
       {
-        "command": "/home/kyuwon/claude-ops/scripts/hook-notification.sh",
+        "command": "/home/kyuwon/claude-ctb/scripts/hook-notification.sh",
         "matcher": "*",
         "timeout": 30
       }
     ],
     "PostToolUse": [  // 도구 사용 후 추가 체크
       {
-        "command": "/home/kyuwon/claude-ops/scripts/hook-notification.sh",
+        "command": "/home/kyuwon/claude-ctb/scripts/hook-notification.sh",
         "matcher": "*",
         "timeout": 10
       }

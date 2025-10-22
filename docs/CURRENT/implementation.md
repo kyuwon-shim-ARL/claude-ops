@@ -13,7 +13,7 @@ Successfully implemented improvements to the `/summary` command addressing two c
 ## 🔧 Changes Implemented
 
 ### 1. WaitTimeTracker Enhancement
-**File**: `claude_ops/utils/wait_time_tracker.py`
+**File**: `claude_ctb/utils/wait_time_tracker.py`
 
 #### Added Method: `validate_and_fix_timestamps()`
 - Detects and corrects future timestamps (beyond current time)
@@ -26,7 +26,7 @@ Successfully implemented improvements to the `/summary` command addressing two c
 - Lines 277-309: New `validate_and_fix_timestamps()` method implementation
 
 ### 2. SessionSummaryHelper Sorting Update
-**File**: `claude_ops/utils/session_summary.py`
+**File**: `claude_ctb/utils/session_summary.py`
 
 #### Modified Method: `get_all_sessions_with_status()`
 - Changed sorting priority: Working sessions now appear first

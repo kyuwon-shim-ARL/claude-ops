@@ -52,7 +52,7 @@ fi
 # Start the multi-session monitor in tmux
 echo -e "${GREEN}Starting Multi-Session Claude Code Monitor...${NC}"
 tmux new-session -d -s claude-multi-monitor \
-    "cd $(pwd) && uv run python -m claude_ops.telegram.multi_monitor"
+    "cd $(pwd) && uv run python -m claude_ctb.telegram.multi_monitor"
 
 # Give tmux a moment to start
 sleep 2

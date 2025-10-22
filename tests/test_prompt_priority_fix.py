@@ -5,7 +5,7 @@ Tests that working indicators should have priority over prompt detection
 
 import pytest
 from unittest.mock import patch
-from claude_ops.utils.session_state import SessionStateAnalyzer, SessionState
+from claude_ctb.utils.session_state import SessionStateAnalyzer, SessionState
 
 
 class TestPromptPriorityFix:

@@ -1,13 +1,13 @@
-# Planning Document - Claude-Ops 완료 알림 시스템 개선
+# Planning Document - Claude-CTB 완료 알림 시스템 개선
 
 **Generated**: 2025-08-25 17:48:00
-**Session**: claude_claude-ops  
+**Session**: claude_claude-ctb  
 **Workflow**: 전체사이클 - 기획 단계
 
 ## 🎯 프로젝트 개요
 
 ### 배경
-Claude-Ops의 `/summary` 명령어에서 완료된 세션이 "대기중 0초"로 표시되어 마치 진행 중인 것처럼 보이는 문제 발생. 특히 `claude_claude_share_snack_tier_preference_vote` 세션이 완료되었음에도 대기시간이 0초로 표시됨.
+Claude-CTB의 `/summary` 명령어에서 완료된 세션이 "대기중 0초"로 표시되어 마치 진행 중인 것처럼 보이는 문제 발생. 특히 `claude_claude_share_snack_tier_preference_vote` 세션이 완료되었음에도 대기시간이 0초로 표시됨.
 
 ### 목표  
 100% 신뢰할 수 있는 세션 완료 감지 및 사용자 친화적 상태 표시 시스템 구축

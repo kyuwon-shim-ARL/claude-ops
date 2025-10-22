@@ -18,13 +18,14 @@ CLAUDE_OPS_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Show help
 show_help() {
-    printf "${BLUE}🚀 Claude-Ops CLI${NC}\n"
+    printf "${BLUE}🌉 Claude-Telegram-Bridge CLI${NC}\n"
     printf "\n"
     printf "${YELLOW}Usage:${NC}\n"
-    printf "  claude-ops <command> [args...]\n"
+    printf "  ctb <command> [args...]${NC}\n"
     printf "\n"
     printf "${YELLOW}Commands:${NC}\n"
     printf "  ${GREEN}new-project${NC} <name> [path]     Create new Claude project session\n"
+    printf "  ${GREEN}connect${NC} <path>               Connect to existing project directory\n"
     printf "  ${GREEN}kill-session${NC} <name>          Kill specific Claude session\n"
     printf "  ${GREEN}start-monitoring${NC}             Start multi-session monitoring\n"
     printf "  ${GREEN}stop-monitoring${NC}              Stop all monitoring processes\n"
@@ -35,54 +36,140 @@ show_help() {
     printf "  ${GREEN}help${NC}                         Show this help message\n"
     printf "\n"
     printf "${YELLOW}Examples:${NC}\n"
-    printf "  claude-ops new-project my-ai-app\n"
-    printf "  claude-ops new-project web-scraper ~/work/client\n"
-    printf "  claude-ops kill-session claude_my-ai-app\n"
-    printf "  claude-ops start-monitoring\n"
-    printf "  claude-ops status\n"
+    printf "  ctb new-project my-ai-app\n"
+    printf "  ctb connect ~/projects/my-existing-app\n"
+    printf "  ctb new-project web-scraper ~/work/client\n"
+    printf "  ctb kill-session claude_my-ai-app\n"
+    printf "  ctb start-monitoring\n"
+    printf "  ctb status\n"
     printf "\n"
-    printf "${BLUE}💡 Tip:${NC} Add to PATH with: claude-ops install\n"
+    printf "${BLUE}💡 Tip:${NC} Add to PATH with: ctb install\n"
 }
 
 # Install to PATH
 install_to_path() {
-    printf "${BLUE}🔧 Installing claude-ops to PATH...${NC}\n"
-    
+    printf "${BLUE}🔧 Installing claude-telegram-bridge CLI to PATH...${NC}\n"
+
+    # Remove old claude-ops entry if exists
+    if grep -q "# Claude-Ops CLI" ~/.bashrc 2>/dev/null; then
+        printf "${YELLOW}⚠️  Removing old claude-ops entry...${NC}\n"
+        sed -i '/# Claude-Ops CLI/,+2d' ~/.bashrc
+    fi
+
     # Add to ~/.bashrc
-    BASHRC_ENTRY="# Claude-Ops CLI
+    BASHRC_ENTRY="# Claude-Telegram-Bridge CLI
 export PATH=\"$SCRIPT_DIR:\$PATH\"
-alias claude-ops='$SCRIPT_DIR/claude-ops.sh'"
-    
-    if ! grep -q "Claude-Ops CLI" ~/.bashrc 2>/dev/null; then
+alias ctb='$SCRIPT_DIR/ctb'
+alias claude-bridge='$SCRIPT_DIR/claude-bridge'
+alias claude-telegram-bridge='$SCRIPT_DIR/claude-telegram-bridge'"
+
+    if ! grep -q "# Claude-Telegram-Bridge CLI" ~/.bashrc 2>/dev/null; then
         echo "" >> ~/.bashrc
         echo "$BASHRC_ENTRY" >> ~/.bashrc
         printf "${GREEN}✅ Added to ~/.bashrc${NC}\n"
     else
         printf "${YELLOW}⚠️  Already installed in ~/.bashrc${NC}\n"
     fi
-    
-    # Create symlink in /usr/local/bin if possible (optional)
+
+    # Create symlinks in /usr/local/bin if possible (optional)
     if [ -w "/usr/local/bin" ] 2>/dev/null; then
-        ln -sf "$SCRIPT_DIR/claude-ops.sh" "/usr/local/bin/claude-ops" 2>/dev/null && \
-        printf "${GREEN}✅ Created symlink in /usr/local/bin${NC}\n" || \
-        printf "${YELLOW}⚠️  Could not create symlink in /usr/local/bin${NC}\n"
+        ln -sf "$SCRIPT_DIR/ctb" "/usr/local/bin/ctb" 2>/dev/null && \
+        printf "${GREEN}✅ Created symlink: /usr/local/bin/ctb${NC}\n" || true
+
+        ln -sf "$SCRIPT_DIR/claude-bridge" "/usr/local/bin/claude-bridge" 2>/dev/null && \
+        printf "${GREEN}✅ Created symlink: /usr/local/bin/claude-bridge${NC}\n" || true
+
+        ln -sf "$SCRIPT_DIR/claude-telegram-bridge" "/usr/local/bin/claude-telegram-bridge" 2>/dev/null && \
+        printf "${GREEN}✅ Created symlink: /usr/local/bin/claude-telegram-bridge${NC}\n" || true
+
+        # Remove old claude-ops symlink if exists
+        if [ -L "/usr/local/bin/claude-ops" ]; then
+            rm -f "/usr/local/bin/claude-ops" 2>/dev/null && \
+            printf "${YELLOW}🗑️  Removed old symlink: /usr/local/bin/claude-ops${NC}\n" || true
+        fi
     fi
-    
+
     printf "\n"
     printf "${GREEN}🎉 Installation complete!${NC}\n"
     printf "Run: ${YELLOW}source ~/.bashrc${NC} or restart your terminal\n"
-    printf "Then try: ${YELLOW}claude-ops help${NC}\n"
+    printf "\n"
+    printf "${YELLOW}Available commands:${NC}\n"
+    printf "  ${GREEN}ctb${NC}                      - Short alias (recommended)\n"
+    printf "  ${GREEN}claude-bridge${NC}            - Medium length\n"
+    printf "  ${GREEN}claude-telegram-bridge${NC}   - Full name\n"
+    printf "\n"
+    printf "Try: ${YELLOW}ctb help${NC}\n"
 }
 
 # Create new project
 new_project() {
     if [ $# -eq 0 ]; then
         printf "${RED}Error: Project name required${NC}\n"
-        printf "Usage: claude-ops new-project <name> [path]\n"
+        printf "Usage: ctb new-project <name> [path]\n"
         exit 1
     fi
-    
+
     "$SCRIPT_DIR/new-project.sh" "$@"
+}
+
+# Connect to existing project
+connect_project() {
+    if [ $# -eq 0 ]; then
+        printf "${RED}Error: Project path required${NC}\n"
+        printf "Usage: ctb connect <project-path>\n"
+        printf "\n"
+        printf "Examples:\n"
+        printf "  ctb connect ~/projects/my-app\n"
+        printf "  ctb connect /home/user/work/client-project\n"
+        exit 1
+    fi
+
+    PROJECT_PATH="$1"
+
+    # Expand ~ to home directory
+    PROJECT_PATH="${PROJECT_PATH/#\~/$HOME}"
+
+    # Check if directory exists
+    if [ ! -d "$PROJECT_PATH" ]; then
+        printf "${RED}❌ Directory not found: $PROJECT_PATH${NC}\n"
+        exit 1
+    fi
+
+    printf "${BLUE}🔄 Connecting to project: $PROJECT_PATH${NC}\n"
+
+    # Use Python to connect via SessionManager
+    cd "$CLAUDE_OPS_DIR"
+
+    uv run python -c "
+import sys
+sys.path.insert(0, '.')
+from claude_ctb.session_manager import session_manager
+
+project_path = '$PROJECT_PATH'
+result = session_manager.connect_to_project(project_path)
+
+if result['status'] == 'error':
+    print(f\"❌ Error: {result['error']}\")
+    exit(1)
+elif result['status'] == 'switched':
+    print(f\"✅ Switched to existing session\")
+    print(f\"🎯 Session: {result['session_name']}\")
+    print(f\"📁 Path: {result['project_path']}\")
+    print('')
+    print('💡 This project already has an active session.')
+    exit(0)
+elif result['status'] == 'created':
+    print(f\"✅ Created new session\")
+    print(f\"🎯 Session: {result['session_name']}\")
+    print(f\"📁 Path: {result['project_path']}\")
+    print('')
+    print('${GREEN}Next steps:${NC}')
+    print(f\"  1. Connect: ${YELLOW}tmux attach -t {result['session_name']}${NC}\")
+    print(f\"  2. Or use Telegram: ${YELLOW}/sessions${NC} to switch to this session\")
+    print('')
+    print('${GREEN}🎉 Session ready!${NC}')
+    exit(0)
+"
 }
 
 # Kill specific session
@@ -178,7 +265,7 @@ start_monitoring() {
     # Start the multi-session monitor in tmux
     printf "${GREEN}Starting Multi-Session Claude Code Monitor...${NC}\n"
     tmux new-session -d -s claude-multi-monitor \
-        "cd $(pwd) && uv run python -m claude_ops.monitoring.multi_monitor"
+        "cd $(pwd) && uv run python -m claude_ctb.monitoring.multi_monitor"
     
     # Give tmux a moment to start
     sleep 3
@@ -198,7 +285,7 @@ start_monitoring() {
             
             printf "${GREEN}Starting Telegram Bot...${NC}\n"
             tmux new-session -d -s telegram-bot \
-                "cd $(pwd) && uv run python -m claude_ops.telegram.bot"
+                "cd $(pwd) && uv run python -m claude_ctb.telegram.bot"
             sleep 2
             
             if tmux has-session -t telegram-bot 2>/dev/null; then
@@ -332,6 +419,10 @@ case "${1:-help}" in
     "new-project")
         shift
         new_project "$@"
+        ;;
+    "connect")
+        shift
+        connect_project "$@"
         ;;
     "kill-session")
         shift

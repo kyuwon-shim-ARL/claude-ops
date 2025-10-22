@@ -11,7 +11,7 @@ import tempfile
 import shutil
 import os
 
-from claude_ops.project_creator import ProjectCreator
+from claude_ctb.project_creator import ProjectCreator
 
 
 class TestClaudeDevKitCompatibility(unittest.TestCase):

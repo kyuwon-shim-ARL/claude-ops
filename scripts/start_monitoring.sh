@@ -36,7 +36,7 @@ fi
 # Start the monitor in tmux
 echo -e "${GREEN}Starting Claude Code Monitor...${NC}"
 tmux new-session -d -s claude-monitor \
-    "cd $(pwd) && uv run python -m claude_ops.telegram.monitor"
+    "cd $(pwd) && uv run python -m claude_ctb.telegram.monitor"
 
 sleep 2
 

@@ -4,9 +4,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "claude-ops"
+name = "claude-telegram-bridge"
 version = "2.0.1"
-description = "Telegram-Claude Bridge System for development workflow automation"
+description = "Telegram-Claude Code Bridge System for remote monitoring and control"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -32,4 +32,4 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["claude_ops", "tadd"]
+packages = ["claude_ctb", "tadd"]

@@ -121,9 +121,9 @@ class SessionState(Enum):
 4. [ ] 통합 테스트 케이스 추가
 
 ## 🔗 관련 파일
-- `claude_ops/utils/session_state.py`: 상태 감지 로직
-- `claude_ops/utils/conservative_detector.py`: 보수적 감지기
-- `claude_ops/telegram/notifier.py`: 알림 발송 로직
+- `claude_ctb/utils/session_state.py`: 상태 감지 로직
+- `claude_ctb/utils/conservative_detector.py`: 보수적 감지기
+- `claude_ctb/telegram/notifier.py`: 알림 발송 로직
 - `tests/test_notification_detection_improvements.py`: 테스트 케이스
 
 ## 📚 관련 이슈

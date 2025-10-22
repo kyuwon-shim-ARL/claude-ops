@@ -1,15 +1,15 @@
-# Multi-User Deployment Guide for Claude-Ops
+# Multi-User Deployment Guide for Claude-CTB
 
 ## Overview
 
-This guide explains how to deploy Claude-Ops for multiple users (~10 people) in your organization. Each user will have their own independent instance with personal Telegram bot configuration.
+This guide explains how to deploy Claude-CTB for multiple users (~10 people) in your organization. Each user will have their own independent instance with personal Telegram bot configuration.
 
 ## 🏗️ Architecture
 
 ```
 ┌──────────────────────────────────────────────────┐
 │                 Git Repository                    │
-│           (Central Claude-Ops Source)             │
+│           (Central Claude-CTB Source)             │
 └──────────────────────────────────────────────────┘
                         │
         ┌───────────────┼───────────────┐
@@ -38,9 +38,9 @@ Each user needs:
 ### Step 1: Clone Repository
 
 ```bash
-# Clone the Claude-Ops repository
-git clone https://github.com/your-org/claude-ops.git
-cd claude-ops
+# Clone the Claude-CTB repository
+git clone https://github.com/your-org/claude-ctb.git
+cd claude-ctb
 ```
 
 ### Step 2: Create Personal Telegram Bot
@@ -49,7 +49,7 @@ cd claude-ops
 2. Send `/newbot` command
 3. Follow prompts to create your bot:
    - Choose a name (e.g., "John's Claude Ops")
-   - Choose a username (must end with 'bot', e.g., "johns_claude_ops_bot")
+   - Choose a username (must end with 'bot', e.g., "johns_claude_ctb_bot")
 4. Save the **Bot Token** provided by BotFather
 
 ### Step 3: Get Your Telegram IDs
@@ -110,17 +110,17 @@ uv sync
 ./scripts/setup-hooks.sh
 
 # Or manual setup
-uv run python -m claude_ops.hook_manager setup
+uv run python -m claude_ctb.hook_manager setup
 ```
 
 ### Step 7: Start Your Bot
 
 ```bash
 # Run the bot
-uv run python -m claude_ops.telegram.bot
+uv run python -m claude_ctb.telegram.bot
 
 # Or run in background with tmux
-tmux new -d -s claude-ops-bot 'uv run python -m claude_ops.telegram.bot'
+tmux new -d -s claude-ctb-bot 'uv run python -m claude_ctb.telegram.bot'
 ```
 
 ### Step 8: Verify Setup
@@ -134,10 +134,10 @@ tmux new -d -s claude-ops-bot 'uv run python -m claude_ops.telegram.bot'
 
 Each user's instance will have:
 ```
-claude-ops/
+claude-ctb/
 ├── .env                  # Personal configuration (NOT shared)
 ├── .env.example          # Template for new users
-├── claude_ops/           # Core code (shared via Git)
+├── claude_ctb/           # Core code (shared via Git)
 ├── scripts/              # Utility scripts
 ├── tests/                # Test files
 └── README.md             # Documentation
@@ -176,7 +176,7 @@ uv sync
 
 # Restart bot
 # (Stop current bot with Ctrl+C first)
-uv run python -m claude_ops.telegram.bot
+uv run python -m claude_ctb.telegram.bot
 ```
 
 ### Breaking Changes
@@ -193,10 +193,10 @@ If updates include breaking changes:
 #### Bot Not Responding
 ```bash
 # Check if bot is running
-ps aux | grep claude_ops
+ps aux | grep claude_ctb
 
 # Check logs
-tail -f claude_ops.log  # If logging to file
+tail -f claude_ctb.log  # If logging to file
 
 # Verify token
 curl https://api.telegram.org/bot<YOUR_TOKEN>/getMe
@@ -269,12 +269,12 @@ For team-wide monitoring, consider:
 ### Resources
 1. **Documentation**: Check `CLAUDE.md` for detailed features
 2. **README**: Quick reference for commands
-3. **Source Code**: Review `claude_ops/` for implementation details
+3. **Source Code**: Review `claude_ctb/` for implementation details
 
 ### Support Channels
 1. **Team Chat**: Ask in your team's Slack/Discord
 2. **GitHub Issues**: Report bugs and request features
-3. **Admin Support**: Contact your Claude-Ops admin
+3. **Admin Support**: Contact your Claude-CTB admin
 
 ## 📝 User Onboarding Checklist
 
@@ -293,7 +293,7 @@ For new users, complete these steps:
 
 ## 🎯 Best Practices for Teams
 
-1. **Regular Sync Meetings**: Weekly sync on Claude-Ops usage
+1. **Regular Sync Meetings**: Weekly sync on Claude-CTB usage
 2. **Shared Workflows**: Document and share effective prompts
 3. **Version Control**: Always pull latest changes before major work
 4. **Backup Strategy**: Keep backups of important session logs
@@ -325,13 +325,13 @@ If your team grows beyond 10 users:
 ### Essential Commands
 ```bash
 # Setup
-git clone <repo> && cd claude-ops
+git clone <repo> && cd claude-ctb
 cp .env.example .env && nano .env
 uv sync
 ./scripts/setup-hooks.sh
 
 # Daily Use
-uv run python -m claude_ops.telegram.bot  # Start bot
+uv run python -m claude_ctb.telegram.bot  # Start bot
 git pull origin main                      # Update
 tmux attach -t claude_projectname         # Join session
 

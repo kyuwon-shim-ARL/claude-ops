@@ -6,7 +6,7 @@ import pytest
 import time
 import unittest.mock
 from pathlib import Path
-from claude_ops.utils.wait_time_tracker_v2 import ImprovedWaitTimeTracker
+from claude_ctb.utils.wait_time_tracker_v2 import ImprovedWaitTimeTracker
 
 
 class TestImprovedWaitTimeTracker:

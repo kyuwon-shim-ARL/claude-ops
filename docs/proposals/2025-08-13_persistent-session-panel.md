@@ -1,9 +1,9 @@
-# PRD: Claude-Ops 상시 세션 패널 (Persistent Session Panel)
+# PRD: Claude-CTB 상시 세션 패널 (Persistent Session Panel)
 
 **작성일:** 2025-08-13  
 **작성자:** Claude & Kyuwon  
 **상태:** Planning  
-**프로젝트:** Claude-Ops Telegram Bot UX Enhancement
+**프로젝트:** Claude-CTB Telegram Bot UX Enhancement
 
 ---
 
@@ -50,11 +50,11 @@
 
 #### A. Pinned Message with Inline Keyboard
 ```
-📊 Claude-Ops 세션 패널 (Auto-updated)
+📊 Claude-CTB 세션 패널 (Auto-updated)
 
 🎯 claude_PaperFlow      [●] WORKING  ⭐ (현재 활성)
 🔬 claude_claude-dev-kit [○] IDLE  
-🤖 claude_claude-ops     [●] WORKING
+🤖 claude_claude-ctb     [●] WORKING
 🧪 claude_MC             [○] IDLE
 💊 claude_SMILES         [△] WAITING
 
@@ -81,7 +81,7 @@ STATUS_EMOJI = {
 SESSION_TYPE_EMOJI = {
     "PaperFlow": "🎯",
     "claude-dev-kit": "🔬", 
-    "claude-ops": "🤖",
+    "claude-ctb": "🤖",
     "MC": "🧪",
     "SMILES": "💊"
 }
@@ -241,7 +241,7 @@ class PersistentSessionPanel:
         
     def generate_panel_content(self) -> str:
         """패널 콘텐츠 생성 (활성 세션 강조 포함)"""
-        lines = ["📊 Claude-Ops 세션 패널 (Auto-updated)\n"]
+        lines = ["📊 Claude-CTB 세션 패널 (Auto-updated)\n"]
         
         # 스마트 정렬: 활성 → WORKING → WAITING → ERROR → IDLE
         sessions = self.get_smart_sorted_sessions()
@@ -648,7 +648,7 @@ async def handle_quick_action(self, session_name: str, action: str):
 
 ### 시나리오 3: 오류 처리
 ```
-1. 패널에서 "🤖 claude-ops [❌] ERROR" 확인
+1. 패널에서 "🤖 claude-ctb [❌] ERROR" 확인
 2. 세션 클릭 → "🔧 오류 보기" 선택
 3. 오류 내용 확인 후 "🔄 재시작" 클릭
 4. 자동으로 세션 재시작 및 상태 정상화
@@ -725,7 +725,7 @@ async def handle_quick_action(self, session_name: str, action: str):
 - [Telegram Bot API - Inline Keyboards](https://core.telegram.org/bots/api#inlinekeyboard)
 - [Freqtrade Telegram Bot UI](https://www.freqtrade.io/en/stable/telegram-usage/)
 - [Pinned Messages Best Practices](https://core.telegram.org/bots/api#pinchatmessage)
-- Current Claude-Ops Telegram Bot Implementation
+- Current Claude-CTB Telegram Bot Implementation
 
 ---
 
@@ -746,7 +746,7 @@ async def handle_quick_action(self, session_name: str, action: str):
 ```
 🎯 claude_PaperFlow      [●] WORKING  ⭐ (현재 활성)
 🔬 claude_claude-dev-kit [○] IDLE  
-🤖 claude_claude-ops     [●] WORKING
+🤖 claude_claude-ctb     [●] WORKING
 ```
 
 ### 3. **📏 동적 로그 길이 조절**
@@ -774,4 +774,4 @@ async def handle_quick_action(self, session_name: str, action: str):
 
 ---
 
-*이 문서는 Claude-Ops Telegram Bot의 사용자 경험을 혁신적으로 개선하기 위한 상시 세션 패널 기능의 제품 요구사항 문서입니다. 추가된 프롬프트 회상, 활성 세션 강조, 동적 로그 조절 기능으로 완전한 UX 혁신을 달성합니다.*
+*이 문서는 Claude-CTB Telegram Bot의 사용자 경험을 혁신적으로 개선하기 위한 상시 세션 패널 기능의 제품 요구사항 문서입니다. 추가된 프롬프트 회상, 활성 세션 강조, 동적 로그 조절 기능으로 완전한 UX 혁신을 달성합니다.*
