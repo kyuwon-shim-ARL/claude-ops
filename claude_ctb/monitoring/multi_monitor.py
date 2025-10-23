@@ -354,12 +354,14 @@ class MultiSessionMonitor:
                 if persisted_state:
                     # Resume from persisted state
                     self.last_screen_hash[session_name] = persisted_state.screen_hash
-                    self.notification_sent[session_name] = persisted_state.notification_sent
+                    # BUGFIX: Always start with notification_sent=False on restart
+                    # The persisted hash allows skip logic, but we should detect NEW work
+                    self.notification_sent[session_name] = False
                     try:
                         self.last_state[session_name] = SessionState(persisted_state.last_state)
                     except ValueError:
                         self.last_state[session_name] = SessionState.UNKNOWN
-                    logger.info(f"📂 Loaded persisted state for {session_name}: notification_sent={persisted_state.notification_sent}")
+                    logger.info(f"📂 Loaded persisted state for {session_name}: screen_hash={persisted_state.screen_hash[:8]}, notification_sent reset to False")
                 else:
                     # Fresh start
                     self.last_screen_hash[session_name] = ""
