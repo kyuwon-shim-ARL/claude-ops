@@ -462,9 +462,31 @@ pytest tests/unit/test_config_validation.py \
   - CI/CD ready: exit code 0 (safe) or 1 (compatibility broken)
   - File: `scripts/check_api_compatibility.py`
 
+## Phase 3.10: Restart State Skip Bug Fixes (Critical Post-Deployment)
+
+**Context**: Phase 3.2 "Restart State Skip" feature had two critical bugs causing notification/wait time tracking failures.
+
+- [x] T054 Fix permanent notification block after restart (notification_sent flag)
+  - Bug: `notification_sent=True` persisted and never reset after restart
+  - Symptom: No notifications sent after restart, completion_times.json empty
+  - Root cause: Line 357 loaded persisted flag without reset logic
+  - Fix: Always reset `notification_sent=False` on restart (line 359)
+  - Keep screen_hash for duplicate detection, but allow new completions
+  - File: `claude_ctb/monitoring/multi_monitor.py` (line 357-364)
+  - Commit: 3e71111
+
+- [x] T055 Fix false positive completions on restart (UNKNOWN state transitions)
+  - Bug: UNKNOWN → WAITING_INPUT treated as completion
+  - Symptom: "아무것도 안했는데 대기시간이 줄어있음" (false completion at restart)
+  - Root cause: Line 261 triggered on any→WAITING_INPUT, including UNKNOWN
+  - Fix: Ignore transitions from UNKNOWN state (line 262-265)
+  - Only notify on real transitions: WORKING/IDLE → WAITING_INPUT
+  - File: `claude_ctb/monitoring/multi_monitor.py` (line 261-265)
+  - Commit: b7fbbae
+
 ## Implementation Summary
 
-**Completed**: 52/53 tasks (98%)
+**Completed**: 54/55 tasks (98%)
 **Remaining**: 1 task (T043 - manual quickstart validation)
 
 All critical implementation tasks completed:
@@ -476,12 +498,14 @@ All critical implementation tasks completed:
 - ✅ Polish (T037-T042, T044)
 - ✅ Monitoring health (T048-T050)
 - ✅ API compatibility bugfix (T051-T053)
+- ✅ Restart state skip bug fixes (T054-T055)
 
 New features fully functional:
 - ✅ Session reconnection with exponential backoff
-- ✅ Restart state skip behavior
+- ✅ Restart state skip behavior (with false positive fixes)
 - ✅ Rate limit queue with backoff
 - ✅ Dangerous command confirmation
 - ✅ 200-line screen history detection
 - ✅ Monitoring session health status
 - ✅ Wait time tracking with session suffix handling
+- ✅ No false positives on restart

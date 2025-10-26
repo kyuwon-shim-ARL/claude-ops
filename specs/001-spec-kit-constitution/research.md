@@ -287,6 +287,105 @@ def remove_session(session_name: str):
 
 ---
 
+---
+
+## 7. Restart State Skip Bug Fixes (Post-Deployment Discovery)
+
+### Problems Identified (Critical)
+
+**Bug 1: Permanent Notification Block**
+- Symptom: "대기시간이 제대로 인식 안되는" - no completions tracked after restart
+- Root cause: `notification_sent=True` persisted to disk, never reset
+- Impact: `completion_times.json` stayed empty, wait time calculation impossible
+
+**Bug 2: Restart False Positives**
+- Symptom: "아무것도 안했는데 대기시간이 줄어있음" - false completions at restart
+- Root cause: UNKNOWN → WAITING_INPUT treated as completion
+- Impact: Sessions at prompt triggered completion events on restart
+
+### Root Cause Analysis
+
+**Bug 1 Timeline:**
+1. Session completes work → `notification_sent=True` saved
+2. System restarts → loads `notification_sent=True` from disk (line 357)
+3. New work completes → screen changes but flag still True
+4. No notification sent → no completion time recorded
+5. Result: `completion_times.json` = {}, wait time tracking broken
+
+**Bug 2 Timeline:**
+1. System restart → all sessions start with `previous_state=UNKNOWN`
+2. Idle session at prompt → `current_state=WAITING_INPUT`
+3. Line 261 check: "any → WAITING_INPUT" triggers notification
+4. UNKNOWN → WAITING_INPUT treated as completion ❌
+5. Result: False positive completion, wait time reset for idle sessions
+
+### Decision
+
+Two-part fix addressing both bugs:
+
+**Fix 1: Reset notification_sent on restart**
+```python
+# Line 359: Always start False, even if persisted True
+self.notification_sent[session_name] = False
+# Keep screen_hash for duplicate detection
+```
+
+**Fix 2: Ignore UNKNOWN transitions**
+```python
+# Line 262-265: Check previous state before notifying
+if previous_state != SessionState.UNKNOWN:
+    should_notify = True
+```
+
+### Implementation Approach
+
+**Fix 1 Logic:**
+- Persisted hash prevents duplicate of SAME completion (restart spam protection)
+- Reset flag allows NEW completions after restart (fixes notification block)
+- Behavior:
+  - Screen unchanged → no notification ✅ (correct, same work)
+  - Screen changed → notification sent ✅ (correct, new work)
+
+**Fix 2 Logic:**
+- Valid transitions that trigger notifications:
+  - ✅ WORKING → WAITING_INPUT (actual completion)
+  - ✅ IDLE → WAITING_INPUT (resumed work completed)
+  - ❌ UNKNOWN → WAITING_INPUT (restart detection, not completion)
+
+### Rationale
+
+**Why both fixes needed:**
+- Fix 1 alone: Notifications work, but restart causes spam
+- Fix 2 alone: No spam, but notifications still blocked by flag
+- Together: Clean restart + accurate detection
+
+**Design principle:**
+- Restart state skip should prevent DUPLICATE notifications
+- But NOT prevent NEW work notifications
+- Screen hash handles duplicates, flag shouldn't be persistent
+
+### Alternatives Considered
+
+- **Delete state files on restart**: Rejected - loses valuable hash data
+- **Time-based expiry**: Rejected - completion timing varies widely
+- **Manual reset command**: Rejected - requires user intervention
+
+### Testing
+
+Created test scenario:
+1. Create state file with `notification_sent=True`
+2. Restart monitor → verify flag reset to False
+3. Session at prompt → verify no false positive
+4. Actual work completes → verify notification sent
+
+### References
+
+- Bug 1 commit: 3e71111
+- Bug 2 commit: b7fbbae
+- Related feature: Phase 3.2 Restart State Skip (T010-T014)
+
+---
+
 ## Summary
 
 All research complete. No unknowns remain. Ready for Phase 1 (Design & Contracts).
@@ -299,3 +398,4 @@ All research complete. No unknowns remain. Ready for Phase 1 (Design & Contracts
 | Dangerous Commands | InlineKeyboard confirmation | Clear intent, follows Telegram UX, non-blocking |
 | Screen History | 200-line scrollback | Sufficient context per clarification, low overhead |
 | API Compatibility | Port missing methods + automated check | Prevents refactoring regressions, ensures v1/v2 parity |
+| Restart Bug Fixes | Reset flag + ignore UNKNOWN | Fixes notification block + false positives |
