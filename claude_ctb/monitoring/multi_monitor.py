@@ -259,8 +259,10 @@ class MultiSessionMonitor:
             should_notify = True
             notification_reason = f"Work completed (WORKING → {current_state})"
         elif current_state == SessionState.WAITING_INPUT and previous_state != SessionState.WAITING_INPUT:
-            should_notify = True
-            notification_reason = "Waiting for input"
+            # BUGFIX: Ignore UNKNOWN -> WAITING_INPUT transitions (restart false positive)
+            if previous_state != SessionState.UNKNOWN:
+                should_notify = True
+                notification_reason = "Waiting for input"
         # 3. Quiet completion detection
         elif self.state_analyzer.detect_quiet_completion(session_name):
             should_notify = True
