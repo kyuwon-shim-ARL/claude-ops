@@ -283,16 +283,76 @@ During implementation validation, two critical blocking issues were discovered a
 
 **Validation**: All three issues resolved, monitoring active with 6 sessions tracked, notifications working correctly
 
+## Phase 3.9: API Compatibility Bugfix (Post-Refactoring)
+
+**Context**: During `claude_ops` → `claude_ctb` refactoring (commit 1b1abf3), v1 improvements from bb6478c were not propagated to v2, causing wait time tracking failures.
+
+**Problem**: User reported "왜인지 대기시간이 다시 또 제대로 인식 안되는중" - wait time tracking completely broken, `completion_times.json` remained empty.
+
+**Root Cause**: `wait_time_tracker_v2.py` missing critical methods from v1:
+- `mark_completion_safe()` - handles session suffix changes (claude_project-5 → claude_project-6)
+- `normalize_session_name()` - removes trailing `-\d+` suffix
+- API compatibility aliases (`cleanup_old_sessions`, `remove_session`)
+
+**Solution**: Three-part fix (T051-T053):
+1. Port `mark_completion_safe()` and `normalize_session_name()` from v1 to v2
+2. Add API compatibility aliases for multi_monitor.py calls
+3. Create automated compatibility checker (`scripts/check_api_compatibility.py`)
+
+**Commits**:
+- `refactor: add missing API compatibility methods to wait_time_tracker_v2`
+- `feat: add API compatibility checker script`
+
+## Phase 3.10: Restart State Skip Bug Fixes (Critical Post-Deployment)
+
+**Context**: Phase 3.2 "Restart State Skip" feature had two critical bugs causing notification/wait time tracking failures.
+
+### Bug #1: Permanent Notification Block (T054)
+
+**Problem**: After system restart, no new completions were tracked even though work was being completed.
+
+**Symptom**: User reported wait time not tracking, `completion_times.json` stayed empty.
+
+**Root Cause**:
+1. `notification_sent=True` saved to `/tmp/claude-ops-state/*.json`
+2. On restart, loaded persisted flag (multi_monitor.py:357)
+3. Flag never reset, blocking all future notifications
+4. Result: No completion times recorded
+
+**Solution**: Always reset `notification_sent=False` on restart (line 359), keep screen_hash for duplicate detection.
+
+**File**: `claude_ctb/monitoring/multi_monitor.py` (line 357-364)
+**Commit**: 3e71111 "fix: reset notification_sent flag on restart to allow new completions"
+
+### Bug #2: False Positive Completions on Restart (T055)
+
+**Problem**: Sessions showing completion when nothing was done.
+
+**Symptom**: User reported "아무것도 안했는데 대기시간이 줄어있음" (false completion at restart).
+
+**Root Cause**:
+1. After restart, all sessions start with `previous_state=UNKNOWN`
+2. Idle sessions at prompt detected as `current_state=WAITING_INPUT`
+3. Line 261 triggered on `any→WAITING_INPUT` transition
+4. `UNKNOWN→WAITING_INPUT` incorrectly treated as completion
+
+**Solution**: Ignore transitions from UNKNOWN state (line 262-265), only notify on real transitions (WORKING/IDLE → WAITING_INPUT).
+
+**File**: `claude_ctb/monitoring/multi_monitor.py` (line 261-265)
+**Commit**: b7fbbae "fix: ignore UNKNOWN state transitions to prevent false positives on restart"
+
+**Validation**: System restarted, both bugs verified fixed, wait time tracking working correctly.
+
 ## Progress Tracking
 
 **Phase Status**:
 - [x] Phase 0: Research complete (/plan command)
 - [x] Phase 1: Design complete (/plan command)
 - [x] Phase 2: Task planning approach described (/plan command)
-- [ ] Phase 3: Tasks generated (/tasks command - NOT YET RUN)
-- [x] Phase 4: Critical bugs discovered and fixed (see section above)
-- [ ] Phase 5: Full implementation complete
-- [ ] Phase 6: Validation passed
+- [x] Phase 3: Tasks generated and executed (/tasks command)
+- [x] Phase 4: Critical bugs discovered and fixed
+- [x] Phase 5: Implementation complete (54/55 tasks - 98%)
+- [ ] Phase 6: Validation - manual quickstart pending (T043)
 
 **Gate Status**:
 - [x] Initial Constitution Check: PASS (all principles aligned)
