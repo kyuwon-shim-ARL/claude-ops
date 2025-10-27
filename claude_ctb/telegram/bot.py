@@ -648,11 +648,11 @@ class TelegramBridge:
                                 header += "**로그 내용:**\n"
                             else:
                                 header = f"📺 **Part {i+1}/{len(parts)}** [{target_session}]\n\n"
-                            # Send without markdown to avoid parsing errors
+                            # Use Markdown for proper line break formatting
                             message = f"{header}{part.strip()}"
-                            await update.message.reply_text(message, parse_mode=None)
+                            await update.message.reply_text(message, parse_mode="Markdown")
                     else:
-                        # Send without markdown to avoid parsing errors with session info
+                        # Use Markdown for proper line break formatting with session info
                         session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
                         header = f"📺 **Claude 화면 로그** [{target_session}]\n\n"
                         header += f"📁 **프로젝트**: `{session_display}`\n"
@@ -660,7 +660,7 @@ class TelegramBridge:
                         header += f"📏 **라인 수**: {len(filtered_lines)}줄\n\n"
                         header += "**로그 내용:**\n"
                         message = f"{header}{screen_text}"
-                        await update.message.reply_text(message, parse_mode=None)
+                        await update.message.reply_text(message, parse_mode="Markdown")
                 else:
                     await update.message.reply_text("📺 Claude 화면이 비어있습니다.")
             else:
@@ -732,14 +732,14 @@ class TelegramBridge:
 
                     screen_text = '\n'.join(filtered_lines)
 
-                    # Send without markdown to avoid parsing errors with session info
+                    # Use Markdown for proper line break formatting with session info
                     session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
                     header = f"📺 Claude 화면 로그 [{target_session}]\n\n"
                     header += f"📁 프로젝트: {session_display}\n"
                     header += f"🎯 세션: {target_session}\n"
                     header += f"📏 라인 수: {len(filtered_lines)}줄\n\n"
                     header += "로그 내용:\n"
-                    
+
                     # Check if we need to split the message due to Telegram limits
                     max_length = 3500
                     if len(header + screen_text) > max_length:
@@ -749,8 +749,8 @@ class TelegramBridge:
                         message = f"{header}{truncated_text}"
                     else:
                         message = f"{header}{screen_text}"
-                    
-                    await update.message.reply_text(message, parse_mode=None)
+
+                    await update.message.reply_text(message, parse_mode="Markdown")
                 else:
                     await update.message.reply_text("📺 Claude 화면이 비어있습니다.")
             else:
