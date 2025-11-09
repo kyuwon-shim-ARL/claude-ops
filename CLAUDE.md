@@ -181,9 +181,21 @@ SESSION_SCREEN_HISTORY_LINES=200  # Lines to analyze for state detection
 - **Perfect for**: Applying slash command changes without losing work context
 
 ### 6. Multi-Session Management
-- Monitor multiple Claude projects simultaneously  
+- Monitor multiple Claude projects simultaneously
 - Session board provides grid view of all active sessions
 - Easy switching between different development contexts
+
+### 7. Wait Time Tracking (NEW!)
+- **Automatic Tracking**: Measures time elapsed since last work completion
+- **Human-Readable Format**: Displays as "3분 25초", "1시간 15분" in notifications
+- **Accuracy Indicator**: Shows "(추정)" for estimated times when exact completion time is unknown
+- **Context Awareness**: Helps users understand Claude's response time and workload
+
+### 8. Reliable Log Viewing
+- **Markdown-Safe**: `/log` command wraps content in code blocks to prevent parsing errors
+- **Special Character Handling**: Properly displays logs with `*`, `_`, `` ` ``, `[`, `]` characters
+- **Formatted Output**: Headers use Markdown formatting while log content displays as-is
+- **Error-Free**: No more "Can't parse entities" errors from Telegram API
 
 ## Best Practices
 
