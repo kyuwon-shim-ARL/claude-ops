@@ -16,6 +16,13 @@ from ..utils.log_length_manager import get_current_log_length
 from .message_queue import get_global_queue, ExponentialBackoffQueue
 # REMOVED: Task completion imports - simplifying to 2 notification types only
 
+# Import wait time tracker
+try:
+    from ..utils.wait_time_tracker_v2 import migrate_to_v2
+    wait_tracker = migrate_to_v2()
+except ImportError:
+    from ..utils.wait_time_tracker import wait_tracker
+
 logger = logging.getLogger(__name__)
 
 
@@ -38,7 +45,24 @@ class SmartNotifier:
         """Get current time formatted for display"""
         from datetime import datetime
         return datetime.now().strftime("%H:%M:%S")
-    
+
+    def _format_wait_time(self, seconds: float) -> str:
+        """Format wait time in human-readable format"""
+        if seconds < 60:
+            return f"{int(seconds)}초"
+        elif seconds < 3600:
+            minutes = int(seconds / 60)
+            remaining_seconds = int(seconds % 60)
+            if remaining_seconds > 0:
+                return f"{minutes}분 {remaining_seconds}초"
+            return f"{minutes}분"
+        else:
+            hours = int(seconds / 3600)
+            remaining_minutes = int((seconds % 3600) / 60)
+            if remaining_minutes > 0:
+                return f"{hours}시간 {remaining_minutes}분"
+            return f"{hours}시간"
+
     def _get_current_screen_content(self) -> str:
         """Get current screen content from tmux session"""
         try:
@@ -375,6 +399,11 @@ class SmartNotifier:
         # 동적 로그 길이 정보 추가
         log_length = get_current_log_length()
 
+        # Get wait time since last completion
+        wait_time_seconds, is_accurate = wait_tracker.get_wait_time_since_completion(session_name)
+        wait_time_str = self._format_wait_time(wait_time_seconds)
+        accuracy_indicator = "" if is_accurate else " (추정)"
+
         if context:
             # Enhanced message with session information and prompt recall
             # Make session clickable: /sessions project_name
@@ -382,6 +411,7 @@ class SmartNotifier:
 
 {prompt_context}📁 **프로젝트**: `{working_dir}`
 ⏰ **완료 시간**: {self._get_current_time()}
+⏱️ **대기 시간**: {wait_time_str}{accuracy_indicator}
 
 {context}
 
@@ -402,6 +432,7 @@ class SmartNotifier:
 
 📁 **프로젝트**: `{working_dir}`
 ⏰ **완료 시간**: {self._get_current_time()}
+⏱️ **대기 시간**: {wait_time_str}{accuracy_indicator}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━
 Claude가 작업을 완료했습니다.

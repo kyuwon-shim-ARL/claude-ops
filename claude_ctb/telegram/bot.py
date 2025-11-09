@@ -645,11 +645,11 @@ class TelegramBridge:
                                 header += f"📁 **프로젝트**: `{session_display}`\n"
                                 header += f"🎯 **세션**: `{target_session}`\n"
                                 header += f"📏 **라인 수**: {len(filtered_lines)}줄 - Part {i+1}/{len(parts)}\n\n"
-                                header += "**로그 내용:**\n"
+                                header += "**로그 내용:**\n```\n"
                             else:
-                                header = f"📺 **Part {i+1}/{len(parts)}** [{target_session}]\n\n"
-                            # Use Markdown for proper line break formatting
-                            message = f"{header}{part.strip()}"
+                                header = f"📺 **Part {i+1}/{len(parts)}** [{target_session}]\n```\n"
+                            # Wrap log content in code block to prevent Markdown parsing errors
+                            message = f"{header}{part.strip()}\n```"
                             await update.message.reply_text(message, parse_mode="Markdown")
                     else:
                         # Use Markdown for proper line break formatting with session info
@@ -658,8 +658,9 @@ class TelegramBridge:
                         header += f"📁 **프로젝트**: `{session_display}`\n"
                         header += f"🎯 **세션**: `{target_session}`\n"
                         header += f"📏 **라인 수**: {len(filtered_lines)}줄\n\n"
-                        header += "**로그 내용:**\n"
-                        message = f"{header}{screen_text}"
+                        header += "**로그 내용:**\n```\n"
+                        # Wrap log content in code block to prevent Markdown parsing errors
+                        message = f"{header}{screen_text}\n```"
                         await update.message.reply_text(message, parse_mode="Markdown")
                 else:
                     await update.message.reply_text("📺 Claude 화면이 비어있습니다.")
@@ -738,17 +739,17 @@ class TelegramBridge:
                     header += f"📁 프로젝트: {session_display}\n"
                     header += f"🎯 세션: {target_session}\n"
                     header += f"📏 라인 수: {len(filtered_lines)}줄\n\n"
-                    header += "로그 내용:\n"
+                    header += "로그 내용:\n```\n"
 
                     # Check if we need to split the message due to Telegram limits
                     max_length = 3500
                     if len(header + screen_text) > max_length:
                         # Truncate the content
-                        available_space = max_length - len(header) - 50  # 50 chars for truncation message
+                        available_space = max_length - len(header) - 60  # 60 chars for code block + truncation message
                         truncated_text = screen_text[:available_space] + "\n\n... (내용이 길어 일부 생략됨)"
-                        message = f"{header}{truncated_text}"
+                        message = f"{header}{truncated_text}\n```"
                     else:
-                        message = f"{header}{screen_text}"
+                        message = f"{header}{screen_text}\n```"
 
                     await update.message.reply_text(message, parse_mode="Markdown")
                 else:
