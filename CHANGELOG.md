@@ -5,6 +5,26 @@ All notable changes to Claude-Ops will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.3] - 2025-11-08
+
+### 🐛 Fixed
+- **`/log` Command Markdown Parsing Errors**: Log content with special Markdown characters (`*`, `_`, `` ` ``, `[`, `]`) caused Telegram API parsing errors
+  - Wrapped log content in code blocks (` ``` `) to prevent Markdown parsing while keeping header formatting
+  - Affected files: `claude_ctb/telegram/bot.py` (3 locations: log_command multipart, single message, _log_with_lines helper)
+  - Error message: "Can't parse entities: can't find end of the entity starting at byte offset X"
+
+### ✨ Completed
+- **Wait Time Tracking Display**: Now shows how long Claude waited before completing work
+  - Added `_format_wait_time()` method for human-readable format (e.g., "3분 25초", "1시간 15분")
+  - Integrated `wait_tracker` into work completion notifications
+  - Shows accuracy indicator "(추정)" for estimated times
+  - Enhanced notification format: `⏱️ **대기 시간**: 3분 25초`
+
+### 💡 Impact
+- ✅ `/log` command now works reliably with any screen content
+- ✅ Users see how long Claude waited before completing work
+- ✅ Better UX with code-formatted logs and completion context
+
 ## [2.0.2] - 2025-09-09
 
 ### 🎯 Enhanced Notification Detection System
