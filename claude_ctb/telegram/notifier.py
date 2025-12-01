@@ -362,13 +362,8 @@ class SmartNotifier:
     
     def send_work_completion_notification(self) -> bool:
         """Send work completion notification with enhanced context and session info"""
-        # Check current state using unified analyzer
-        current_state = self._get_session_state()
-
-        # Don't send notification if still working
-        if current_state == SessionState.WORKING:
-            logger.info("Work still in progress, skipping notification")
-            return False
+        # NOTE: State check removed - multi_monitor already verified completion
+        # Rechecking here can cause false negatives due to timing/session switching
 
         # Get session information
         session_name = self.config.session_name
@@ -399,10 +394,15 @@ class SmartNotifier:
         # 동적 로그 길이 정보 추가
         log_length = get_current_log_length()
 
-        # Get wait time since last completion
-        wait_time_seconds, is_accurate = wait_tracker.get_wait_time_since_completion(session_name)
-        wait_time_str = self._format_wait_time(wait_time_seconds)
-        accuracy_indicator = "" if is_accurate else " (추정)"
+        # Get wait time since last completion (with error handling)
+        try:
+            wait_time_seconds, is_accurate = wait_tracker.get_wait_time_since_completion(session_name)
+            wait_time_str = self._format_wait_time(wait_time_seconds)
+            accuracy_indicator = "" if is_accurate else " (추정)"
+        except Exception as e:
+            logger.warning(f"Failed to get wait time for {session_name}: {e}")
+            wait_time_str = "알 수 없음"
+            accuracy_indicator = ""
 
         if context:
             # Enhanced message with session information and prompt recall

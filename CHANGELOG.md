@@ -5,6 +5,20 @@ All notable changes to Claude-Ops will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.4] - 2025-12-01
+
+### 🐛 Fixed
+- **Wait Time Tracking Accuracy**: Fixed bug where wait time was inconsistently tracked ("추정" shown instead of accurate time)
+  - Root cause: `has_screen_changed()` called `tracker.reset_session()` on every screen change
+  - Problem: Screen changes occur AFTER work completion (output displayed), deleting the completion record
+  - Solution: Removed premature `reset_session()` call; wait time only resets when WORKING state detected
+  - Affected file: `claude_ctb/monitoring/multi_monitor.py` (line 185-192)
+
+### 💡 Impact
+- ✅ Wait time now accurately reflects actual completion time
+- ✅ No more "(추정)" fallback for recently completed work
+- ✅ Completion records preserved across screen output changes
+
 ## [2.0.3] - 2025-11-08
 
 ### 🐛 Fixed

@@ -184,9 +184,10 @@ class MultiSessionMonitor:
         
         if current_hash != last_hash:
             self.last_screen_hash[session_name] = current_hash
-            # Screen changed means activity - reset wait time
-            self.tracker.reset_session(session_name)
-            # Reset activity tracking
+            # NOTE: Don't reset wait time on screen change anymore!
+            # Screen changes happen AFTER work completion too (output being displayed)
+            # Wait time should only be reset when WORKING state is detected (line 223)
+            # Reset activity tracking only
             self.last_activity_time[session_name] = time.time()
             return True
             

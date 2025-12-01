@@ -484,9 +484,19 @@ pytest tests/unit/test_config_validation.py \
   - File: `claude_ctb/monitoring/multi_monitor.py` (line 261-265)
   - Commit: b7fbbae
 
+## Phase 3.11: Wait Time Tracking Reset Bug Fix
+
+- [x] T056 Fix premature wait time reset on screen change in `claude_ctb/monitoring/multi_monitor.py`
+  - Bug: `has_screen_changed()` called `tracker.reset_session()` deleting completion records
+  - Symptom: Wait time inconsistently tracked ("추정" shown instead of accurate time)
+  - Root cause: Screen changes happen AFTER completion (output displayed), deleting the record
+  - Fix: Remove `reset_session()` from screen change detection (line 188)
+  - Wait time only resets when WORKING state detected (line 223)
+  - File: `claude_ctb/monitoring/multi_monitor.py` (line 185-192)
+
 ## Implementation Summary
 
-**Completed**: 54/55 tasks (98%)
+**Completed**: 55/56 tasks (98%)
 **Remaining**: 1 task (T043 - manual quickstart validation)
 
 All critical implementation tasks completed:
@@ -499,6 +509,7 @@ All critical implementation tasks completed:
 - ✅ Monitoring health (T048-T050)
 - ✅ API compatibility bugfix (T051-T053)
 - ✅ Restart state skip bug fixes (T054-T055)
+- ✅ Wait time tracking reset bug fix (T056)
 
 New features fully functional:
 - ✅ Session reconnection with exponential backoff
@@ -509,3 +520,4 @@ New features fully functional:
 - ✅ Monitoring session health status
 - ✅ Wait time tracking with session suffix handling
 - ✅ No false positives on restart
+- ✅ Accurate wait time tracking (no premature reset)

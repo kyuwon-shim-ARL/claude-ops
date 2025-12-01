@@ -343,6 +343,48 @@ During implementation validation, two critical blocking issues were discovered a
 
 **Validation**: System restarted, both bugs verified fixed, wait time tracking working correctly.
 
+## Phase 3.11: Wait Time Tracking Reset Bug Fix
+
+**Context**: Wait time tracking was intermittently showing estimated values instead of accurate times.
+
+### Bug: Premature Wait Time Reset on Screen Change (T056)
+
+**Problem**: Wait time was being reset every time the screen changed, causing completion records to be deleted prematurely.
+
+**Symptom**: User reported "대기시간이 뭔가 반영이 되는듯 안되는듯 애매" (wait time inconsistently tracked).
+
+**Root Cause**:
+1. `has_screen_changed()` in multi_monitor.py called `tracker.reset_session()` on every screen change
+2. Screen changes happen AFTER work completion (Claude outputs results)
+3. Sequence: Work completes → completion time recorded → results displayed → screen change detected → `reset_session()` deletes completion record
+4. Next notification → no completion record → fallback to estimated time
+
+**Solution**: Remove `reset_session()` call from `has_screen_changed()` (line 188). Wait time should only be reset when WORKING state is detected (line 223), not on every screen change.
+
+**File**: `claude_ctb/monitoring/multi_monitor.py` (line 185-192)
+**Commit**: (pending)
+
+**Code Change**:
+```python
+# BEFORE (incorrect)
+if current_hash != last_hash:
+    self.last_screen_hash[session_name] = current_hash
+    self.tracker.reset_session(session_name)  # ← Deleted completion record!
+    self.last_activity_time[session_name] = time.time()
+    return True
+
+# AFTER (fixed)
+if current_hash != last_hash:
+    self.last_screen_hash[session_name] = current_hash
+    # NOTE: Don't reset wait time on screen change anymore!
+    # Screen changes happen AFTER work completion too (output being displayed)
+    # Wait time should only be reset when WORKING state is detected (line 223)
+    self.last_activity_time[session_name] = time.time()
+    return True
+```
+
+**Validation**: All wait time tracker tests passing (14/14).
+
 ## Progress Tracking
 
 **Phase Status**:
