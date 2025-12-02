@@ -265,7 +265,7 @@ class TelegramBridge:
                 
                 if target_session:
                     logger.info(f"📍 Reply 기반 세션 타겟팅: {target_session}")
-                    
+
                     # Check if target session exists
                     session_exists = os.system(f"tmux has-session -t {target_session}") == 0
                     if not session_exists:
@@ -275,7 +275,8 @@ class TelegramBridge:
                         )
                         return
                 else:
-                    logger.debug("Reply 대상 메시지에서 세션 정보를 찾을 수 없음")
+                    # Log the original message for debugging
+                    logger.warning(f"⚠️ Reply 대상 메시지에서 세션 정보를 찾을 수 없음. 원본 메시지 첫 100자: {original_text[:100] if original_text else 'None'}...")
         
         # Use target session if found, otherwise use current active session
         if not target_session:

@@ -407,13 +407,16 @@ class SmartNotifier:
         if context:
             # Enhanced message with session information and prompt recall
             # Make session clickable: /sessions project_name
+            # Wrap context in code block to prevent Markdown parsing errors
             message = f"""✅ **작업 완료** [`{session_name}`]
 
 {prompt_context}📁 **프로젝트**: `{working_dir}`
 ⏰ **완료 시간**: {self._get_current_time()}
 ⏱️ **대기 시간**: {wait_time_str}{accuracy_indicator}
 
+```
 {context}
+```
 
 💡 **세션 전환**: `/sessions {session_name}` 또는 이 메시지에 Reply"""
             

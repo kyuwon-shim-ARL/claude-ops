@@ -273,39 +273,24 @@ start_monitoring() {
     # Check if started successfully
     if tmux has-session -t claude-multi-monitor 2>/dev/null; then
         printf "${GREEN}✅ Multi-Session Monitor started successfully${NC}\n"
-        
-        # Also start telegram bot if not already running
-        if ! tmux has-session -t telegram-bot 2>/dev/null; then
-            # 기존 telegram bot 프로세스 강제 정리
-            if pgrep -f "telegram.*bot" > /dev/null 2>&1; then
-                printf "${YELLOW}Found existing telegram bot processes, cleaning up...${NC}\n"
-                pkill -f "telegram.*bot" || true
-                sleep 3
-            fi
-            
-            printf "${GREEN}Starting Telegram Bot...${NC}\n"
-            tmux new-session -d -s telegram-bot \
-                "cd $(pwd) && uv run python -m claude_ctb.telegram.bot"
-            sleep 2
-            
-            if tmux has-session -t telegram-bot 2>/dev/null; then
-                printf "${GREEN}✅ Telegram Bot started successfully${NC}\n"
-            else
-                printf "${YELLOW}⚠️  Telegram Bot failed to start${NC}\n"
-            fi
-        else
-            printf "${GREEN}✅ Telegram Bot already running${NC}\n"
+
+        # NOTE: multi_monitor.py already starts the Telegram bot internally
+        # Do NOT start a separate telegram-bot session - it will cause conflicts!
+        # The telegram-bot session is only for legacy standalone bot usage
+
+        # Clean up any existing telegram-bot session to prevent conflicts
+        if tmux has-session -t telegram-bot 2>/dev/null; then
+            printf "${YELLOW}⚠️  Stopping standalone telegram-bot (now integrated in multi-monitor)${NC}\n"
+            tmux kill-session -t telegram-bot 2>/dev/null || true
         fi
-        
+
         printf "\n🎯 Now monitoring ALL Claude sessions simultaneously!\n\n"
         printf "Commands:\n"
-        printf "  - View monitor logs: tmux attach -t claude-multi-monitor\n"
-        printf "  - View bot logs: tmux attach -t telegram-bot\n"
-        printf "  - Stop monitor: tmux kill-session -t claude-multi-monitor\n"
-        printf "  - Stop bot: tmux kill-session -t telegram-bot\n\n"
+        printf "  - View logs: tmux attach -t claude-multi-monitor\n"
+        printf "  - Stop: tmux kill-session -t claude-multi-monitor\n\n"
         printf "🚀 The monitor will automatically detect new sessions and send\n"
         printf "   notifications when ANY Claude Code task completes!\n"
-        printf "📱 You can now send messages via Telegram bot!\n"
+        printf "📱 Telegram bot is integrated - send messages via Telegram!\n"
         return 0
     else
         printf "${RED}❌ Failed to start Multi-Session Monitor${NC}\n"
@@ -364,10 +349,9 @@ show_status() {
         printf "  ⚠️  Single-session monitoring: ${YELLOW}Running (should stop)${NC}\n"
     fi
     
+    # Note: Telegram bot is now integrated into multi-monitor
     if tmux has-session -t telegram-bot 2>/dev/null; then
-        printf "  📱 Telegram bot: ${GREEN}Running${NC}\n"
-    else
-        printf "  📱 Telegram bot: ${RED}Stopped${NC}\n"
+        printf "  ⚠️  Standalone telegram-bot: ${YELLOW}Running (should be stopped, use multi-monitor)${NC}\n"
     fi
     
     # Check Claude sessions
