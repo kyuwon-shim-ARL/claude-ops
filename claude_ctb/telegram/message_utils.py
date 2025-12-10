@@ -124,15 +124,15 @@ def _balance_markdown(text: str) -> str:
 
 
 async def safe_send_message(
-    send_func: Callable, 
-    text: str, 
+    send_func: Callable,
+    text: str,
     max_length: int = 4000,
     preserve_markdown: bool = True,
     **kwargs
 ) -> None:
     """
     안전한 텔레그램 메시지 전송 (자동 분할 지원)
-    
+
     Args:
         send_func: 메시지 전송 함수 (일반적으로 update.message.reply_text)
         text: 전송할 텍스트
@@ -144,13 +144,13 @@ async def safe_send_message(
         # 단일 메시지로 전송
         await send_func(text, **kwargs)
         return
-    
+
     # 메시지 분할 후 전송
     messages = split_long_message(text, max_length, preserve_markdown)
-    
+
     # reply_markup은 마지막 메시지에만 추가
     reply_markup = kwargs.pop('reply_markup', None)
-    
+
     for i, message in enumerate(messages):
         if i == len(messages) - 1 and reply_markup:
             # 마지막 메시지에만 버튼 추가

@@ -146,6 +146,9 @@ class TelegramBridge:
                 return session_name
         
         # Look for session patterns in the message (updated for all formats)
+        # First, remove escaped underscores for easier pattern matching
+        normalized_text = message_text.replace('\\_', '_')
+
         patterns = [
             r'🎛️ 세션: ([^\n]+)',                    # Log format: 🎛️ 세션: claude_claude-ops
             r'\[`([^`]+)`\]',                      # Notification format: [`session_name`]
@@ -154,14 +157,15 @@ class TelegramBridge:
             r'\*\*🎯 세션 이름\*\*: `([^`]+)`',  # From start command
             r'세션: `([^`]+)`',                    # Simple with backticks: 세션: `session_name`
             r'세션: ([^\n\s]+)',                  # Simple without backticks: 세션: claude_ops
+            r'/sessions\s+(claude_[a-zA-Z0-9_-]+)', # /sessions command format
             r'\[([^]]+)\]',                        # Fallback: [session_name]
             r'\*\*Claude 화면 로그\*\* \[([^\]]+)\]',  # From new log format
-            r'(claude_[\w-]+)',                    # Any claude_xxx pattern (full match)
-            r'claude_(\w+)',                       # Any claude_xxx pattern (name only)
+            r'(claude_[a-zA-Z0-9_-]+)',            # Any claude_xxx pattern (includes underscores)
+            r'claude_([a-zA-Z0-9_-]+)',            # Any claude_xxx pattern (name only, includes underscores)
         ]
         
         for pattern in patterns:
-            match = re.search(pattern, message_text)
+            match = re.search(pattern, normalized_text)
             if match:
                 session_name = match.group(1)
                 # If it already starts with 'claude_', return as-is
@@ -462,9 +466,9 @@ class TelegramBridge:
                 git_status = "📦 Git 저장소 초기화됨" if result.get('git_initialized') else "⚠️ Git 초기화 건너뜀"
                 session_status = "🎯 세션 생성됨" if result.get('session_created') else "✅ 기존 세션 사용"
                 
-                success_msg = f"""✅ 프로젝트 생성 완료!
+                success_msg = f"""✅ <b>프로젝트 생성 완료!</b>
 
-📁 프로젝트: {project_name}
+📁 프로젝트: <code>/sessions {target_session}</code>
 📂 경로: {target_directory}
 🎯 세션: {target_session}
 {git_status}
@@ -477,7 +481,8 @@ class TelegramBridge:
                 
                 await progress_msg.edit_text(
                     success_msg,
-                    reply_markup=reply_markup
+                    reply_markup=reply_markup,
+                    parse_mode='HTML'
                 )
                 
                 
@@ -734,13 +739,16 @@ class TelegramBridge:
 
                     screen_text = '\n'.join(filtered_lines)
 
-                    # Use Markdown for proper line break formatting with session info
+                    # Use HTML for proper formatting with copyable session command
                     session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
-                    header = f"📺 Claude 화면 로그 [{target_session}]\n\n"
-                    header += f"📁 프로젝트: {session_display}\n"
+                    # Escape HTML special characters in screen text
+                    screen_text = screen_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+                    header = f"📺 <b>Claude 화면 로그</b> [{target_session}]\n\n"
+                    header += f"📁 프로젝트: <code>/sessions {target_session}</code>\n"
                     header += f"🎯 세션: {target_session}\n"
                     header += f"📏 라인 수: {len(filtered_lines)}줄\n\n"
-                    header += "로그 내용:\n```\n"
+                    header += "로그 내용:\n<pre>"
 
                     # Check if we need to split the message due to Telegram limits
                     max_length = 3500
@@ -748,11 +756,11 @@ class TelegramBridge:
                         # Truncate the content
                         available_space = max_length - len(header) - 60  # 60 chars for code block + truncation message
                         truncated_text = screen_text[:available_space] + "\n\n... (내용이 길어 일부 생략됨)"
-                        message = f"{header}{truncated_text}\n```"
+                        message = f"{header}{truncated_text}</pre>"
                     else:
-                        message = f"{header}{screen_text}\n```"
+                        message = f"{header}{screen_text}</pre>"
 
-                    await update.message.reply_text(message, parse_mode="Markdown")
+                    await update.message.reply_text(message, parse_mode="HTML")
                 else:
                     await update.message.reply_text("📺 Claude 화면이 비어있습니다.")
             else:
@@ -1098,11 +1106,11 @@ class TelegramBridge:
             # Generate summary
             summary_message = summary_helper.generate_summary()
 
-            # Use safe_send_message to handle long messages (auto-split)
+            # Send with HTML mode - allows <code> tags for copyable commands
             await safe_send_message(
                 send_func=update.message.reply_text,
                 text=summary_message,
-                parse_mode='Markdown'
+                parse_mode='HTML'
             )
 
         except Exception as e:
@@ -1165,20 +1173,24 @@ class TelegramBridge:
 
                     log_content = '\n'.join(filtered_lines)
                 
-                # Build message parts separately
+                # Build message parts separately using HTML
+                # Escape HTML special characters in log content
+                if log_content:
+                    log_content = log_content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
                 switch_message = (
-                    f"🔄 **활성 세션 전환 완료**\n\n"
-                    f"📍 현재 활성: `{target_session}`\n"
-                    f"📁 프로젝트: `{session_display}`\n\n"
-                    f"이제 `{session_display}` 세션이 활성화되었습니다.\n"
-                    f"_(이전 세션: {old_session})_"
+                    f"🔄 <b>활성 세션 전환 완료</b>\n\n"
+                    f"📍 현재 활성: {target_session}\n"
+                    f"📁 프로젝트: <code>/sessions {target_session}</code>\n\n"
+                    f"이제 {session_display} 세션이 활성화되었습니다.\n"
+                    f"<i>(이전 세션: {old_session})</i>"
                 )
-                
+
                 if log_content:
                     # Add log header
-                    log_header = "\n\n📺 **최근 로그 (50줄)**:\n"
-                    # Combine without markdown code blocks to avoid parsing errors
-                    full_message = f"{switch_message}{log_header}{log_content}"
+                    log_header = "\n\n📺 <b>최근 로그 (50줄)</b>:\n<pre>"
+                    # Combine with HTML pre tag for log content
+                    full_message = f"{switch_message}{log_header}{log_content}</pre>"
                 else:
                     full_message = f"{switch_message}\n\n📺 화면이 비어있습니다."
                 
@@ -1203,13 +1215,13 @@ class TelegramBridge:
                     await safe_send_message(
                         update.message.reply_text,
                         full_message,
-                        parse_mode=None,
+                        parse_mode='HTML',
                         reply_markup=reply_markup,
                         preserve_markdown=False  # 로그 내용이므로 마크다운 보존 불필요
                     )
                 else:
                     # Send as single message
-                    await update.message.reply_text(full_message, parse_mode=None, reply_markup=reply_markup)
+                    await update.message.reply_text(full_message, parse_mode='HTML', reply_markup=reply_markup)
             else:
                 await update.message.reply_text(f"❌ 세션 전환에 실패했습니다: {target_session}")
                 
@@ -1268,13 +1280,15 @@ class TelegramBridge:
                         )
                         
                         session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+                        # Escape HTML special characters in text_to_send
+                        escaped_text = text_to_send.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
                         await update.message.reply_text(
-                            f"✅ 텍스트 전송 완료\n\n"
+                            f"✅ <b>텍스트 전송 완료</b>\n\n"
                             f"📍 대상 세션: {target_session}\n"
-                            f"📁 프로젝트: {session_display}\n"
-                            f"📝 전송된 텍스트: {text_to_send}\n\n"
+                            f"📁 프로젝트: <code>/sessions {target_session}</code>\n"
+                            f"📝 전송된 텍스트: {escaped_text}\n\n"
                             f"💡 세션 로그를 보려면 /log를 사용하세요.",
-                            parse_mode=None
+                            parse_mode='HTML'
                         )
                         
                         logger.info(f"텍스트 전송 성공: {target_session} <- {text_to_send[:100]}")
@@ -1490,13 +1504,15 @@ class TelegramBridge:
             from ..utils.prompt_recall import PromptRecallSystem
             prompt_system = PromptRecallSystem()
             last_prompt = prompt_system.extract_last_user_prompt(session_name)
-            
+
             if last_prompt and len(last_prompt.strip()) > 5:
                 # Smart truncation for hint (max 60 chars)
                 if len(last_prompt) > 60:
                     hint = last_prompt[:57] + "..."
                 else:
                     hint = last_prompt
+                # Inside backticks (inline code), only backticks need escaping
+                hint = hint.replace('`', "'")  # backticks break inline code
                 return f"\n*마지막 프롬프트*: `{hint}`\n"
             else:
                 return ""
@@ -2339,11 +2355,12 @@ class TelegramBridge:
             # No utility buttons needed - sessions are the main content
             
             reply_markup = InlineKeyboardMarkup(keyboard)
-            
+
             # Count working and waiting sessions
             waiting_count = sum(1 for _, _, status, _ in sessions_info if status == 'waiting')
             working_count = sum(1 for _, _, status, _ in sessions_info if status == 'working')
-            
+
+            # Inside backticks (inline code), no escaping needed
             await reply_func(
                 f"🎯 **세션 보드** (전체: {len(sessions_info)}개)\n"
                 f"대기: {waiting_count}개 | 작업중: {working_count}개\n\n"
@@ -2431,9 +2448,17 @@ class TelegramBridge:
             ]
             
             reply_markup = InlineKeyboardMarkup(keyboard)
-            
+
+            # Escape special characters for Markdown (only for text outside inline code)
+            escaped_display = display_name.replace('_', '\\_')
+            # Clean recent_log of characters that break Markdown parsing
+            safe_log = recent_log if recent_log else ""
+            safe_log = safe_log.replace('`', "'")      # backticks break code blocks
+            safe_log = safe_log.replace('**', '∗∗')    # double asterisks break bold
+
             # Create reply-targeting optimized message format
-            session_action_msg = f"""🎯 **{display_name}** 세션 액션
+            # Note: Inside backticks (inline code), no escaping needed - text is literal
+            session_action_msg = f"""🎯 **{escaped_display}** 세션 액션
 
 📊 **상태**: {status_emoji}
 🎯 **메인 세션**: {'✅ 현재 메인' if is_current else '❌ 다른 세션'}
@@ -2443,12 +2468,12 @@ class TelegramBridge:
 
 📺 **최근 진행사항 (30줄)**:
 ```
-{recent_log}
+{safe_log}
 ```
 
 💆‍♂️ **원클릭 액션 선택**:
 이 메시지에 답장하여 `{session_name}` 세션에 직접 명령어를 전송할 수 있습니다."""
-            
+
             await query.edit_message_text(
                 session_action_msg,
                 reply_markup=reply_markup,
@@ -2735,15 +2760,15 @@ class TelegramBridge:
             
             if success:
                 display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
-                
+
                 await query.edit_message_text(
-                    f"🏠 메인 세션 변경 완료\n\n"
+                    f"🏠 <b>메인 세션 변경 완료</b>\n\n"
                     f"📍 현재 메인: {session_name}\n"
-                    f"📁 프로젝트: {display_name}\n\n"
+                    f"📁 프로젝트: <code>/sessions {session_name}</code>\n\n"
                     f"✅ 이제 {display_name} 세션이 메인 세션입니다.\n"
                     f"모니터링 시스템이 자동으로 업데이트됩니다.\n"
-                    f"(이전: {current_session})",
-                    parse_mode=None
+                    f"<i>(이전: {current_session})</i>",
+                    parse_mode='HTML'
                 )
                 
                 # Restart monitoring for new session
@@ -2934,25 +2959,28 @@ class TelegramBridge:
 
                     screen_text = '\n'.join(filtered_lines)
                     
-                    # Send without markdown to avoid parsing errors with session info
+                    # Use HTML for proper formatting with copyable session command
                     session_display = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
-                    header = f"📺 빠른 로그 ({line_count}줄) [{session_name}]\n\n"
-                    header += f"📁 프로젝트: {session_display}\n"
+                    # Escape HTML special characters in screen text
+                    screen_text = screen_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+                    header = f"📺 <b>빠른 로그 ({line_count}줄)</b> [{session_name}]\n\n"
+                    header += f"📁 프로젝트: <code>/sessions {session_name}</code>\n"
                     header += f"🎯 세션: {session_name}\n"
                     header += f"📏 라인 수: {len(filtered_lines)}줄\n\n"
-                    header += "로그 내용:\n"
-                    
+                    header += "로그 내용:\n<pre>"
+
                     # Check if we need to split the message due to Telegram limits
                     max_length = 3500
                     if len(header + screen_text) > max_length:
                         # Truncate the content
-                        available_space = max_length - len(header) - 50  # 50 chars for truncation message
+                        available_space = max_length - len(header) - 60  # 60 chars for pre tag + truncation message
                         truncated_text = screen_text[:available_space] + "\n\n... (내용이 길어 일부 생략됨)"
-                        message = f"{header}{truncated_text}"
+                        message = f"{header}{truncated_text}</pre>"
                     else:
-                        message = f"{header}{screen_text}"
-                    
-                    await query.edit_message_text(message, parse_mode=None)
+                        message = f"{header}{screen_text}</pre>"
+
+                    await query.edit_message_text(message, parse_mode='HTML')
                 else:
                     await query.edit_message_text("📺 Claude 화면이 비어있습니다.")
             else:

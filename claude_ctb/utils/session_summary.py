@@ -197,10 +197,13 @@ class SessionSummaryHelper:
                     if 'shift+tab' in cleaned.lower() or 'esc to interrupt' in cleaned.lower():
                         continue
                     
-                    # Clean problematic characters that break Markdown parsing
-                    # Remove or escape quotes that can break parsing in code blocks
-                    cleaned = cleaned.replace('"', "'")  # Replace double quotes with single quotes
-                    cleaned = cleaned.replace('`', "'")  # Replace backticks with single quotes
+                    # Escape HTML special characters first
+                    cleaned = cleaned.replace('&', '&amp;')
+                    cleaned = cleaned.replace('<', '&lt;')
+                    cleaned = cleaned.replace('>', '&gt;')
+                    # Clean other problematic characters
+                    cleaned = cleaned.replace('"', "'")
+                    cleaned = cleaned.replace('`', "'")
                     
                     # Truncate long lines
                     if len(cleaned) > 70:
@@ -217,9 +220,13 @@ class SessionSummaryHelper:
                 for line in reversed(all_lines[-20:]):  # Check last 20 lines
                     simple = line.strip()
                     if simple and not all(c in '─│╭╮╯╰┌┐└┘├┤┬┴┼ >?' for c in simple):
-                        # Clean problematic characters in fallback content too
-                        simple = simple.replace('"', "'")  # Replace double quotes
-                        simple = simple.replace('`', "'")  # Replace backticks
+                        # Escape HTML special characters first
+                        simple = simple.replace('&', '&amp;')
+                        simple = simple.replace('<', '&lt;')
+                        simple = simple.replace('>', '&gt;')
+                        # Clean other problematic characters
+                        simple = simple.replace('"', "'")
+                        simple = simple.replace('`', "'")
                         if len(simple) > 70:
                             simple = simple[:67] + "..."
                         cleaned_lines.insert(0, f"  {simple}")
@@ -255,22 +262,22 @@ class SessionSummaryHelper:
     
     def escape_markdown(self, text: str) -> str:
         """
-        Escape special characters for Telegram Markdown
-        
+        Escape special characters for Telegram Markdown (legacy mode)
+
         Args:
             text: Text to escape
-            
+
         Returns:
             Escaped text safe for Markdown
         """
-        # Escape all special Markdown characters properly
-        # Order matters - escape backslash first
-        text = text.replace('\\', '\\\\')
-        text = text.replace('*', '\\*')
+        # For Telegram legacy Markdown, only these need escaping:
+        # _ * ` [ ]
+        # Note: Do NOT escape backslash or dots - that causes more problems
         text = text.replace('_', '\\_')
-        text = text.replace('[', '\\[')
-        text = text.replace(']', '\\]')
-        text = text.replace('`', '\\`')
+        text = text.replace('*', '\\*')
+        text = text.replace('`', "'")  # Replace backticks with quotes (safer)
+        text = text.replace('[', '(')  # Replace brackets with parentheses (safer)
+        text = text.replace(']', ')')
         return text
     
     def _generate_single_session_summary(self, session_name: str) -> str:
@@ -462,74 +469,69 @@ class SessionSummaryHelper:
         # Count sessions using fallback estimates
         fallback_count = sum(1 for s in all_sessions if not s[4])  # s[4] is has_record
         
-        # Header
+        # Header with HTML formatting
         current_time = datetime.now().strftime("%H:%M")
-        message = f"📊 **세션 요약**\n\\_{current_time} 기준\\_\n\n"
-        message += f"**전체 세션: {len(all_sessions)}개** (대기: {waiting_count}, 작업중: {working_count})\n\n"
-        
+        message = f"📊 <b>세션 요약</b> ({current_time} 기준)\n\n"
+        message += f"<b>전체 세션: {len(all_sessions)}개</b> (대기: {waiting_count}, 작업중: {working_count})\n\n"
+
         # Session details
         for i, (session_name, wait_time, last_prompt, status, has_record) in enumerate(all_sessions, 1):
-            # Format session name - escape underscores
+            # Format session name
             display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
-            display_name = self.escape_markdown(display_name)
-            
+
             # Add separator
             message += "━" * 25 + "\n"
-            
-            # Session header with status indicator and transparency
-            # Add clickable command as inline code (users can tap to copy)
-            session_command = f"`/sessions {session_name}`"
-            
+
+            # Session header with bold
             if status == 'working':
-                message += f"🔨 **{display_name}** (작업 중)\n"
+                message += f"🔨 <b>{display_name}</b> (작업 중)\n"
             else:
                 wait_str = self.format_wait_time(wait_time)
-                message += f"🎯 **{display_name}** ({wait_str} 대기)\n"
-            
-            # Add the clickable command
-            message += f"🔗 {session_command}\n"
-            
+                message += f"🎯 <b>{display_name}</b> ({wait_str} 대기)\n"
+
+            # Add copyable command wrapped in HTML code tag
+            message += f"    ↳ <code>/sessions {session_name}</code>\n"
+
             # Last prompt if available
             if last_prompt and len(last_prompt) > 2:
-                # Escape markdown characters in prompt
-                last_prompt = self.escape_markdown(last_prompt)
+                # Escape HTML special characters
+                last_prompt = last_prompt.replace('&', '&amp;')
+                last_prompt = last_prompt.replace('<', '&lt;')
+                last_prompt = last_prompt.replace('>', '&gt;')
                 # Truncate if too long
                 if len(last_prompt) > 60:
-                    last_prompt = last_prompt[:57] + "\.\.\."
-                message += f"💬 {last_prompt}\n"
-            
+                    last_prompt = last_prompt[:57] + "..."
+                message += f"💬 <i>{last_prompt}</i>\n"
+
             # Context status for each session
             try:
                 context_info = self._detect_context_warning(session_name=session_name)
                 if context_info:
                     usage_percent = context_info['usage_percent']
                     remaining_tokens = context_info['remaining_tokens']
-                    
+
                     if usage_percent >= 90:
-                        message += f"⚠️ 컨텍스트: {usage_percent}% 사용됨 ({remaining_tokens}K 토큰 남음, 곧 정리 필요)\n"
+                        message += f"⚠️ 컨텍스트: {usage_percent}% ({remaining_tokens}K 남음)\n"
                     else:
-                        message += f"📊 컨텍스트: {usage_percent}% 사용됨 ({remaining_tokens}K 토큰 남음)\n"
+                        message += f"📊 컨텍스트: {usage_percent}% ({remaining_tokens}K 남음)\n"
                 else:
                     message += f"📊 컨텍스트: 여유\n"
             except Exception:
-                message += f"📊 컨텍스트: 상태 확인 불가\n"
-            
-            # Screen summary (get more lines for better context)
-            screen_summary = self.get_screen_summary(session_name, 5)
+                message += f"📊 컨텍스트: 확인 불가\n"
+
+            # Screen summary in code block (HTML <pre> tag)
+            screen_summary = self.get_screen_summary(session_name, 3)
             if screen_summary and screen_summary != "화면 대기 중":
-                # No need to escape inside code blocks
-                message += f"\n```\n{screen_summary}\n```\n\n"
+                message += f"\n<pre>{screen_summary}</pre>\n\n"
             else:
-                # Try to get at least the current status
-                message += "\n\\_화면 대기 중\\_\n\n"
-        
-        # Footer with longest waiting session (only if there are waiting sessions)
+                message += "\n"
+
+        # Footer with longest waiting session
         waiting_sessions = [(s[0], s[1]) for s in all_sessions if s[3] == 'waiting']
         if waiting_sessions:
             longest_session, longest_time = max(waiting_sessions, key=lambda x: x[1])
             longest_name = longest_session.replace('claude_', '') if longest_session.startswith('claude_') else longest_session
-            longest_name = self.escape_markdown(longest_name)
-            message += f"💡 **가장 오래 대기**: {longest_name} ({self.format_wait_time(longest_time)})"
+            message += f"💡 <b>가장 오래 대기</b>: {longest_name} ({self.format_wait_time(longest_time)})"
         
         return message
     

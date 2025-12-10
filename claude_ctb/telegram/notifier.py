@@ -275,7 +275,7 @@ class SmartNotifier:
         logger.info(f"Smart notification request: {message}")
         
         # Add context information
-        full_message = f"🤖 **Claude Status Update**\n\n{message}\n\n📁 **Project:** `{os.path.basename(self.config.working_directory)}`\n🎯 **Session:** `{self.config.session_name}`"
+        full_message = f"🤖 **Claude Status Update**\n\n{message}\n\n📁 **Project:** `/sessions {self.config.session_name}`\n🎯 **Session:** `{self.config.session_name}`"
         
         # Check conditions unless forced
         if not force:
@@ -327,7 +327,7 @@ class SmartNotifier:
         # Enhanced message with session information for reply targeting
         message = f"""⏸️ **입력 대기** [`{session_name}`]
 
-📁 **프로젝트**: `{working_dir}`
+📁 **프로젝트**: `/sessions {session_name}`
 🎯 **세션**: `{session_name}` (로그: {log_length}줄)
 ⏰ **대기 시작**: {self._get_current_time()}
 
@@ -410,7 +410,7 @@ class SmartNotifier:
             # Wrap context in code block to prevent Markdown parsing errors
             message = f"""✅ **작업 완료** [`{session_name}`]
 
-{prompt_context}📁 **프로젝트**: `{working_dir}`
+{prompt_context}📁 **프로젝트**: `/sessions {session_name}`
 ⏰ **완료 시간**: {self._get_current_time()}
 ⏱️ **대기 시간**: {wait_time_str}{accuracy_indicator}
 
@@ -433,7 +433,7 @@ class SmartNotifier:
             # Simple fallback message with better formatting
             message = f"""✅ **작업 완료** [`{session_name}`]
 
-📁 **프로젝트**: `{working_dir}`
+📁 **프로젝트**: `/sessions {session_name}`
 ⏰ **완료 시간**: {self._get_current_time()}
 ⏱️ **대기 시간**: {wait_time_str}{accuracy_indicator}
 
@@ -490,7 +490,7 @@ Claude가 작업을 완료했습니다.
 
 {task_emoji} **{task_completion.message}**
 
-📁 **Project**: `{working_dir}`
+📁 **Project**: `/sessions {session_name}`
 🎯 **Session**: `{session_name}`
 ⏰ **Time**: {self._get_current_time()}
 
@@ -499,42 +499,42 @@ Claude가 작업을 완료했습니다.
 ⚠️ **Immediate attention required!**
 
 💡 **Reply** to this message to respond!"""
-        
+
         elif task_completion.priority == AlertPriority.HIGH:
             # High priority - important completion
             message = f"""{priority_emoji} **Important Completion** [`{session_name}`]
 
 {task_emoji} **{task_completion.message}**
 
-📁 **Project**: `{working_dir}`
+📁 **Project**: `/sessions {session_name}`
 🎯 **Session**: `{session_name}`
 ⏰ **Time**: {self._get_current_time()}
 
 🟡 **Details**: {task_completion.details}
 {prompt_context}
 💡 **Reply** to this message to respond!"""
-        
+
         elif task_completion.priority == AlertPriority.NORMAL:
             # Normal priority - standard completion
             message = f"""{priority_emoji} **Task Completed** [`{session_name}`]
 
 {task_emoji} **{task_completion.message}**
 
-📁 **Project**: `{working_dir}`
+📁 **Project**: `/sessions {session_name}`
 🎯 **Session**: `{session_name}`
 ⏰ **Time**: {self._get_current_time()}
 
 🟢 **Details**: {task_completion.details}
 {prompt_context}
 💡 **Reply** to this message to respond!"""
-        
+
         else:  # LOW priority
             # Low priority - informational only
             message = f"""{priority_emoji} **Info** [`{session_name}`]
 
 {task_emoji} {task_completion.message}
 
-📁 Project: `{working_dir}`
+📁 Project: `/sessions {session_name}`
 🎯 Session: `{session_name}`
 
 {task_completion.details}"""
@@ -863,7 +863,7 @@ Claude가 작업을 완료했습니다.
             active_session = session_manager.get_active_session()
             session_info = session_manager.get_session_info(active_session)
             
-            header = f"📁 Project: {session_info['directory']}\n🎯 Session: {active_session}\n\n"
+            header = f"📁 Project: `/sessions {active_session}`\n🎯 Session: {active_session}\n\n"
             
             # Use plain text format to avoid markdown issues
             return header + f"```\n{context_text}\n```"
