@@ -18,7 +18,7 @@ from datetime import datetime
 from collections import defaultdict
 
 # Add project to path
-sys.path.insert(0, '/home/kyuwon/claude-ops')
+sys.path.insert(0, '/home/kyuwon/projects/claude-ops')
 
 from claude_ctb.utils.session_state import SessionStateAnalyzer, SessionState
 from claude_ctb.session_manager import session_manager

@@ -197,6 +197,34 @@ SESSION_SCREEN_HISTORY_LINES=200  # Lines to analyze for state detection
 - **Formatted Output**: Headers use Markdown formatting while log content displays as-is
 - **Error-Free**: No more "Can't parse entities" errors from Telegram API
 
+## System-Wide Utilities
+
+The following CLI tools are available in `$HOME/bin` and can be used from any Claude Code session:
+
+### Email (Gmail API)
+```bash
+# Send email
+send-email <recipient> <subject> <body>
+send-email user@example.com "Meeting Summary" "Here is the summary..."
+
+# With CC
+send-email user@example.com "Subject" "Body" --cc other@example.com
+```
+
+### Google Drive Upload
+```bash
+# Upload to My Drive root
+gdrive-upload /path/to/file.pdf
+
+# Upload to personal folder (개인용)
+gdrive-upload /path/to/file.pdf personal
+
+# Upload to shared folder (공유용)
+gdrive-upload /path/to/file.pdf shared
+```
+
+**Note**: These tools use credentials from `/home/kyuwon/projects/email_agent/token.json`. Authentication must be completed in that project first.
+
 ## Best Practices
 
 1. **Use descriptive session names** that reflect project/task context

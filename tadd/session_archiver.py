@@ -682,8 +682,8 @@ Context will be loaded from previous session summary...
 
 class TADDSessionArchiver(SessionArchiver):
     """TADD-specific session archiver with enhanced features"""
-    
-    def __init__(self, base_path: str = "/home/kyuwon/claude-ops"):
+
+    def __init__(self, base_path: str = "/home/kyuwon/projects/claude-ops"):
         super().__init__(base_path)
     
     def archive_with_deployment(self, 

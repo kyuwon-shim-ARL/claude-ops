@@ -154,10 +154,10 @@ class SessionSummaryHelper:
             
             if result.returncode != 0:
                 return "화면 캡처 실패"
-            
+
             content = result.stdout.strip()
             if not content:
-                return "뺈 화면"
+                return "빈 화면"
             
             # Split into lines and process from bottom up
             all_lines = content.split('\n')
@@ -236,7 +236,8 @@ class SessionSummaryHelper:
             return '\n'.join(cleaned_lines) if cleaned_lines else "화면 대기 중"
             
         except Exception as e:
-            return f"오류: {str(e)}"
+            error_msg = str(e).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            return f"오류: {error_msg}"
     
     def format_wait_time(self, seconds: float) -> str:
         """
@@ -521,8 +522,12 @@ class SessionSummaryHelper:
 
             # Screen summary in code block (HTML <pre> tag)
             screen_summary = self.get_screen_summary(session_name, 3)
-            if screen_summary and screen_summary != "화면 대기 중":
-                message += f"\n<pre>{screen_summary}</pre>\n\n"
+            if screen_summary and screen_summary not in ["화면 대기 중", "빈 화면", "화면 캡처 실패"]:
+                # Ensure no unclosed tags - double check HTML escaping
+                safe_summary = screen_summary.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                # Avoid double escaping
+                safe_summary = safe_summary.replace('&amp;amp;', '&amp;').replace('&amp;lt;', '&lt;').replace('&amp;gt;', '&gt;')
+                message += f"\n<pre>{safe_summary}</pre>\n\n"
             else:
                 message += "\n"
 
