@@ -4,7 +4,7 @@
 
 [![Setup Time](https://img.shields.io/badge/Setup-1_minute-green)](./QUICK_START.md)
 [![Architecture](https://img.shields.io/badge/Architecture-Pure_Bridge-purple)](./CLAUDE.md)
-[![Version](https://img.shields.io/badge/Version-2.0.1-blue)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-2.0.3-blue)](./CHANGELOG.md)
 
 ## 🎯 핵심 기능
 
@@ -12,6 +12,8 @@
 - 📱 **Reply Targeting**: 알림 메시지 Reply로 정확한 세션 타겟팅
 - 🎛️ **Multi-Session**: 여러 Claude 세션 동시 제어
 - 📊 **Smart Summary**: 대기 중 세션 요약 (`/summary`)
+- ⏱️ **Wait Time Tracking**: 작업 완료 시 대기 시간 자동 표시
+- 📺 **Reliable Log View**: Markdown-safe log viewing (`/log`)
 - 🔄 **Workflow Delegation**: 모든 워크플로우는 [claude-dev-kit](https://github.com/kyuwon-shim-ARL/claude-dev-kit) 처리
 
 ## ⚡ 1분 설정

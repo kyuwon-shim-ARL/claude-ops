@@ -181,9 +181,49 @@ SESSION_SCREEN_HISTORY_LINES=200  # Lines to analyze for state detection
 - **Perfect for**: Applying slash command changes without losing work context
 
 ### 6. Multi-Session Management
-- Monitor multiple Claude projects simultaneously  
+- Monitor multiple Claude projects simultaneously
 - Session board provides grid view of all active sessions
 - Easy switching between different development contexts
+
+### 7. Wait Time Tracking (NEW!)
+- **Automatic Tracking**: Measures time elapsed since last work completion
+- **Human-Readable Format**: Displays as "3분 25초", "1시간 15분" in notifications
+- **Accuracy Indicator**: Shows "(추정)" for estimated times when exact completion time is unknown
+- **Context Awareness**: Helps users understand Claude's response time and workload
+
+### 8. Reliable Log Viewing
+- **Markdown-Safe**: `/log` command wraps content in code blocks to prevent parsing errors
+- **Special Character Handling**: Properly displays logs with `*`, `_`, `` ` ``, `[`, `]` characters
+- **Formatted Output**: Headers use Markdown formatting while log content displays as-is
+- **Error-Free**: No more "Can't parse entities" errors from Telegram API
+
+## System-Wide Utilities
+
+The following CLI tools are available in `$HOME/bin` and can be used from any Claude Code session:
+
+### Email (Gmail API)
+```bash
+# Send email
+send-email <recipient> <subject> <body>
+send-email user@example.com "Meeting Summary" "Here is the summary..."
+
+# With CC
+send-email user@example.com "Subject" "Body" --cc other@example.com
+```
+
+### Google Drive Upload
+```bash
+# Upload to My Drive root
+gdrive-upload /path/to/file.pdf
+
+# Upload to personal folder (개인용)
+gdrive-upload /path/to/file.pdf personal
+
+# Upload to shared folder (공유용)
+gdrive-upload /path/to/file.pdf shared
+```
+
+**Note**: These tools use credentials from `/home/kyuwon/projects/email_agent/token.json`. Authentication must be completed in that project first.
 
 ## Best Practices
 

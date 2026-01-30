@@ -184,9 +184,10 @@ class MultiSessionMonitor:
         
         if current_hash != last_hash:
             self.last_screen_hash[session_name] = current_hash
-            # Screen changed means activity - reset wait time
-            self.tracker.reset_session(session_name)
-            # Reset activity tracking
+            # NOTE: Don't reset wait time on screen change anymore!
+            # Screen changes happen AFTER work completion too (output being displayed)
+            # Wait time should only be reset when WORKING state is detected (line 223)
+            # Reset activity tracking only
             self.last_activity_time[session_name] = time.time()
             return True
             
@@ -259,8 +260,10 @@ class MultiSessionMonitor:
             should_notify = True
             notification_reason = f"Work completed (WORKING → {current_state})"
         elif current_state == SessionState.WAITING_INPUT and previous_state != SessionState.WAITING_INPUT:
-            should_notify = True
-            notification_reason = "Waiting for input"
+            # BUGFIX: Ignore UNKNOWN -> WAITING_INPUT transitions (restart false positive)
+            if previous_state != SessionState.UNKNOWN:
+                should_notify = True
+                notification_reason = "Waiting for input"
         # 3. Quiet completion detection
         elif self.state_analyzer.detect_quiet_completion(session_name):
             should_notify = True
@@ -306,14 +309,58 @@ class MultiSessionMonitor:
         return result == 0
     
     
+    def _log_scraping_event(self, session_name: str, event_type: str, state: str):
+        """Log scraping event and create marker for hooks safety net"""
+        import json
+        from datetime import datetime
+
+        log_file = os.path.join(os.path.dirname(__file__), '../../logs/scraping_events.jsonl')
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "session_name": session_name,
+            "event_type": event_type,
+            "state": state,
+            "source": "scraping"
+        }
+
+        try:
+            with open(log_file, 'a') as f:
+                f.write(json.dumps(log_entry) + '\n')
+        except Exception as e:
+            logger.debug(f"Failed to log scraping event: {e}")
+
+        # Create marker file to prevent duplicate idle_prompt notification
+        # Extract project name from session (claude_<project> -> <project>)
+        project_name = session_name
+        if session_name.startswith("claude_"):
+            project_name = session_name[7:]
+        elif session_name.startswith("claude-"):
+            project_name = session_name[7:]
+
+        marker_dir = "/tmp/claude-ops-notified"
+        marker_file = os.path.join(marker_dir, project_name)
+        try:
+            os.makedirs(marker_dir, exist_ok=True)
+            # Touch the marker file
+            with open(marker_file, 'w') as f:
+                f.write(datetime.now().isoformat())
+            logger.debug(f"Created notification marker: {marker_file}")
+        except Exception as e:
+            logger.debug(f"Failed to create marker file: {e}")
+
     def send_completion_notification(self, session_name: str, task_completion: Optional[TaskCompletion] = None):
         """Send work completion notification for a specific session with task details
-        
+
         Args:
             session_name: The session to send notification for
             task_completion: Optional task completion details
         """
         try:
+            # Log for comparison with hooks (POC)
+            self._log_scraping_event(session_name, "completion", "notified")
+
             # Temporarily switch to this session for notification context
             original_session = session_manager.get_active_session()
             session_manager.switch_session(session_name)
@@ -354,12 +401,14 @@ class MultiSessionMonitor:
                 if persisted_state:
                     # Resume from persisted state
                     self.last_screen_hash[session_name] = persisted_state.screen_hash
-                    self.notification_sent[session_name] = persisted_state.notification_sent
+                    # BUGFIX: Always start with notification_sent=False on restart
+                    # The persisted hash allows skip logic, but we should detect NEW work
+                    self.notification_sent[session_name] = False
                     try:
                         self.last_state[session_name] = SessionState(persisted_state.last_state)
                     except ValueError:
                         self.last_state[session_name] = SessionState.UNKNOWN
-                    logger.info(f"📂 Loaded persisted state for {session_name}: notification_sent={persisted_state.notification_sent}")
+                    logger.info(f"📂 Loaded persisted state for {session_name}: screen_hash={persisted_state.screen_hash[:8]}, notification_sent reset to False")
                 else:
                     # Fresh start
                     self.last_screen_hash[session_name] = ""
@@ -550,10 +599,21 @@ class MultiSessionMonitor:
         """Start monitoring all Claude sessions"""
         logger.info("🚀 Starting multi-session monitoring...")
         self.running = True
-        
+
         # Discover initial sessions
         active_sessions = self.discover_sessions()
-        
+
+        # Initialize tracker states for all sessions (T056 fix: wait time tracking on restart)
+        for session_name in active_sessions:
+            try:
+                current_state = self.get_session_state(session_name)
+                state_name = 'working' if current_state == SessionState.WORKING else 'waiting'
+                if hasattr(self.tracker, 'mark_state_transition'):
+                    self.tracker.mark_state_transition(session_name, state_name)
+                    logger.debug(f"Initialized tracker state for {session_name}: {state_name}")
+            except Exception as e:
+                logger.warning(f"Failed to initialize tracker for {session_name}: {e}")
+
         # Start monitoring threads for initial sessions
         started_count = 0
         for session_name in active_sessions:
@@ -631,30 +691,37 @@ class MultiSessionMonitor:
 
 
 def main():
-    """Main entry point for multi-session monitoring with Telegram bot"""
+    """Main entry point for Telegram bot with optional monitoring"""
     import threading
     from ..telegram.bot import TelegramBridge
-    
+
     try:
         config = ClaudeOpsConfig()
-        
-        # Start monitoring in separate thread
-        monitor = MultiSessionMonitor(config)
-        monitor_thread = threading.Thread(target=monitor.start_monitoring, daemon=True)
-        monitor_thread.start()
-        logger.info("📊 Started monitoring thread")
-        
-        # Start Telegram bot (main thread)
-        bot = TelegramBridge(config)
-        logger.info("🤖 Starting Telegram bot...")
-        bot.run()
-        
+
+        if config.hook_only_mode:
+            logger.info("🪝 Hook-only mode enabled - notifications via Claude Code hooks")
+            # Start Telegram bot only (no monitoring thread)
+            bot = TelegramBridge(config)
+            logger.info("🤖 Starting Telegram bot (hook-only mode)...")
+            bot.run()
+        else:
+            # Legacy: Start monitoring in separate thread
+            monitor = MultiSessionMonitor(config)
+            monitor_thread = threading.Thread(target=monitor.start_monitoring, daemon=True)
+            monitor_thread.start()
+            logger.info("📊 Started monitoring thread (polling mode)")
+
+            # Start Telegram bot (main thread)
+            bot = TelegramBridge(config)
+            logger.info("🤖 Starting Telegram bot...")
+            bot.run()
+
     except KeyboardInterrupt:
-        logger.info("Multi-session monitor and bot stopped by user")
+        logger.info("Bot stopped by user")
         if 'monitor' in locals():
             monitor.stop_monitoring()
     except Exception as e:
-        logger.error(f"Multi-session monitor error: {e}")
+        logger.error(f"Bot error: {e}")
         if 'monitor' in locals():
             monitor.stop_monitoring()
 

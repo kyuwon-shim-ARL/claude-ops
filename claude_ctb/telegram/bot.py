@@ -11,8 +11,8 @@ import subprocess
 import re
 import asyncio
 from typing import Optional
-from telegram.ext import Application, MessageHandler, CommandHandler, CallbackQueryHandler, filters
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+from telegram.ext import Application, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 
 from ..config import ClaudeOpsConfig
 from ..project_creator import ProjectCreator
@@ -24,6 +24,13 @@ from .dangerous_commands import (
     create_confirmation,
     get_confirmation,
     cleanup_expired_confirmations
+)
+from .command_picker import (
+    build_flat_commands_keyboard,
+    build_category_keyboard,
+    build_commands_keyboard,
+    get_command,
+    get_category_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -146,6 +153,9 @@ class TelegramBridge:
                 return session_name
         
         # Look for session patterns in the message (updated for all formats)
+        # First, remove escaped underscores for easier pattern matching
+        normalized_text = message_text.replace('\\_', '_')
+
         patterns = [
             r'🎛️ 세션: ([^\n]+)',                    # Log format: 🎛️ 세션: claude_claude-ops
             r'\[`([^`]+)`\]',                      # Notification format: [`session_name`]
@@ -153,15 +163,15 @@ class TelegramBridge:
             r'🎯 \*\*세션\*\*: `([^`]+)`',       # With emoji: 🎯 **세션**: `session_name`
             r'\*\*🎯 세션 이름\*\*: `([^`]+)`',  # From start command
             r'세션: `([^`]+)`',                    # Simple with backticks: 세션: `session_name`
-            r'세션: ([^\n\s]+)',                  # Simple without backticks: 세션: claude_ops
-            r'\[([^]]+)\]',                        # Fallback: [session_name]
+            r'세션: (claude_[a-zA-Z0-9_-]+)',     # Simple without backticks - strict claude_ pattern
+            r'/sessions\s+(claude_[a-zA-Z0-9_-]+)', # /sessions command format
+            r'\[(claude_[a-zA-Z0-9_-]+)\]',        # Bracketed session: [claude_xxx]
             r'\*\*Claude 화면 로그\*\* \[([^\]]+)\]',  # From new log format
-            r'(claude_[\w-]+)',                    # Any claude_xxx pattern (full match)
-            r'claude_(\w+)',                       # Any claude_xxx pattern (name only)
+            r'(claude_[a-zA-Z0-9_-]+)',            # Any claude_xxx pattern (includes underscores)
         ]
         
         for pattern in patterns:
-            match = re.search(pattern, message_text)
+            match = re.search(pattern, normalized_text)
             if match:
                 session_name = match.group(1)
                 # If it already starts with 'claude_', return as-is
@@ -265,7 +275,7 @@ class TelegramBridge:
                 
                 if target_session:
                     logger.info(f"📍 Reply 기반 세션 타겟팅: {target_session}")
-                    
+
                     # Check if target session exists
                     session_exists = os.system(f"tmux has-session -t {target_session}") == 0
                     if not session_exists:
@@ -275,7 +285,8 @@ class TelegramBridge:
                         )
                         return
                 else:
-                    logger.debug("Reply 대상 메시지에서 세션 정보를 찾을 수 없음")
+                    # Log the original message for debugging
+                    logger.warning(f"⚠️ Reply 대상 메시지에서 세션 정보를 찾을 수 없음. 원본 메시지 첫 100자: {original_text[:100] if original_text else 'None'}...")
         
         # Use target session if found, otherwise use current active session
         if not target_session:
@@ -332,21 +343,25 @@ class TelegramBridge:
         session_status = "✅ 활성" if result == 0 else "❌ 비활성"
 
         # T050: Get monitoring session status
-        monitoring_status = "❓ 알 수 없음"
-        session_count = 0
-        try:
-            from ..monitoring.multi_monitor import MultiSessionMonitor
-            monitor = MultiSessionMonitor(self.config)
-            status_data = monitor.get_monitoring_status()
+        # Check for hook-only mode
+        if self.config.hook_only_mode:
+            monitoring_status = "🪝 Hook-only (no polling)"
+        else:
+            monitoring_status = "❓ 알 수 없음"
+            session_count = 0
+            try:
+                from ..monitoring.multi_monitor import MultiSessionMonitor
+                monitor = MultiSessionMonitor(self.config)
+                status_data = monitor.get_monitoring_status()
 
-            if status_data.get("is_active", False):
-                session_count = status_data.get("session_count", 0)
-                monitoring_status = f"✅ 활성 ({session_count} 세션)"
-            else:
-                monitoring_status = "⚠️ 비활성"
-        except Exception as e:
-            logger.error(f"Failed to get monitoring status: {e}")
-            monitoring_status = "❌ 오류"
+                if status_data.get("is_active", False):
+                    session_count = status_data.get("session_count", 0)
+                    monitoring_status = f"✅ 활성 ({session_count} 세션)"
+                else:
+                    monitoring_status = "⚠️ 비활성"
+            except Exception as e:
+                logger.error(f"Failed to get monitoring status: {e}")
+                monitoring_status = "❌ 오류"
 
         status_message = f"""
 🤖 **Telegram-Claude Bridge 상태**
@@ -461,9 +476,9 @@ class TelegramBridge:
                 git_status = "📦 Git 저장소 초기화됨" if result.get('git_initialized') else "⚠️ Git 초기화 건너뜀"
                 session_status = "🎯 세션 생성됨" if result.get('session_created') else "✅ 기존 세션 사용"
                 
-                success_msg = f"""✅ 프로젝트 생성 완료!
+                success_msg = f"""✅ <b>프로젝트 생성 완료!</b>
 
-📁 프로젝트: {project_name}
+📁 프로젝트: <code>/sessions {target_session}</code>
 📂 경로: {target_directory}
 🎯 세션: {target_session}
 {git_status}
@@ -476,7 +491,8 @@ class TelegramBridge:
                 
                 await progress_msg.edit_text(
                     success_msg,
-                    reply_markup=reply_markup
+                    reply_markup=reply_markup,
+                    parse_mode='HTML'
                 )
                 
                 
@@ -541,8 +557,22 @@ class TelegramBridge:
 ❓ 메시지에 Reply하면 해당 세션으로 명령 전송"""
         
         await update.message.reply_text(help_text, parse_mode='Markdown')
-    
-    
+
+    async def cmds_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show command picker inline keyboard"""
+        user_id = update.effective_user.id
+
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+
+        keyboard = build_flat_commands_keyboard()
+        await update.message.reply_text(
+            "📝 **Quick Commands**\n\n⭐ = 자주 사용\n\n클릭하면 입력창에 복사됩니다. 인자를 추가하고 전송하세요!",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+
     async def log_command(self, update, context):
         """Show current Claude screen command with optional line count"""
         user_id = update.effective_user.id
@@ -645,22 +675,23 @@ class TelegramBridge:
                                 header += f"📁 **프로젝트**: `{session_display}`\n"
                                 header += f"🎯 **세션**: `{target_session}`\n"
                                 header += f"📏 **라인 수**: {len(filtered_lines)}줄 - Part {i+1}/{len(parts)}\n\n"
-                                header += "**로그 내용:**\n"
+                                header += "**로그 내용:**\n```\n"
                             else:
-                                header = f"📺 **Part {i+1}/{len(parts)}** [{target_session}]\n\n"
-                            # Send without markdown to avoid parsing errors
-                            message = f"{header}{part.strip()}"
-                            await update.message.reply_text(message, parse_mode=None)
+                                header = f"📺 **Part {i+1}/{len(parts)}** [{target_session}]\n```\n"
+                            # Wrap log content in code block to prevent Markdown parsing errors
+                            message = f"{header}{part.strip()}\n```"
+                            await update.message.reply_text(message, parse_mode="Markdown")
                     else:
-                        # Send without markdown to avoid parsing errors with session info
+                        # Use Markdown for proper line break formatting with session info
                         session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
                         header = f"📺 **Claude 화면 로그** [{target_session}]\n\n"
                         header += f"📁 **프로젝트**: `{session_display}`\n"
                         header += f"🎯 **세션**: `{target_session}`\n"
                         header += f"📏 **라인 수**: {len(filtered_lines)}줄\n\n"
-                        header += "**로그 내용:**\n"
-                        message = f"{header}{screen_text}"
-                        await update.message.reply_text(message, parse_mode=None)
+                        header += "**로그 내용:**\n```\n"
+                        # Wrap log content in code block to prevent Markdown parsing errors
+                        message = f"{header}{screen_text}\n```"
+                        await update.message.reply_text(message, parse_mode="Markdown")
                 else:
                     await update.message.reply_text("📺 Claude 화면이 비어있습니다.")
             else:
@@ -732,25 +763,28 @@ class TelegramBridge:
 
                     screen_text = '\n'.join(filtered_lines)
 
-                    # Send without markdown to avoid parsing errors with session info
+                    # Use HTML for proper formatting with copyable session command
                     session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
-                    header = f"📺 Claude 화면 로그 [{target_session}]\n\n"
-                    header += f"📁 프로젝트: {session_display}\n"
+                    # Escape HTML special characters in screen text
+                    screen_text = screen_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+                    header = f"📺 <b>Claude 화면 로그</b> [{target_session}]\n\n"
+                    header += f"📁 프로젝트: <code>/sessions {target_session}</code>\n"
                     header += f"🎯 세션: {target_session}\n"
                     header += f"📏 라인 수: {len(filtered_lines)}줄\n\n"
-                    header += "로그 내용:\n"
-                    
+                    header += "로그 내용:\n<pre>"
+
                     # Check if we need to split the message due to Telegram limits
                     max_length = 3500
                     if len(header + screen_text) > max_length:
                         # Truncate the content
-                        available_space = max_length - len(header) - 50  # 50 chars for truncation message
+                        available_space = max_length - len(header) - 60  # 60 chars for code block + truncation message
                         truncated_text = screen_text[:available_space] + "\n\n... (내용이 길어 일부 생략됨)"
-                        message = f"{header}{truncated_text}"
+                        message = f"{header}{truncated_text}</pre>"
                     else:
-                        message = f"{header}{screen_text}"
-                    
-                    await update.message.reply_text(message, parse_mode=None)
+                        message = f"{header}{screen_text}</pre>"
+
+                    await update.message.reply_text(message, parse_mode="HTML")
                 else:
                     await update.message.reply_text("📺 Claude 화면이 비어있습니다.")
             else:
@@ -834,7 +868,211 @@ class TelegramBridge:
         except Exception as e:
             logger.error(f"입력 지우기 중 오류: {str(e)}")
             await update.message.reply_text("❌ 내부 오류가 발생했습니다.")
-    
+
+    async def enter_command(self, update, context):
+        """Send Enter key to session (for confirming selections)"""
+        user_id = update.effective_user.id
+
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+
+        # Check for reply-based session targeting
+        target_session = self.config.session_name
+        if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
+            original_text = update.message.reply_to_message.text
+            reply_session = self.extract_session_from_message(original_text)
+            if reply_session:
+                session_exists = os.system(f"tmux has-session -t {reply_session} 2>/dev/null") == 0
+                if session_exists:
+                    target_session = reply_session
+                    logger.info(f"📍 Reply 기반 enter: {target_session}")
+
+        try:
+            # Send Enter key
+            result = os.system(f"tmux send-keys -t {target_session} Enter")
+
+            if result == 0:
+                logger.info(f"Enter 키 전송 완료: {target_session}")
+                session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+                await update.message.reply_text(f"⏎ `{session_display}` 세션에 Enter 키를 전송했습니다")
+            else:
+                logger.error(f"Enter 키 전송 실패: exit code {result}")
+                await update.message.reply_text("❌ Enter 키 전송에 실패했습니다.")
+        except Exception as e:
+            logger.error(f"Enter 키 전송 중 오류: {str(e)}")
+            await update.message.reply_text("❌ 내부 오류가 발생했습니다.")
+
+    async def tab_command(self, update, context):
+        """Send Tab key to session (for navigating options)"""
+        user_id = update.effective_user.id
+
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+
+        # Check for reply-based session targeting
+        target_session = self.config.session_name
+        if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
+            original_text = update.message.reply_to_message.text
+            reply_session = self.extract_session_from_message(original_text)
+            if reply_session:
+                session_exists = os.system(f"tmux has-session -t {reply_session} 2>/dev/null") == 0
+                if session_exists:
+                    target_session = reply_session
+                    logger.info(f"📍 Reply 기반 tab: {target_session}")
+
+        try:
+            # Send Tab key
+            result = os.system(f"tmux send-keys -t {target_session} Tab")
+
+            if result == 0:
+                logger.info(f"Tab 키 전송 완료: {target_session}")
+                session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+                await update.message.reply_text(f"⇥ `{session_display}` 세션에 Tab 키를 전송했습니다")
+            else:
+                logger.error(f"Tab 키 전송 실패: exit code {result}")
+                await update.message.reply_text("❌ Tab 키 전송에 실패했습니다.")
+        except Exception as e:
+            logger.error(f"Tab 키 전송 중 오류: {str(e)}")
+            await update.message.reply_text("❌ 내부 오류가 발생했습니다.")
+
+    async def left_command(self, update, context):
+        """Send Left arrow key to session (for navigating options)"""
+        user_id = update.effective_user.id
+
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+
+        # Check for reply-based session targeting
+        target_session = self.config.session_name
+        if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
+            original_text = update.message.reply_to_message.text
+            reply_session = self.extract_session_from_message(original_text)
+            if reply_session:
+                session_exists = os.system(f"tmux has-session -t {reply_session} 2>/dev/null") == 0
+                if session_exists:
+                    target_session = reply_session
+                    logger.info(f"📍 Reply 기반 left: {target_session}")
+
+        try:
+            # Send Left arrow key
+            result = os.system(f"tmux send-keys -t {target_session} Left")
+
+            if result == 0:
+                logger.info(f"Left 키 전송 완료: {target_session}")
+                session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+                await update.message.reply_text(f"⬅️ `{session_display}` 세션에 ← 키를 전송했습니다")
+            else:
+                logger.error(f"Left 키 전송 실패: exit code {result}")
+                await update.message.reply_text("❌ Left 키 전송에 실패했습니다.")
+        except Exception as e:
+            logger.error(f"Left 키 전송 중 오류: {str(e)}")
+            await update.message.reply_text("❌ 내부 오류가 발생했습니다.")
+
+    async def right_command(self, update, context):
+        """Send Right arrow key to session (for navigating options)"""
+        user_id = update.effective_user.id
+
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+
+        # Check for reply-based session targeting
+        target_session = self.config.session_name
+        if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
+            original_text = update.message.reply_to_message.text
+            reply_session = self.extract_session_from_message(original_text)
+            if reply_session:
+                session_exists = os.system(f"tmux has-session -t {reply_session} 2>/dev/null") == 0
+                if session_exists:
+                    target_session = reply_session
+                    logger.info(f"📍 Reply 기반 right: {target_session}")
+
+        try:
+            # Send Right arrow key
+            result = os.system(f"tmux send-keys -t {target_session} Right")
+
+            if result == 0:
+                logger.info(f"Right 키 전송 완료: {target_session}")
+                session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+                await update.message.reply_text(f"➡️ `{session_display}` 세션에 → 키를 전송했습니다")
+            else:
+                logger.error(f"Right 키 전송 실패: exit code {result}")
+                await update.message.reply_text("❌ Right 키 전송에 실패했습니다.")
+        except Exception as e:
+            logger.error(f"Right 키 전송 중 오류: {str(e)}")
+            await update.message.reply_text("❌ 내부 오류가 발생했습니다.")
+
+    async def up_command(self, update, context):
+        """Send Up arrow key to session (for navigating options)"""
+        user_id = update.effective_user.id
+
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+
+        # Check for reply-based session targeting
+        target_session = self.config.session_name
+        if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
+            original_text = update.message.reply_to_message.text
+            reply_session = self.extract_session_from_message(original_text)
+            if reply_session:
+                session_exists = os.system(f"tmux has-session -t {reply_session} 2>/dev/null") == 0
+                if session_exists:
+                    target_session = reply_session
+                    logger.info(f"📍 Reply 기반 up: {target_session}")
+
+        try:
+            # Send Up arrow key
+            result = os.system(f"tmux send-keys -t {target_session} Up")
+
+            if result == 0:
+                logger.info(f"Up 키 전송 완료: {target_session}")
+                session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+                await update.message.reply_text(f"⬆️ `{session_display}` 세션에 ↑ 키를 전송했습니다")
+            else:
+                logger.error(f"Up 키 전송 실패: exit code {result}")
+                await update.message.reply_text("❌ Up 키 전송에 실패했습니다.")
+        except Exception as e:
+            logger.error(f"Up 키 전송 중 오류: {str(e)}")
+            await update.message.reply_text("❌ 내부 오류가 발생했습니다.")
+
+    async def down_command(self, update, context):
+        """Send Down arrow key to session (for navigating options)"""
+        user_id = update.effective_user.id
+
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+
+        # Check for reply-based session targeting
+        target_session = self.config.session_name
+        if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
+            original_text = update.message.reply_to_message.text
+            reply_session = self.extract_session_from_message(original_text)
+            if reply_session:
+                session_exists = os.system(f"tmux has-session -t {reply_session} 2>/dev/null") == 0
+                if session_exists:
+                    target_session = reply_session
+                    logger.info(f"📍 Reply 기반 down: {target_session}")
+
+        try:
+            # Send Down arrow key
+            result = os.system(f"tmux send-keys -t {target_session} Down")
+
+            if result == 0:
+                logger.info(f"Down 키 전송 완료: {target_session}")
+                session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+                await update.message.reply_text(f"⬇️ `{session_display}` 세션에 ↓ 키를 전송했습니다")
+            else:
+                logger.error(f"Down 키 전송 실패: exit code {result}")
+                await update.message.reply_text("❌ Down 키 전송에 실패했습니다.")
+        except Exception as e:
+            logger.error(f"Down 키 전송 중 오류: {str(e)}")
+            await update.message.reply_text("❌ 내부 오류가 발생했습니다.")
+
     async def restart_command(self, update, context):
         """Restart Claude Code session with conversation continuity"""
         user_id = update.effective_user.id
@@ -1096,11 +1334,11 @@ class TelegramBridge:
             # Generate summary
             summary_message = summary_helper.generate_summary()
 
-            # Use safe_send_message to handle long messages (auto-split)
+            # Send with HTML mode - allows <code> tags for copyable commands
             await safe_send_message(
                 send_func=update.message.reply_text,
                 text=summary_message,
-                parse_mode='Markdown'
+                parse_mode='HTML'
             )
 
         except Exception as e:
@@ -1163,20 +1401,23 @@ class TelegramBridge:
 
                     log_content = '\n'.join(filtered_lines)
                 
-                # Build message parts separately
+                # Build message parts separately using HTML
+                # Escape HTML special characters in log content
+                if log_content:
+                    log_content = log_content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
                 switch_message = (
-                    f"🔄 **활성 세션 전환 완료**\n\n"
-                    f"📍 현재 활성: `{target_session}`\n"
-                    f"📁 프로젝트: `{session_display}`\n\n"
-                    f"이제 `{session_display}` 세션이 활성화되었습니다.\n"
-                    f"_(이전 세션: {old_session})_"
+                    f"🔄 <b>활성 세션 전환 완료</b>\n\n"
+                    f"📍 현재 활성: {target_session}\n"
+                    f"📁 프로젝트: <code>/sessions {target_session}</code>\n\n"
+                    f"이제 {session_display} 세션이 활성화되었습니다."
                 )
-                
+
                 if log_content:
                     # Add log header
-                    log_header = "\n\n📺 **최근 로그 (50줄)**:\n"
-                    # Combine without markdown code blocks to avoid parsing errors
-                    full_message = f"{switch_message}{log_header}{log_content}"
+                    log_header = "\n\n📺 <b>최근 로그 (50줄)</b>:\n<pre>"
+                    # Combine with HTML pre tag for log content
+                    full_message = f"{switch_message}{log_header}{log_content}</pre>"
                 else:
                     full_message = f"{switch_message}\n\n📺 화면이 비어있습니다."
                 
@@ -1201,13 +1442,13 @@ class TelegramBridge:
                     await safe_send_message(
                         update.message.reply_text,
                         full_message,
-                        parse_mode=None,
+                        parse_mode='HTML',
                         reply_markup=reply_markup,
                         preserve_markdown=False  # 로그 내용이므로 마크다운 보존 불필요
                     )
                 else:
                     # Send as single message
-                    await update.message.reply_text(full_message, parse_mode=None, reply_markup=reply_markup)
+                    await update.message.reply_text(full_message, parse_mode='HTML', reply_markup=reply_markup)
             else:
                 await update.message.reply_text(f"❌ 세션 전환에 실패했습니다: {target_session}")
                 
@@ -1266,13 +1507,15 @@ class TelegramBridge:
                         )
                         
                         session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+                        # Escape HTML special characters in text_to_send
+                        escaped_text = text_to_send.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
                         await update.message.reply_text(
-                            f"✅ 텍스트 전송 완료\n\n"
+                            f"✅ <b>텍스트 전송 완료</b>\n\n"
                             f"📍 대상 세션: {target_session}\n"
-                            f"📁 프로젝트: {session_display}\n"
-                            f"📝 전송된 텍스트: {text_to_send}\n\n"
+                            f"📁 프로젝트: <code>/sessions {target_session}</code>\n"
+                            f"📝 전송된 텍스트: {escaped_text}\n\n"
                             f"💡 세션 로그를 보려면 /log를 사용하세요.",
-                            parse_mode=None
+                            parse_mode='HTML'
                         )
                         
                         logger.info(f"텍스트 전송 성공: {target_session} <- {text_to_send[:100]}")
@@ -1488,13 +1731,15 @@ class TelegramBridge:
             from ..utils.prompt_recall import PromptRecallSystem
             prompt_system = PromptRecallSystem()
             last_prompt = prompt_system.extract_last_user_prompt(session_name)
-            
+
             if last_prompt and len(last_prompt.strip()) > 5:
                 # Smart truncation for hint (max 60 chars)
                 if len(last_prompt) > 60:
                     hint = last_prompt[:57] + "..."
                 else:
                     hint = last_prompt
+                # Inside backticks (inline code), only backticks need escaping
+                hint = hint.replace('`', "'")  # backticks break inline code
                 return f"\n*마지막 프롬프트*: `{hint}`\n"
             else:
                 return ""
@@ -1608,7 +1853,102 @@ class TelegramBridge:
         elif callback_data.startswith("compact_"):
             # Handle /compact related callbacks
             await self._compact_callback(query, context)
-    
+        elif callback_data.startswith("cmd:"):
+            # Command picker callbacks
+            await self._command_picker_callback(query, context, callback_data)
+
+    async def _command_picker_callback(self, query, context, callback_data: str):
+        """Handle command picker callbacks"""
+        try:
+            # Check authorization
+            if not self.check_user_authorization(query.from_user.id):
+                await query.answer("Unauthorized")
+                return
+
+            parts = callback_data.split(":")
+            action = parts[1] if len(parts) > 1 else ""
+
+            if action == "cat":
+                # Show commands in category
+                category_idx = int(parts[2])
+
+                # Validate indices
+                from .command_picker import COMMAND_CATEGORIES
+                if category_idx < 0 or category_idx >= len(COMMAND_CATEGORIES):
+                    await query.answer("Invalid category")
+                    return
+
+                keyboard = build_commands_keyboard(category_idx)
+                if keyboard:
+                    cat_name = get_category_name(category_idx)
+                    await query.edit_message_text(
+                        f"📂 {cat_name} commands:",
+                        reply_markup=keyboard
+                    )
+
+            elif action == "run":
+                # Execute command
+                category_idx = int(parts[2])
+                cmd_idx = int(parts[3])
+
+                # Validate indices
+                from .command_picker import COMMAND_CATEGORIES
+                if category_idx < 0 or category_idx >= len(COMMAND_CATEGORIES):
+                    await query.answer("Invalid category")
+                    return
+
+                command = get_command(category_idx, cmd_idx)
+
+                if command:
+                    name, full_cmd, desc = command
+                    # Send to active session
+                    from ..session_manager import session_manager
+                    active_session = session_manager.get_active_session()
+
+                    if active_session:
+                        # Send command to tmux session
+                        import subprocess
+                        subprocess.run(
+                            ["tmux", "send-keys", "-t", active_session, full_cmd, "Enter"],
+                            timeout=5,
+                            check=False
+                        )
+                        await query.edit_message_text(
+                            f"✅ Sent `{full_cmd}` to {active_session}",
+                            parse_mode="Markdown"
+                        )
+                    else:
+                        await query.edit_message_text(
+                            "❌ No active session. Use /sessions to select one."
+                        )
+                else:
+                    await query.edit_message_text(
+                        "❌ Invalid command. Please try again."
+                    )
+
+            elif action == "back":
+                # Back to categories
+                keyboard = build_category_keyboard()
+                await query.edit_message_text(
+                    "🎯 Select a command category:",
+                    reply_markup=keyboard
+                )
+
+            elif action == "x":
+                # Cancel
+                await query.edit_message_text("Cancelled.")
+
+            elif action == "noop":
+                # Separator clicked - do nothing
+                await query.answer()
+                return
+
+            await query.answer()
+
+        except Exception as e:
+            logger.error(f"Command picker callback error: {e}")
+            await query.answer("Error processing command")
+
     async def _status_callback(self, query, context):
         """Status check callback"""
         result = os.system(f"tmux has-session -t {self.config.session_name}")
@@ -1719,13 +2059,34 @@ class TelegramBridge:
         """Handle unknown commands - check for Korean workflow commands first"""
         user_id = update.effective_user.id
         command_text = update.message.text
-        
+
         logger.info(f"Unknown command received: {command_text}")
-        
-        
+
+
         # Forward unknown commands to Claude with a prefix explanation
         await self.forward_to_claude(update, context)
-    
+
+    async def handle_file_upload(self, update, context):
+        """Handle file uploads from Telegram"""
+        user_id = update.effective_user.id
+
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+
+        # Get project directory from active session
+        from ..session_manager import session_manager
+        session_info = session_manager.get_session_info(self.config.session_name)
+
+        if session_info and session_info.get('directory'):
+            project_dir = session_info['directory']
+        else:
+            # Fallback to working directory
+            project_dir = self.config.working_directory
+
+        from .file_handlers import handle_file_upload
+        await handle_file_upload(update, context, project_dir)
+
     def setup_handlers(self):
         """Setup all command and callback handlers"""
         if not self.app:
@@ -1735,6 +2096,7 @@ class TelegramBridge:
         self.app.add_handler(CommandHandler("status", self.status_command))
         self.app.add_handler(CommandHandler("new_project", self.start_claude_command))  # Primary command
         self.app.add_handler(CommandHandler("help", self.help_command))
+        self.app.add_handler(CommandHandler("cmds", self.cmds_command))
         self.app.add_handler(CommandHandler("log", self.log_command))
         self.app.add_handler(CommandHandler("logs", self.log_command))  # Alias for common typo
         self.app.add_handler(CommandHandler("log50", self.log50_command))
@@ -1744,6 +2106,12 @@ class TelegramBridge:
         self.app.add_handler(CommandHandler("log300", self.log300_command))
         self.app.add_handler(CommandHandler("stop", self.stop_command))
         self.app.add_handler(CommandHandler("erase", self.erase_command))
+        self.app.add_handler(CommandHandler("enter", self.enter_command))
+        self.app.add_handler(CommandHandler("tab", self.tab_command))
+        self.app.add_handler(CommandHandler("left", self.left_command))
+        self.app.add_handler(CommandHandler("right", self.right_command))
+        self.app.add_handler(CommandHandler("up", self.up_command))
+        self.app.add_handler(CommandHandler("down", self.down_command))
         self.app.add_handler(CommandHandler("restart", self.restart_command))
         self.app.add_handler(CommandHandler("sessions", self.sessions_command))
         self.app.add_handler(CommandHandler("connect", self.connect_command))
@@ -1758,22 +2126,28 @@ class TelegramBridge:
         self.app.add_handler(CommandHandler("stabilization", self.workflow_stabilization_command))
         self.app.add_handler(CommandHandler("deployment", self.workflow_deployment_command))
         self.app.add_handler(CommandHandler("fullcycle", self.workflow_fullcycle_command))
-        
-        # REMOVED: Detection analysis commands - non-functional
-        # self.app.add_handler(CommandHandler("detection_status", self.detection_status_command))
-        # self.app.add_handler(CommandHandler("detection_report", self.detection_report_command))
-        # self.app.add_handler(CommandHandler("detection_trends", self.detection_trends_command))
-        # self.app.add_handler(CommandHandler("detection_improve", self.detection_improve_command))
-        
+
+        # File and external service commands
+        from .file_handlers import download_command, email_command, gdrive_command
+        self.app.add_handler(CommandHandler("download", download_command))
+        self.app.add_handler(CommandHandler("email", email_command))
+        self.app.add_handler(CommandHandler("gdrive", gdrive_command))
+
         # Callback query handler for inline buttons
         self.app.add_handler(CallbackQueryHandler(self.button_callback))
-        
+
+        # File upload handler - must be before text handler
+        self.app.add_handler(MessageHandler(
+            filters.Document.ALL | filters.PHOTO | filters.VIDEO | filters.AUDIO | filters.VOICE,
+            self.handle_file_upload
+        ))
+
         # Message handler for forwarding regular text to Claude
         self.app.add_handler(MessageHandler(
-            filters.TEXT & ~filters.COMMAND, 
+            filters.TEXT & ~filters.COMMAND,
             self.forward_to_claude
         ))
-        
+
         # Handler for unknown commands - forward to Claude
         # This must be added AFTER known commands to catch unhandled ones
         self.app.add_handler(MessageHandler(
@@ -1784,6 +2158,7 @@ class TelegramBridge:
     async def setup_bot_commands(self):
         """Setup bot command menu"""
         commands = [
+            BotCommand("cmds", "🎯 슬래시 명령어 선택"),
             BotCommand("sessions", "🔄 활성 세션 목록 보기"),
             BotCommand("connect", "📁 기존 프로젝트에 세션 연결"),
             BotCommand("board", "🎯 세션 보드"),
@@ -1791,6 +2166,15 @@ class TelegramBridge:
             BotCommand("log", "📺 현재 Claude 화면 실시간 확인"),
             BotCommand("stop", "⛔ Claude 작업 중단 (ESC 키 전송)"),
             BotCommand("erase", "🧹 현재 입력 지우기 (Ctrl+C 전송)"),
+            BotCommand("enter", "⏎ Enter 키 전송 (선택 확정)"),
+            BotCommand("tab", "⇥ Tab 키 전송 (옵션 이동)"),
+            BotCommand("left", "⬅️ 왼쪽 화살표 키 전송"),
+            BotCommand("right", "➡️ 오른쪽 화살표 키 전송"),
+            BotCommand("up", "⬆️ 위쪽 화살표 키 전송"),
+            BotCommand("down", "⬇️ 아래쪽 화살표 키 전송"),
+            BotCommand("download", "📥 서버 파일 다운로드"),
+            BotCommand("email", "📧 이메일 전송 (Gmail)"),
+            BotCommand("gdrive", "☁️ Google Drive 업로드"),
             BotCommand("status", "📊 봇 및 tmux 세션 상태 확인"),
             BotCommand("help", "❓ 도움말 보기"),
             BotCommand("new_project", "🆕 새 Claude 프로젝트 생성")
@@ -1916,7 +2300,6 @@ class TelegramBridge:
                     f"📍 현재 활성: `{session_name}`\n"
                     f"📁 상태 파일: `{new_status_file}`\n\n"
                     f"이제 `{session_name}` 세션을 모니터링합니다.\n"
-                    f"_(이전: {current_session})_\n"
                 )
                 
                 if log_content:
@@ -2228,7 +2611,7 @@ class TelegramBridge:
             
             # Start new monitor
             subprocess.run(
-                "cd /home/kyuwon/claude-ops && ./scripts/start_monitoring.sh > /dev/null 2>&1 &",
+                "cd /home/kyuwon/projects/claude-ops && ./scripts/start_monitoring.sh > /dev/null 2>&1 &",
                 shell=True
             )
             
@@ -2252,8 +2635,7 @@ class TelegramBridge:
                 await update.message.reply_text(
                     f"🔄 메인 세션 자동 전환 완료\n\n"
                     f"📍 현재 활성: `{session_name}`\n\n"
-                    f"✅ 이제 모든 메시지가 새 세션으로 전송됩니다!\n"
-                    f"_(이전: {old_session})_",
+                    f"✅ 이제 모든 메시지가 새 세션으로 전송됩니다!",
                     parse_mode='Markdown'
                 )
                 return True
@@ -2337,11 +2719,12 @@ class TelegramBridge:
             # No utility buttons needed - sessions are the main content
             
             reply_markup = InlineKeyboardMarkup(keyboard)
-            
+
             # Count working and waiting sessions
             waiting_count = sum(1 for _, _, status, _ in sessions_info if status == 'waiting')
             working_count = sum(1 for _, _, status, _ in sessions_info if status == 'working')
-            
+
+            # Inside backticks (inline code), no escaping needed
             await reply_func(
                 f"🎯 **세션 보드** (전체: {len(sessions_info)}개)\n"
                 f"대기: {waiting_count}개 | 작업중: {working_count}개\n\n"
@@ -2429,9 +2812,17 @@ class TelegramBridge:
             ]
             
             reply_markup = InlineKeyboardMarkup(keyboard)
-            
+
+            # Escape special characters for Markdown (only for text outside inline code)
+            escaped_display = display_name.replace('_', '\\_')
+            # Clean recent_log of characters that break Markdown parsing
+            safe_log = recent_log if recent_log else ""
+            safe_log = safe_log.replace('`', "'")      # backticks break code blocks
+            safe_log = safe_log.replace('**', '∗∗')    # double asterisks break bold
+
             # Create reply-targeting optimized message format
-            session_action_msg = f"""🎯 **{display_name}** 세션 액션
+            # Note: Inside backticks (inline code), no escaping needed - text is literal
+            session_action_msg = f"""🎯 **{escaped_display}** 세션 액션
 
 📊 **상태**: {status_emoji}
 🎯 **메인 세션**: {'✅ 현재 메인' if is_current else '❌ 다른 세션'}
@@ -2441,12 +2832,12 @@ class TelegramBridge:
 
 📺 **최근 진행사항 (30줄)**:
 ```
-{recent_log}
+{safe_log}
 ```
 
 💆‍♂️ **원클릭 액션 선택**:
 이 메시지에 답장하여 `{session_name}` 세션에 직접 명령어를 전송할 수 있습니다."""
-            
+
             await query.edit_message_text(
                 session_action_msg,
                 reply_markup=reply_markup,
@@ -2733,15 +3124,14 @@ class TelegramBridge:
             
             if success:
                 display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
-                
+
                 await query.edit_message_text(
-                    f"🏠 메인 세션 변경 완료\n\n"
+                    f"🏠 <b>메인 세션 변경 완료</b>\n\n"
                     f"📍 현재 메인: {session_name}\n"
-                    f"📁 프로젝트: {display_name}\n\n"
+                    f"📁 프로젝트: <code>/sessions {session_name}</code>\n\n"
                     f"✅ 이제 {display_name} 세션이 메인 세션입니다.\n"
-                    f"모니터링 시스템이 자동으로 업데이트됩니다.\n"
-                    f"(이전: {current_session})",
-                    parse_mode=None
+                    f"모니터링 시스템이 자동으로 업데이트됩니다.",
+                    parse_mode='HTML'
                 )
                 
                 # Restart monitoring for new session
@@ -2932,25 +3322,28 @@ class TelegramBridge:
 
                     screen_text = '\n'.join(filtered_lines)
                     
-                    # Send without markdown to avoid parsing errors with session info
+                    # Use HTML for proper formatting with copyable session command
                     session_display = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
-                    header = f"📺 빠른 로그 ({line_count}줄) [{session_name}]\n\n"
-                    header += f"📁 프로젝트: {session_display}\n"
+                    # Escape HTML special characters in screen text
+                    screen_text = screen_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+                    header = f"📺 <b>빠른 로그 ({line_count}줄)</b> [{session_name}]\n\n"
+                    header += f"📁 프로젝트: <code>/sessions {session_name}</code>\n"
                     header += f"🎯 세션: {session_name}\n"
                     header += f"📏 라인 수: {len(filtered_lines)}줄\n\n"
-                    header += "로그 내용:\n"
-                    
+                    header += "로그 내용:\n<pre>"
+
                     # Check if we need to split the message due to Telegram limits
                     max_length = 3500
                     if len(header + screen_text) > max_length:
                         # Truncate the content
-                        available_space = max_length - len(header) - 50  # 50 chars for truncation message
+                        available_space = max_length - len(header) - 60  # 60 chars for pre tag + truncation message
                         truncated_text = screen_text[:available_space] + "\n\n... (내용이 길어 일부 생략됨)"
-                        message = f"{header}{truncated_text}"
+                        message = f"{header}{truncated_text}</pre>"
                     else:
-                        message = f"{header}{screen_text}"
-                    
-                    await query.edit_message_text(message, parse_mode=None)
+                        message = f"{header}{screen_text}</pre>"
+
+                    await query.edit_message_text(message, parse_mode='HTML')
                 else:
                     await query.edit_message_text("📺 Claude 화면이 비어있습니다.")
             else:

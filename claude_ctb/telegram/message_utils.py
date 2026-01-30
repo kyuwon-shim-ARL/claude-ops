@@ -123,16 +123,46 @@ def _balance_markdown(text: str) -> str:
     return text
 
 
+def _balance_html_tags(text: str) -> str:
+    """
+    HTML 태그가 열린 상태로 끝나면 닫아주기
+
+    Args:
+        text: 균형을 맞출 텍스트
+
+    Returns:
+        균형이 맞춰진 텍스트
+    """
+    # 간단한 태그들만 처리 (pre, b, i, code)
+    tags_to_check = ['pre', 'b', 'i', 'code']
+
+    for tag in tags_to_check:
+        open_count = text.count(f'<{tag}>')
+        close_count = text.count(f'</{tag}>')
+
+        # 열린 태그가 더 많으면 닫아주기
+        while open_count > close_count:
+            text += f'</{tag}>'
+            close_count += 1
+
+        # 닫힌 태그가 더 많으면 앞에 열어주기
+        while close_count > open_count:
+            text = f'<{tag}>' + text
+            open_count += 1
+
+    return text
+
+
 async def safe_send_message(
-    send_func: Callable, 
-    text: str, 
+    send_func: Callable,
+    text: str,
     max_length: int = 4000,
     preserve_markdown: bool = True,
     **kwargs
 ) -> None:
     """
     안전한 텔레그램 메시지 전송 (자동 분할 지원)
-    
+
     Args:
         send_func: 메시지 전송 함수 (일반적으로 update.message.reply_text)
         text: 전송할 텍스트
@@ -144,13 +174,18 @@ async def safe_send_message(
         # 단일 메시지로 전송
         await send_func(text, **kwargs)
         return
-    
+
     # 메시지 분할 후 전송
     messages = split_long_message(text, max_length, preserve_markdown)
-    
+
+    # HTML 모드인 경우 각 메시지의 태그 균형 맞추기
+    parse_mode = kwargs.get('parse_mode', None)
+    if parse_mode == 'HTML':
+        messages = [_balance_html_tags(msg) for msg in messages]
+
     # reply_markup은 마지막 메시지에만 추가
     reply_markup = kwargs.pop('reply_markup', None)
-    
+
     for i, message in enumerate(messages):
         if i == len(messages) - 1 and reply_markup:
             # 마지막 메시지에만 버튼 추가
