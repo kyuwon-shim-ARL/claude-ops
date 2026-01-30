@@ -107,9 +107,8 @@ class SessionStateAnalyzer:
         
         # Patterns indicating user input is required
         self.input_waiting_patterns = [
+            # Standard confirmation prompts
             "Do you want to proceed?",
-            "❯ 1.",                      # Option selection
-            "❯ 2.",                      # Option selection
             "Choose an option:",
             "Select:",
             "Enter your choice:",
@@ -117,6 +116,20 @@ class SessionStateAnalyzer:
             "How would you like to proceed?",
             "Please choose:",
             "Continue?",
+            # Numbered option selection
+            "❯ 1.",                      # Option selection
+            "❯ 2.",                      # Option selection
+            # AskUserQuestion patterns (Claude Code's question UI)
+            "Question ",                 # "Question 1 of 5:" etc
+            "│ Option │",                # Table header for options
+            "│ A ",                       # Option A row
+            "│ B ",                       # Option B row
+            "│ C ",                       # Option C row
+            "│ D ",                       # Option D row
+            "│ Short ",                   # Short answer option
+            "│ Other ",                   # Other option
+            "┌────────┬",                # Table top border
+            "(<=",                        # Character limit hint like "(<=5 words)"
         ]
         
         # NEW: Completion message patterns
@@ -278,10 +291,13 @@ class SessionStateAnalyzer:
         recent_lines = lines[-25:]  # Last 25 lines (was 15, increased for scrolling)
         recent_content = '\n'.join(recent_lines)
 
-        # PRIORITY 1: Check for 'esc to interrupt' in RECENT content only
-        if "esc to interrupt" in recent_content:
-            logger.debug("🎯 WORKING: 'esc to interrupt' detected in recent lines")
-            return True
+        # PRIORITY 1: Check for interrupt indicators in RECENT content
+        # Claude Code shows either 'esc to interrupt' or 'ctrl+c to interrupt' when working
+        interrupt_patterns = ["esc to interrupt", "ctrl+c to interrupt"]
+        for pattern in interrupt_patterns:
+            if pattern in recent_content:
+                logger.debug(f"🎯 WORKING: '{pattern}' detected in recent lines")
+                return True
 
         # Additional working patterns that also indicate active work
         working_patterns = [
@@ -402,44 +418,55 @@ class SessionStateAnalyzer:
     def _detect_input_waiting(self, screen_content: str) -> bool:
         """
         Detect if session is waiting for user input based on prompt patterns
-        
-        Checks for selection prompts and interactive dialogs in the most recent
-        screen content, indicating the user needs to make a choice.
-        This state has higher priority than WORKING when both are detected.
-        
+
+        CRITICAL: Working state takes precedence. If working indicators are present,
+        this returns False even if input patterns exist (they may be artifacts
+        from before the current work started).
+
         Input Waiting Patterns Detected:
             - "Do you want to proceed?": Confirmation prompts
-            - "❯ 1.", "❯ 2.": Selection menu indicators  
+            - "❯ 1.", "❯ 2.": Selection menu indicators
             - "Choose an option:", "Select:": Choice requests
-            - "Enter your choice:", "Continue?": Input requests
-            
-        Algorithm:
-            1. Split content into lines
-            2. Focus on last 10 lines (prompts are usually at the end)
-            3. Search for any input waiting pattern
-            4. Return True if found, False otherwise
-            
+            - AskUserQuestion table patterns
+
         Returns:
-            bool: True if input waiting patterns found, False otherwise
-            
-        Priority Note:
-            Input waiting has higher priority than working detection because
-            users need to respond even if background work is happening.
+            bool: True if input waiting patterns found AND not currently working
         """
         if not screen_content:
             return False
-        
+
         lines = screen_content.split('\n')
-        
+        recent_content = '\n'.join(lines[-25:])
+
+        # CRITICAL FIX: If working indicators present, NOT waiting for input
+        # Working state must take precedence to prevent false alarms
+        working_indicators = [
+            "esc to interrupt",
+            "ctrl+c to interrupt",
+            "ctrl+b to run in background",
+            "Thinking…",
+            "Running…",
+            "Implementing",
+            "Building",
+            "Testing",
+            "Installing",
+            "Processing",
+            "Analyzing",
+        ]
+
+        for indicator in working_indicators:
+            if indicator in recent_content:
+                return False
+
         # Check last 10 lines for input waiting patterns
         # Input prompts are typically at the bottom of the screen
         recent_lines = lines[-10:]
-        
+
         for line in recent_lines:
             for pattern in self.input_waiting_patterns:
                 if pattern in line:
                     return True
-        
+
         return False
     
     def _detect_error_state(self, screen_content: str) -> bool:

@@ -11,8 +11,8 @@ import subprocess
 import re
 import asyncio
 from typing import Optional
-from telegram.ext import Application, MessageHandler, CommandHandler, CallbackQueryHandler, filters
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+from telegram.ext import Application, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 
 from ..config import ClaudeOpsConfig
 from ..project_creator import ProjectCreator
@@ -24,6 +24,13 @@ from .dangerous_commands import (
     create_confirmation,
     get_confirmation,
     cleanup_expired_confirmations
+)
+from .command_picker import (
+    build_flat_commands_keyboard,
+    build_category_keyboard,
+    build_commands_keyboard,
+    get_command,
+    get_category_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -336,21 +343,25 @@ class TelegramBridge:
         session_status = "✅ 활성" if result == 0 else "❌ 비활성"
 
         # T050: Get monitoring session status
-        monitoring_status = "❓ 알 수 없음"
-        session_count = 0
-        try:
-            from ..monitoring.multi_monitor import MultiSessionMonitor
-            monitor = MultiSessionMonitor(self.config)
-            status_data = monitor.get_monitoring_status()
+        # Check for hook-only mode
+        if self.config.hook_only_mode:
+            monitoring_status = "🪝 Hook-only (no polling)"
+        else:
+            monitoring_status = "❓ 알 수 없음"
+            session_count = 0
+            try:
+                from ..monitoring.multi_monitor import MultiSessionMonitor
+                monitor = MultiSessionMonitor(self.config)
+                status_data = monitor.get_monitoring_status()
 
-            if status_data.get("is_active", False):
-                session_count = status_data.get("session_count", 0)
-                monitoring_status = f"✅ 활성 ({session_count} 세션)"
-            else:
-                monitoring_status = "⚠️ 비활성"
-        except Exception as e:
-            logger.error(f"Failed to get monitoring status: {e}")
-            monitoring_status = "❌ 오류"
+                if status_data.get("is_active", False):
+                    session_count = status_data.get("session_count", 0)
+                    monitoring_status = f"✅ 활성 ({session_count} 세션)"
+                else:
+                    monitoring_status = "⚠️ 비활성"
+            except Exception as e:
+                logger.error(f"Failed to get monitoring status: {e}")
+                monitoring_status = "❌ 오류"
 
         status_message = f"""
 🤖 **Telegram-Claude Bridge 상태**
@@ -546,8 +557,22 @@ class TelegramBridge:
 ❓ 메시지에 Reply하면 해당 세션으로 명령 전송"""
         
         await update.message.reply_text(help_text, parse_mode='Markdown')
-    
-    
+
+    async def cmds_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show command picker inline keyboard"""
+        user_id = update.effective_user.id
+
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+
+        keyboard = build_flat_commands_keyboard()
+        await update.message.reply_text(
+            "📝 **Quick Commands**\n\n⭐ = 자주 사용\n\n클릭하면 입력창에 복사됩니다. 인자를 추가하고 전송하세요!",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+
     async def log_command(self, update, context):
         """Show current Claude screen command with optional line count"""
         user_id = update.effective_user.id
@@ -1828,7 +1853,102 @@ class TelegramBridge:
         elif callback_data.startswith("compact_"):
             # Handle /compact related callbacks
             await self._compact_callback(query, context)
-    
+        elif callback_data.startswith("cmd:"):
+            # Command picker callbacks
+            await self._command_picker_callback(query, context, callback_data)
+
+    async def _command_picker_callback(self, query, context, callback_data: str):
+        """Handle command picker callbacks"""
+        try:
+            # Check authorization
+            if not self.check_user_authorization(query.from_user.id):
+                await query.answer("Unauthorized")
+                return
+
+            parts = callback_data.split(":")
+            action = parts[1] if len(parts) > 1 else ""
+
+            if action == "cat":
+                # Show commands in category
+                category_idx = int(parts[2])
+
+                # Validate indices
+                from .command_picker import COMMAND_CATEGORIES
+                if category_idx < 0 or category_idx >= len(COMMAND_CATEGORIES):
+                    await query.answer("Invalid category")
+                    return
+
+                keyboard = build_commands_keyboard(category_idx)
+                if keyboard:
+                    cat_name = get_category_name(category_idx)
+                    await query.edit_message_text(
+                        f"📂 {cat_name} commands:",
+                        reply_markup=keyboard
+                    )
+
+            elif action == "run":
+                # Execute command
+                category_idx = int(parts[2])
+                cmd_idx = int(parts[3])
+
+                # Validate indices
+                from .command_picker import COMMAND_CATEGORIES
+                if category_idx < 0 or category_idx >= len(COMMAND_CATEGORIES):
+                    await query.answer("Invalid category")
+                    return
+
+                command = get_command(category_idx, cmd_idx)
+
+                if command:
+                    name, full_cmd, desc = command
+                    # Send to active session
+                    from ..session_manager import session_manager
+                    active_session = session_manager.get_active_session()
+
+                    if active_session:
+                        # Send command to tmux session
+                        import subprocess
+                        subprocess.run(
+                            ["tmux", "send-keys", "-t", active_session, full_cmd, "Enter"],
+                            timeout=5,
+                            check=False
+                        )
+                        await query.edit_message_text(
+                            f"✅ Sent `{full_cmd}` to {active_session}",
+                            parse_mode="Markdown"
+                        )
+                    else:
+                        await query.edit_message_text(
+                            "❌ No active session. Use /sessions to select one."
+                        )
+                else:
+                    await query.edit_message_text(
+                        "❌ Invalid command. Please try again."
+                    )
+
+            elif action == "back":
+                # Back to categories
+                keyboard = build_category_keyboard()
+                await query.edit_message_text(
+                    "🎯 Select a command category:",
+                    reply_markup=keyboard
+                )
+
+            elif action == "x":
+                # Cancel
+                await query.edit_message_text("Cancelled.")
+
+            elif action == "noop":
+                # Separator clicked - do nothing
+                await query.answer()
+                return
+
+            await query.answer()
+
+        except Exception as e:
+            logger.error(f"Command picker callback error: {e}")
+            await query.answer("Error processing command")
+
     async def _status_callback(self, query, context):
         """Status check callback"""
         result = os.system(f"tmux has-session -t {self.config.session_name}")
@@ -1976,6 +2096,7 @@ class TelegramBridge:
         self.app.add_handler(CommandHandler("status", self.status_command))
         self.app.add_handler(CommandHandler("new_project", self.start_claude_command))  # Primary command
         self.app.add_handler(CommandHandler("help", self.help_command))
+        self.app.add_handler(CommandHandler("cmds", self.cmds_command))
         self.app.add_handler(CommandHandler("log", self.log_command))
         self.app.add_handler(CommandHandler("logs", self.log_command))  # Alias for common typo
         self.app.add_handler(CommandHandler("log50", self.log50_command))
@@ -2037,6 +2158,7 @@ class TelegramBridge:
     async def setup_bot_commands(self):
         """Setup bot command menu"""
         commands = [
+            BotCommand("cmds", "🎯 슬래시 명령어 선택"),
             BotCommand("sessions", "🔄 활성 세션 목록 보기"),
             BotCommand("connect", "📁 기존 프로젝트에 세션 연결"),
             BotCommand("board", "🎯 세션 보드"),

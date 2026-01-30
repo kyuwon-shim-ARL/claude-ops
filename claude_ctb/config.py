@@ -138,6 +138,12 @@ class ClaudeOpsConfig:
         """Number of screen lines to analyze for state detection"""
         return int(os.getenv("SESSION_SCREEN_HISTORY_LINES", "200"))
 
+    # Hook-Only Mode (v2.2)
+    @property
+    def hook_only_mode(self) -> bool:
+        """Enable hook-only notifications (disable polling). Default: True for v2.2+"""
+        return os.getenv("HOOK_ONLY_MODE", "true").lower() == "true"
+
     def _validate_required_vars(self) -> None:
         """Validate required environment variables based on enabled features"""
         # Only validate if features are being used
