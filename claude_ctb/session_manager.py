@@ -110,36 +110,42 @@ class SessionManager:
             return []
 
     def _sort_sessions_by_activity(self, sessions: List[str]) -> List[str]:
-        """Sort sessions by last activity time (most recent first)"""
+        """Sort sessions by last activity time (most recent first)
+
+        Uses single tmux call to fetch all session activity times at once.
+        """
         import subprocess
-        import re
 
-        session_times = []
-        for session in sessions:
-            try:
-                # Get session activity time from tmux
-                result = subprocess.run(
-                    f"tmux display-message -t {session} -p '#{{session_activity}}'",
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=1
-                )
+        try:
+            # Single tmux call to get all session names + activity times
+            result = subprocess.run(
+                "tmux list-sessions -F '#{session_name} #{session_activity}'",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
 
-                if result.returncode == 0 and result.stdout.strip():
-                    activity_time = int(result.stdout.strip())
-                    session_times.append((session, activity_time))
-                else:
-                    # If can't get time, put at end
-                    session_times.append((session, 0))
-            except Exception:
-                # If error, put at end
-                session_times.append((session, 0))
+            if result.returncode != 0:
+                return sessions
 
-        # Sort by activity time descending (most recent first)
-        session_times.sort(key=lambda x: x[1], reverse=True)
+            # Parse into lookup dict
+            activity_map = {}
+            for line in result.stdout.strip().split('\n'):
+                parts = line.strip().split(' ', 1)
+                if len(parts) == 2:
+                    try:
+                        activity_map[parts[0]] = int(parts[1])
+                    except ValueError:
+                        activity_map[parts[0]] = 0
 
-        return [session for session, _ in session_times]
+            # Sort requested sessions by activity time
+            session_times = [(s, activity_map.get(s, 0)) for s in sessions]
+            session_times.sort(key=lambda x: x[1], reverse=True)
+            return [s for s, _ in session_times]
+
+        except Exception:
+            return sessions
     
     def get_session_info(self, session_name: str) -> Dict:
         """Get detailed information about a session"""
@@ -226,10 +232,23 @@ class SessionManager:
 
         for session in self.get_all_claude_sessions():
             session_path = self.get_session_path(session)
-            if session_path == project_path:
+            if session_path == project_path or session_path.startswith(project_path + '/'):
                 matching_sessions.append(session)
 
         return matching_sessions
+
+    @staticmethod
+    def _resolve_worktree_parent(path: str) -> str:
+        """Resolve a worktree path to its parent project path.
+
+        If path contains '/.claude/worktrees/', returns the project root.
+        Otherwise returns the path unchanged.
+        """
+        marker = '/.claude/worktrees/'
+        idx = path.find(marker)
+        if idx != -1:
+            return path[:idx]
+        return path
 
     def get_available_projects(self, scan_dirs: List[str] = None) -> List[Dict]:
         """Get list of available projects from running sessions and scan directories.
@@ -246,17 +265,25 @@ class SessionManager:
         for session in self.get_all_claude_sessions():
             path = self.get_session_path(session)
             if path and os.path.isdir(path):
+                # Resolve worktree paths to parent project
+                project_path = self._resolve_worktree_parent(path)
                 try:
                     mtime = os.path.getmtime(path)
                 except Exception:
                     mtime = 0
 
-                projects[path] = {
-                    "path": path,
-                    "name": os.path.basename(path),
-                    "has_session": True,
-                    "mtime": mtime
-                }
+                # Use parent project path as key to avoid duplicate entries
+                if project_path in projects:
+                    # Update mtime if this session is more recent
+                    if mtime > projects[project_path]["mtime"]:
+                        projects[project_path]["mtime"] = mtime
+                else:
+                    projects[project_path] = {
+                        "path": project_path,
+                        "name": os.path.basename(project_path),
+                        "has_session": True,
+                        "mtime": mtime
+                    }
 
         # Scan configured directories
         for scan_dir in scan_dirs:
@@ -308,8 +335,8 @@ class SessionManager:
         existing_sessions = self.find_sessions_for_project(project_path)
 
         if existing_sessions:
-            # Switch to the most recent session (last in list)
-            target_session = existing_sessions[-1]
+            # Switch to the most recent session (first in activity-sorted list)
+            target_session = existing_sessions[0]
             self.switch_session(target_session)
             return {
                 "status": "switched",
