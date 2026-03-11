@@ -267,6 +267,8 @@ class SessionManager:
             if path and os.path.isdir(path):
                 # Resolve worktree paths to parent project
                 project_path = self._resolve_worktree_parent(path)
+                if not os.path.isdir(project_path):
+                    project_path = path  # fallback to original if parent missing
                 try:
                     mtime = os.path.getmtime(path)
                 except Exception:
