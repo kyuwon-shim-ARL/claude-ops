@@ -32,12 +32,13 @@ class TestSessionState:
         """Test state priority ordering"""
         analyzer = SessionStateAnalyzer()
         
-        # ERROR should have highest priority (lowest number)
-        assert analyzer.STATE_PRIORITY[SessionState.ERROR] == 0
-        assert analyzer.STATE_PRIORITY[SessionState.WAITING_INPUT] == 1
-        assert analyzer.STATE_PRIORITY[SessionState.WORKING] == 2
-        assert analyzer.STATE_PRIORITY[SessionState.IDLE] == 3
-        assert analyzer.STATE_PRIORITY[SessionState.UNKNOWN] == 4
+        # CONTEXT_LIMIT should have highest priority (lowest number)
+        assert analyzer.STATE_PRIORITY[SessionState.CONTEXT_LIMIT] == 0
+        assert analyzer.STATE_PRIORITY[SessionState.ERROR] == 1
+        assert analyzer.STATE_PRIORITY[SessionState.WAITING_INPUT] == 2
+        assert analyzer.STATE_PRIORITY[SessionState.WORKING] == 3
+        assert analyzer.STATE_PRIORITY[SessionState.IDLE] == 4
+        assert analyzer.STATE_PRIORITY[SessionState.UNKNOWN] == 5
 
 
 class TestStateTransition:

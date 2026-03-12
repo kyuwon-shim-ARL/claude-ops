@@ -1850,12 +1850,157 @@ class TelegramBridge:
             await self._back_to_menu_callback(query, context)
         elif callback_data == "back_to_sessions":
             await self._session_actions_callback(query, context)
+        elif callback_data.startswith("ctx_restart:"):
+            session_name = callback_data.split(":", 1)[1]
+            await self._context_limit_restart_callback(query, context, session_name)
+        elif callback_data.startswith("ctx_ignore:"):
+            session_name = callback_data.split(":", 1)[1]
+            await query.edit_message_text(
+                f"⏭️ `{session_name}` context limit 알림을 무시했습니다.\n"
+                f"수동으로 `/restart`하거나 세션에서 `/clear`를 입력하세요.",
+                parse_mode="Markdown"
+            )
         elif callback_data.startswith("compact_"):
             # Handle /compact related callbacks
             await self._compact_callback(query, context)
         elif callback_data.startswith("cmd:"):
             # Command picker callbacks
             await self._command_picker_callback(query, context, callback_data)
+
+    async def _context_limit_restart_callback(self, query, context, session_name: str):
+        """Handle context limit restart button callback.
+
+        Restarts the Claude session with a fresh context (NOT --continue,
+        which would reload the same full conversation and hit the limit again).
+        Generates a handoff prompt from git status and .omc state files.
+        """
+        import asyncio
+
+        try:
+            session_display = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
+
+            # Validate session_name against live tmux sessions to prevent injection
+            valid_sessions = self.session_manager.get_all_claude_sessions()
+            valid_session_names = {s[0] for s in valid_sessions} if valid_sessions else set()
+            if session_name not in valid_session_names:
+                await query.edit_message_text(
+                    f"❌ 세션 `{session_display}`을 찾을 수 없습니다.",
+                    parse_mode="Markdown"
+                )
+                return
+
+            await query.edit_message_text(
+                f"🔄 `{session_display}` 세션 재시작 중...\n\n"
+                f"1️⃣ 기존 세션 종료\n"
+                f"2️⃣ 핸드오프 컨텍스트 수집\n"
+                f"3️⃣ 새 세션 시작 (fresh context)",
+                parse_mode="Markdown"
+            )
+
+            # Step 1: Exit current Claude session (list-form subprocess to prevent injection)
+            subprocess.run(["tmux", "send-keys", "-t", session_name, "C-c"], timeout=5)
+            await asyncio.sleep(1)
+            subprocess.run(["tmux", "send-keys", "-t", session_name, "/exit", "Enter"], timeout=5)
+            await asyncio.sleep(3)
+
+            # Step 2: Collect handoff context
+            handoff = self._build_handoff_prompt(session_name)
+
+            # Step 3: Start fresh Claude session (NO --continue)
+            subprocess.run(["tmux", "send-keys", "-t", session_name, "claude --dangerously-skip-permissions", "Enter"], timeout=5)
+            await asyncio.sleep(5)
+
+            # Step 4: Send handoff prompt to the new session
+            if handoff:
+                # Truncate if too long (keep under 4000 chars to avoid token waste)
+                if len(handoff) > 4000:
+                    handoff = handoff[:3900] + "\n\n[핸드오프 프롬프트가 잘렸습니다. 상태 파일을 직접 확인해주세요.]"
+                subprocess.run(["tmux", "send-keys", "-t", session_name, handoff, "Enter"], timeout=10)
+
+            await query.edit_message_text(
+                f"✅ `{session_display}` 새 세션으로 재시작 완료!\n\n"
+                f"🆕 Fresh context (이전 대화 없음)\n"
+                f"📋 핸드오프 프롬프트 전송됨\n"
+                f"🔄 이전 작업 컨텍스트 요약 포함\n\n"
+                f"💡 새 세션에서 이전 작업을 이어갑니다.",
+                parse_mode="Markdown"
+            )
+            logger.info(f"Successfully restarted {session_name} with fresh context after context limit")
+
+        except Exception as e:
+            logger.error(f"Error in context limit restart for {session_name}: {e}")
+            await query.edit_message_text(
+                f"❌ 재시작 실패: {str(e)}\n"
+                f"수동으로 세션에서 `/clear` 후 재시작해주세요.",
+                parse_mode="Markdown"
+            )
+
+    def _build_handoff_prompt(self, session_name: str) -> str:
+        """Build a handoff prompt for a fresh session after context limit.
+
+        Collects context from:
+        1. git status/diff (what was being worked on)
+        2. .omc state files (if OMC modes were active)
+        3. .omc/notepad.md (working memory)
+
+        Returns a prompt string for the new session.
+        """
+        parts = ["이전 세션이 context limit에 도달하여 새 세션으로 이어서 진행합니다.\n"]
+
+        # 1. Git status (list-form subprocess to prevent shell injection via cwd)
+        try:
+            result = subprocess.run(
+                ["tmux", "display-message", "-t", session_name, "-p", "#{pane_current_path}"],
+                capture_output=True, text=True, timeout=5
+            )
+            cwd = result.stdout.strip() if result.returncode == 0 else None
+
+            if cwd and os.path.isdir(cwd):
+                git_status = subprocess.run(
+                    ["git", "status", "--short"],
+                    cwd=cwd, capture_output=True, text=True, timeout=5
+                )
+                if git_status.returncode == 0 and git_status.stdout.strip():
+                    parts.append(f"## Git Status\n```\n{git_status.stdout.strip()}\n```\n")
+
+                git_log = subprocess.run(
+                    ["git", "log", "--oneline", "-5"],
+                    cwd=cwd, capture_output=True, text=True, timeout=5
+                )
+                if git_log.returncode == 0 and git_log.stdout.strip():
+                    parts.append(f"## Recent Commits\n```\n{git_log.stdout.strip()}\n```\n")
+
+                # 2. .omc notepad
+                notepad_path = os.path.join(cwd, '.omc', 'notepad.md')
+                if os.path.exists(notepad_path):
+                    try:
+                        with open(notepad_path, 'r') as f:
+                            notepad = f.read().strip()
+                        if notepad:
+                            # Truncate notepad to keep handoff lean
+                            if len(notepad) > 1000:
+                                notepad = notepad[:1000] + "\n...(truncated)"
+                            parts.append(f"## Working Notes\n{notepad}\n")
+                    except Exception:
+                        pass
+
+                # 3. MANIFEST.yaml (experiment status)
+                manifest_path = os.path.join(cwd, 'outputs', 'MANIFEST.yaml')
+                if os.path.exists(manifest_path):
+                    try:
+                        with open(manifest_path, 'r') as f:
+                            manifest = f.read().strip()
+                        if manifest and len(manifest) < 1500:
+                            parts.append(f"## Experiment Manifest\n```yaml\n{manifest}\n```\n")
+                    except Exception:
+                        pass
+
+        except Exception as e:
+            logger.warning(f"Failed to collect handoff context: {e}")
+            parts.append("(핸드오프 컨텍스트 수집 실패 - 이전 작업 내역을 직접 확인해주세요)\n")
+
+        parts.append("이전 작업을 이어서 진행해주세요.")
+        return "\n".join(parts)
 
     async def _command_picker_callback(self, query, context, callback_data: str):
         """Handle command picker callbacks"""

@@ -92,6 +92,7 @@ completion-monitor.log*
 /data/*.json
 /data/*.db
 .claude*
+.omc/
 
 # Debug and testing
 /tmp/claude-ops-debug/

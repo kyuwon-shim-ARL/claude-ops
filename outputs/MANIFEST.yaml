@@ -1,0 +1,29 @@
+version: 1
+updated: "2026-03-12T00:00:00Z"
+scan_paths:
+  - outputs/
+experiments:
+  e001:
+    path: outputs/e001/
+    script: null
+    params: {}
+    outputs: []
+    status: final
+    description: "Context limit 자동 감지 + Telegram 알림"
+    issue: null
+    branch: worktree-context_limit
+    tasks:
+      - "session_state.py에 CONTEXT_LIMIT enum + _detect_context_limit() 추가"
+      - "multi_monitor.py에 context limit 알림 경로 + InlineKeyboard 추가"
+  e002:
+    path: outputs/e002/
+    script: null
+    params: {}
+    outputs: []
+    status: final
+    description: "Context limit 시 자동 세션 재시작 + 핸드오프 프롬프트"
+    issue: null
+    branch: worktree-context_limit
+    tasks:
+      - "bot.py에 ctx_restart/ctx_ignore 콜백 + _context_limit_restart_callback()"
+      - "bot.py에 _build_handoff_prompt() (git status + .omc state → handoff)"

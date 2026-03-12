@@ -244,8 +244,12 @@ class MultiSessionMonitor:
         notification_reason = ""
         should_notify = False
         
+        # 0. Context limit detected (highest priority - requires immediate action)
+        if current_state == SessionState.CONTEXT_LIMIT and previous_state != SessionState.CONTEXT_LIMIT:
+            should_notify = True
+            notification_reason = "Context limit reached - session needs restart"
         # 1. Task-specific completion detected (highest priority)
-        if task_completion and task_completion.confidence > 0.7:
+        elif task_completion and task_completion.confidence > 0.7:
             should_notify = True
             notification_reason = f"Task completed: {task_completion.message}"
             # Adjust cooldown based on priority
@@ -350,6 +354,44 @@ class MultiSessionMonitor:
         except Exception as e:
             logger.debug(f"Failed to create marker file: {e}")
 
+    def send_context_limit_notification(self, session_name: str):
+        """Send context limit alert with restart button via Telegram
+
+        This sends a special notification with an inline keyboard button
+        that allows the user to restart the session with a fresh context.
+
+        Args:
+            session_name: The session that hit the context limit
+        """
+        try:
+            self._log_scraping_event(session_name, "context_limit", "notified")
+
+            message = (
+                f"⚠️ *Context Limit Reached*\n\n"
+                f"세션 `{session_name}`의 컨텍스트 윈도우가 가득 찼습니다.\n"
+                f"`/compact`는 이 상태에서 작동하지 않습니다 (API 호출 deadlock).\n\n"
+                f"🔄 새 세션으로 재시작하려면 아래 버튼을 눌러주세요."
+            )
+
+            # Import for inline keyboard
+            try:
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                keyboard = InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("🔄 Restart Session", callback_data=f"ctx_restart:{session_name}"),
+                        InlineKeyboardButton("❌ Ignore", callback_data=f"ctx_ignore:{session_name}"),
+                    ]
+                ])
+                message_queue.enqueue(message, parse_mode="Markdown", reply_markup=keyboard)
+            except ImportError:
+                # Fallback without inline keyboard
+                message_queue.enqueue(message, parse_mode="Markdown")
+
+            logger.info(f"⚠️ Sent context limit notification for session: {session_name}")
+
+        except Exception as e:
+            logger.error(f"Error sending context limit notification for {session_name}: {e}")
+
     def send_completion_notification(self, session_name: str, task_completion: Optional[TaskCompletion] = None):
         """Send work completion notification for a specific session with task details
 
@@ -358,23 +400,29 @@ class MultiSessionMonitor:
             task_completion: Optional task completion details
         """
         try:
+            # Check if this is a context limit notification
+            current_state = self.last_state.get(session_name, SessionState.UNKNOWN)
+            if current_state == SessionState.CONTEXT_LIMIT:
+                self.send_context_limit_notification(session_name)
+                return
+
             # Log for comparison with hooks (POC)
             self._log_scraping_event(session_name, "completion", "notified")
 
             # Temporarily switch to this session for notification context
             original_session = session_manager.get_active_session()
             session_manager.switch_session(session_name)
-            
+
             # Create a notifier for this session
             session_notifier = SmartNotifier(self.config)
 
             # Send completion notification
             # NOTE: task_completion support removed - using standard work completion notification
             success = session_notifier.send_work_completion_notification()
-            
+
             # Switch back to original session
             session_manager.switch_session(original_session)
-            
+
             if success:
                 priority_emoji = task_detector.get_priority_emoji(task_completion.priority) if task_completion else "✅"
                 logger.info(f"{priority_emoji} Sent completion notification for session: {session_name}")
@@ -385,7 +433,7 @@ class MultiSessionMonitor:
                 # Still mark completion if state changed (v2 tracker feature)
                 if hasattr(self.tracker, 'mark_state_transition'):
                     self.tracker.mark_state_transition(session_name, 'waiting')
-                
+
         except Exception as e:
             logger.error(f"Error sending completion notification for {session_name}: {e}")
     

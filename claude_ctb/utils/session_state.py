@@ -48,9 +48,10 @@ logger = logging.getLogger(__name__)
 
 class SessionState(Enum):
     """Session state definitions with clear priorities"""
-    ERROR = "error"               # Highest priority - system errors
+    CONTEXT_LIMIT = "context_limit"  # Highest priority - context window exhausted
+    ERROR = "error"               # System errors
     WAITING_INPUT = "waiting"     # User response required
-    WORKING = "working"           # Active work in progress  
+    WORKING = "working"           # Active work in progress
     IDLE = "idle"                 # No activity, ready for commands
     UNKNOWN = "unknown"           # Cannot determine state
 
@@ -80,11 +81,12 @@ class SessionStateAnalyzer:
     
     # State priority for conflict resolution (lower number = higher priority)
     STATE_PRIORITY = {
-        SessionState.ERROR: 0,
-        SessionState.WAITING_INPUT: 1,
-        SessionState.WORKING: 2,
-        SessionState.IDLE: 3,
-        SessionState.UNKNOWN: 4
+        SessionState.CONTEXT_LIMIT: 0,
+        SessionState.ERROR: 1,
+        SessionState.WAITING_INPUT: 2,
+        SessionState.WORKING: 3,
+        SessionState.IDLE: 4,
+        SessionState.UNKNOWN: 5
     }
     
     def __init__(self):
@@ -469,6 +471,34 @@ class SessionStateAnalyzer:
 
         return False
     
+    def _detect_context_limit(self, screen_content: str) -> bool:
+        """
+        Detect if session has hit the context window limit.
+
+        Claude Code displays specific messages when the context window is exhausted.
+        This is distinct from generic errors because it requires a different recovery
+        strategy (exit + fresh session, NOT /compact which deadlocks).
+
+        Known patterns (from GitHub issues #23047, #18211, #18159):
+        - "Context limit reached"
+        - "Conversation is too long"
+        - "context window"
+        """
+        if not screen_content:
+            return False
+
+        context_limit_patterns = [
+            "Context limit reached",
+            "Conversation is too long",
+            "context window exceeded",
+            "Context left until auto-compact: 0%",
+        ]
+
+        lines = screen_content.split('\n')
+        recent_content = '\n'.join(lines[-15:])
+
+        return any(pattern.lower() in recent_content.lower() for pattern in context_limit_patterns)
+
     def _detect_error_state(self, screen_content: str) -> bool:
         """
         Detect if session is in an error state
@@ -524,27 +554,30 @@ class SessionStateAnalyzer:
         else:
             # Check states in priority order
             detected_states = []
-            
+
+            if self._detect_context_limit(screen_content):
+                detected_states.append(SessionState.CONTEXT_LIMIT)
+
             if self._detect_error_state(screen_content):
                 detected_states.append(SessionState.ERROR)
-            
+
             if self._detect_input_waiting(screen_content):
                 detected_states.append(SessionState.WAITING_INPUT)
-            
+
             if self._detect_working_state(screen_content):
                 detected_states.append(SessionState.WORKING)
-            
+
             # If no specific state detected, assume idle
             if not detected_states:
                 detected_states.append(SessionState.IDLE)
-            
+
             # Return highest priority state
             state = min(detected_states, key=lambda s: self.STATE_PRIORITY[s])
-        
+
         # Update state cache
         if use_cache:
             self._state_cache[session_name] = (state, now)
-        
+
         return state
     
     def get_state_for_notification(self, session_name: str) -> SessionState:
@@ -571,20 +604,23 @@ class SessionStateAnalyzer:
         else:
             # Check states in priority order
             detected_states = []
-            
+
+            if self._detect_context_limit(screen_content):
+                detected_states.append(SessionState.CONTEXT_LIMIT)
+
             if self._detect_error_state(screen_content):
                 detected_states.append(SessionState.ERROR)
-            
+
             if self._detect_input_waiting(screen_content):
                 detected_states.append(SessionState.WAITING_INPUT)
-            
+
             if self._detect_working_state(screen_content):
                 detected_states.append(SessionState.WORKING)
-            
+
             # If no specific state detected, assume idle
             if not detected_states:
                 detected_states.append(SessionState.IDLE)
-            
+
             # Return highest priority state
             return min(detected_states, key=lambda s: self.STATE_PRIORITY[s])
     
@@ -635,6 +671,10 @@ class SessionStateAnalyzer:
         """Check if session is waiting for user input (legacy interface)"""
         return self.get_state(session_name) == SessionState.WAITING_INPUT
     
+    def is_context_limit(self, session_name: str) -> bool:
+        """Check if session has hit context limit"""
+        return self.get_state(session_name) == SessionState.CONTEXT_LIMIT
+
     def is_idle(self, session_name: str) -> bool:
         """Check if session is idle (legacy interface)"""
         return self.get_state(session_name) == SessionState.IDLE
