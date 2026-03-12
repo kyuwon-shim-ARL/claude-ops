@@ -1956,7 +1956,13 @@ class TelegramBridge:
             # Step 1: Exit current Claude session (list-form subprocess to prevent injection)
             subprocess.run(["tmux", "send-keys", "-t", session_name, "C-c"], timeout=5)
             await asyncio.sleep(1)
-            subprocess.run(["tmux", "send-keys", "-t", session_name, "/exit", "Enter"], timeout=5)
+            # Send /exit, Escape (dismiss autocomplete), Enter separately
+            # Claude Code's autocomplete intercepts Enter if sent atomically with /exit
+            subprocess.run(["tmux", "send-keys", "-t", session_name, "/exit"], timeout=5)
+            await asyncio.sleep(0.5)
+            subprocess.run(["tmux", "send-keys", "-t", session_name, "Escape"], timeout=5)
+            await asyncio.sleep(0.3)
+            subprocess.run(["tmux", "send-keys", "-t", session_name, "Enter"], timeout=5)
             await asyncio.sleep(3)
 
             # Step 2: Collect handoff context
