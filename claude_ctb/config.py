@@ -141,8 +141,8 @@ class ClaudeOpsConfig:
     # Hook-Only Mode (v2.2)
     @property
     def hook_only_mode(self) -> bool:
-        """Enable hook-only notifications (disable polling). Default: True for v2.2+"""
-        return os.getenv("HOOK_ONLY_MODE", "true").lower() == "true"
+        """Enable hook-only notifications (disable polling). Default: False (polling needed for context limit detection)"""
+        return os.getenv("HOOK_ONLY_MODE", "false").lower() == "true"
 
     def _validate_required_vars(self) -> None:
         """Validate required environment variables based on enabled features"""
