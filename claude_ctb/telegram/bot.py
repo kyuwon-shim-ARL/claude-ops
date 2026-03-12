@@ -1992,18 +1992,18 @@ class TelegramBridge:
             )
 
     def _build_handoff_prompt(self, session_name: str) -> str:
-        """Build a handoff prompt for a fresh session after context limit.
+        """Build a handoff prompt from screen log + minimal metadata.
 
-        Collects context from:
-        1. git status/diff (what was being worked on)
-        2. .omc state files (if OMC modes were active)
-        3. .omc/notepad.md (working memory)
+        Uses the last 50 lines of tmux screen output as primary context,
+        since OMC state files (notepad, MANIFEST) are auto-loaded by the
+        new session's hooks. Only adds branch name and active OMC modes
+        as lightweight metadata.
 
-        Returns a prompt string for the new session.
+        Returns a prompt string for the new session (max ~2500 chars).
         """
-        parts = ["이전 세션이 context limit에 도달하여 새 세션으로 이어서 진행합니다.\n"]
+        parts = ["이전 세션이 context limit에 도달하여 새 세션으로 자동 재시작되었습니다.\n"]
 
-        # 1. Git status (list-form subprocess to prevent shell injection via cwd)
+        # 1. Metadata: branch + active OMC modes
         try:
             result = subprocess.run(
                 ["tmux", "display-message", "-t", session_name, "-p", "#{pane_current_path}"],
@@ -2012,50 +2012,51 @@ class TelegramBridge:
             cwd = result.stdout.strip() if result.returncode == 0 else None
 
             if cwd and os.path.isdir(cwd):
-                git_status = subprocess.run(
-                    ["git", "status", "--short"],
+                branch = subprocess.run(
+                    ["git", "branch", "--show-current"],
                     cwd=cwd, capture_output=True, text=True, timeout=5
                 )
-                if git_status.returncode == 0 and git_status.stdout.strip():
-                    parts.append(f"## Git Status\n```\n{git_status.stdout.strip()}\n```\n")
+                branch_name = branch.stdout.strip() if branch.returncode == 0 else "unknown"
 
-                git_log = subprocess.run(
-                    ["git", "log", "--oneline", "-5"],
-                    cwd=cwd, capture_output=True, text=True, timeout=5
-                )
-                if git_log.returncode == 0 and git_log.stdout.strip():
-                    parts.append(f"## Recent Commits\n```\n{git_log.stdout.strip()}\n```\n")
+                # Check active OMC modes
+                omc_state_dir = os.path.join(cwd, '.omc', 'state')
+                active_modes = []
+                if os.path.isdir(omc_state_dir):
+                    for f in os.listdir(omc_state_dir):
+                        if f.endswith('-state.json'):
+                            active_modes.append(f.replace('-state.json', ''))
 
-                # 2. .omc notepad
-                notepad_path = os.path.join(cwd, '.omc', 'notepad.md')
-                if os.path.exists(notepad_path):
-                    try:
-                        with open(notepad_path, 'r') as f:
-                            notepad = f.read().strip()
-                        if notepad:
-                            # Truncate notepad to keep handoff lean
-                            if len(notepad) > 1000:
-                                notepad = notepad[:1000] + "\n...(truncated)"
-                            parts.append(f"## Working Notes\n{notepad}\n")
-                    except Exception:
-                        pass
+                meta = f"Branch: `{branch_name}`"
+                if active_modes:
+                    meta += f" | OMC: `{', '.join(active_modes)}`"
+                parts.append(meta + "\n")
+        except Exception:
+            pass
 
-                # 3. MANIFEST.yaml (experiment status)
-                manifest_path = os.path.join(cwd, 'outputs', 'MANIFEST.yaml')
-                if os.path.exists(manifest_path):
-                    try:
-                        with open(manifest_path, 'r') as f:
-                            manifest = f.read().strip()
-                        if manifest and len(manifest) < 1500:
-                            parts.append(f"## Experiment Manifest\n```yaml\n{manifest}\n```\n")
-                    except Exception:
-                        pass
-
+        # 2. Screen log: last 50 lines (primary context)
+        try:
+            screen = subprocess.run(
+                ["tmux", "capture-pane", "-t", session_name, "-p", "-S", "-50"],
+                capture_output=True, text=True, timeout=5
+            )
+            if screen.returncode == 0 and screen.stdout.strip():
+                lines = screen.stdout.strip().split('\n')
+                # Filter out context limit error lines (noise for new session)
+                filtered = [
+                    line for line in lines
+                    if "Context limit reached" not in line
+                    and "context window exceeded" not in line
+                    and "Conversation is too long" not in line
+                ]
+                screen_text = '\n'.join(filtered)
+                # Truncate to ~2000 chars
+                if len(screen_text) > 2000:
+                    screen_text = screen_text[-2000:]
+                parts.append(f"## 직전 화면 로그\n```\n{screen_text}\n```\n")
         except Exception as e:
-            logger.warning(f"Failed to collect handoff context: {e}")
-            parts.append("(핸드오프 컨텍스트 수집 실패 - 이전 작업 내역을 직접 확인해주세요)\n")
+            logger.warning(f"Failed to capture screen log: {e}")
 
-        parts.append("이전 작업을 이어서 진행해주세요.")
+        parts.append("이전 작업을 이어서 진행해주세요. (notepad, MANIFEST 등은 자동 로드됩니다)")
         return "\n".join(parts)
 
     async def _command_picker_callback(self, query, context, callback_data: str):
