@@ -64,6 +64,9 @@ class MultiSessionMonitor:
         # Activity tracking for proper state management
         self.last_activity_time: Dict[str, float] = {}  # session -> last_activity_timestamp
 
+        # Context limit auto-restart cooldown (prevent re-detection from residual scroll buffer)
+        self._context_limit_restart_time: Dict[str, float] = {}  # session -> restart_timestamp
+
         # T027: Session reconnection tracking
         self.reconnection_states: Dict[str, SessionReconnectionState] = {}  # session -> reconnection_state
 
@@ -245,7 +248,10 @@ class MultiSessionMonitor:
         should_notify = False
         
         # 0. Context limit detected (highest priority - requires immediate action)
-        if current_state == SessionState.CONTEXT_LIMIT and previous_state != SessionState.CONTEXT_LIMIT:
+        # Skip if recently auto-restarted (60s cooldown to avoid re-detection from residual scroll buffer)
+        restart_cooldown = 60
+        last_restart = self._context_limit_restart_time.get(session_name, 0)
+        if current_state == SessionState.CONTEXT_LIMIT and previous_state != SessionState.CONTEXT_LIMIT and (current_time - last_restart) > restart_cooldown:
             should_notify = True
             notification_reason = "Context limit reached - session needs restart"
         # 1. Task-specific completion detected (highest priority)
@@ -355,10 +361,13 @@ class MultiSessionMonitor:
             logger.debug(f"Failed to create marker file: {e}")
 
     def send_context_limit_notification(self, session_name: str):
-        """Send context limit alert with restart button via Telegram
+        """Send context limit alert and auto-restart the session.
 
-        This sends a special notification with an inline keyboard button
-        that allows the user to restart the session with a fresh context.
+        When auto-restart is enabled (default), automatically restarts the session
+        with a fresh context and handoff prompt. Sends a Telegram notification
+        informing the user of the auto-restart.
+
+        When auto-restart is disabled, sends a notification with restart/ignore buttons.
 
         Args:
             session_name: The session that hit the context limit
@@ -369,39 +378,191 @@ class MultiSessionMonitor:
 
             self._log_scraping_event(session_name, "context_limit", "notified")
 
-            message = (
-                f"⚠️ *Context Limit Reached*\n\n"
-                f"세션 `{session_name}`의 컨텍스트 윈도우가 가득 찼습니다.\n"
-                f"`/compact`는 이 상태에서 작동하지 않습니다 (API 호출 deadlock).\n\n"
-                f"🔄 새 세션으로 재시작하려면 아래 버튼을 눌러주세요."
-            )
-
             bot_token = self.config.telegram_bot_token
             chat_id = self.config.telegram_chat_id
             url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 
-            keyboard = {
-                "inline_keyboard": [[
-                    {"text": "🔄 Restart Session", "callback_data": f"ctx_restart:{session_name}"},
-                    {"text": "❌ Ignore", "callback_data": f"ctx_ignore:{session_name}"},
-                ]]
-            }
+            if self.config.context_limit_auto_restart:
+                # Auto-restart mode: notify + restart
+                message = (
+                    f"⚠️ *Context Limit Reached*\n\n"
+                    f"세션 `{session_name}` 컨텍스트 한도 도달.\n"
+                    f"🔄 자동 재시작 중..."
+                )
+                data = {
+                    "chat_id": chat_id,
+                    "text": message,
+                    "parse_mode": "Markdown",
+                }
+                requests.post(url, data=data, timeout=10)
 
-            data = {
-                "chat_id": chat_id,
-                "text": message,
-                "parse_mode": "Markdown",
-                "reply_markup": json.dumps(keyboard),
-            }
+                # Perform auto-restart
+                success = self._auto_restart_session(session_name)
 
-            response = requests.post(url, data=data, timeout=10)
-            if response.status_code == 200:
-                logger.info(f"⚠️ Sent context limit notification for session: {session_name}")
+                # Send result notification
+                if success:
+                    result_msg = (
+                        f"✅ `{session_name}` 자동 재시작 완료!\n\n"
+                        f"🆕 Fresh context (이전 대화 없음)\n"
+                        f"📋 핸드오프 프롬프트 전송됨"
+                    )
+                else:
+                    result_msg = (
+                        f"❌ `{session_name}` 자동 재시작 실패.\n"
+                        f"수동으로 `/restart` 해주세요."
+                    )
+                data = {
+                    "chat_id": chat_id,
+                    "text": result_msg,
+                    "parse_mode": "Markdown",
+                }
+                requests.post(url, data=data, timeout=10)
             else:
-                logger.error(f"Telegram API error {response.status_code}: {response.text}")
+                # Manual mode: send notification with buttons
+                message = (
+                    f"⚠️ *Context Limit Reached*\n\n"
+                    f"세션 `{session_name}`의 컨텍스트 윈도우가 가득 찼습니다.\n"
+                    f"`/compact`는 이 상태에서 작동하지 않습니다 (API 호출 deadlock).\n\n"
+                    f"🔄 새 세션으로 재시작하려면 아래 버튼을 눌러주세요."
+                )
+                keyboard = {
+                    "inline_keyboard": [[
+                        {"text": "🔄 Restart Session", "callback_data": f"ctx_restart:{session_name}"},
+                        {"text": "❌ Ignore", "callback_data": f"ctx_ignore:{session_name}"},
+                    ]]
+                }
+                data = {
+                    "chat_id": chat_id,
+                    "text": message,
+                    "parse_mode": "Markdown",
+                    "reply_markup": json.dumps(keyboard),
+                }
+                response = requests.post(url, data=data, timeout=10)
+                if response.status_code == 200:
+                    logger.info(f"⚠️ Sent context limit notification for session: {session_name}")
+                else:
+                    logger.error(f"Telegram API error {response.status_code}: {response.text}")
 
         except Exception as e:
             logger.error(f"Error sending context limit notification for {session_name}: {e}")
+
+    def _auto_restart_session(self, session_name: str) -> bool:
+        """Auto-restart a Claude session that hit context limit.
+
+        Exits the current session, clears the terminal (to prevent re-detection
+        from old scroll buffer), collects handoff context, and starts
+        a fresh Claude session with the handoff prompt.
+
+        Args:
+            session_name: The tmux session to restart
+
+        Returns:
+            True if restart succeeded, False otherwise
+        """
+        try:
+            logger.info(f"🔄 Auto-restarting {session_name} after context limit...")
+
+            # Step 1: Exit current Claude session
+            subprocess.run(["tmux", "send-keys", "-t", session_name, "C-c"], timeout=5)
+            time.sleep(1)
+            subprocess.run(["tmux", "send-keys", "-t", session_name, "/exit", "Enter"], timeout=5)
+            time.sleep(3)
+
+            # Step 2: Collect handoff context BEFORE clearing screen
+            handoff = self._build_handoff_prompt(session_name)
+
+            # Step 3: Clear terminal to remove old "Context limit reached" from scroll buffer
+            # This prevents the monitor from re-detecting the old text and creating a restart loop
+            subprocess.run(["tmux", "send-keys", "-t", session_name, "clear", "Enter"], timeout=5)
+            time.sleep(1)
+
+            # Step 4: Start fresh Claude session (NO --continue)
+            subprocess.run(["tmux", "send-keys", "-t", session_name, "claude --dangerously-skip-permissions", "Enter"], timeout=5)
+            time.sleep(5)
+
+            # Step 5: Send handoff prompt
+            if handoff:
+                if len(handoff) > 4000:
+                    handoff = handoff[:3900] + "\n\n[핸드오프 프롬프트가 잘렸습니다. 상태 파일을 직접 확인해주세요.]"
+                subprocess.run(["tmux", "send-keys", "-t", session_name, handoff, "Enter"], timeout=10)
+
+            logger.info(f"✅ Auto-restart completed for {session_name}")
+
+            # Reset monitor state + set cooldown to prevent re-detection from residual text
+            with self.thread_lock:
+                self.last_state[session_name] = SessionState.WORKING
+                self.notification_sent[session_name] = True  # Block notifications during cooldown
+                self._context_limit_restart_time[session_name] = time.time()
+
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Auto-restart failed for {session_name}: {e}")
+            return False
+
+    def _build_handoff_prompt(self, session_name: str) -> str:
+        """Build a handoff prompt for a fresh session after context limit.
+
+        Collects context from git status, .omc state files, and notepad.
+
+        Args:
+            session_name: The tmux session name
+
+        Returns:
+            Handoff prompt string for the new session
+        """
+        parts = ["이전 세션이 context limit에 도달하여 새 세션으로 이어서 진행합니다.\n"]
+
+        try:
+            result = subprocess.run(
+                ["tmux", "display-message", "-t", session_name, "-p", "#{pane_current_path}"],
+                capture_output=True, text=True, timeout=5
+            )
+            cwd = result.stdout.strip() if result.returncode == 0 else None
+
+            if cwd and os.path.isdir(cwd):
+                git_status = subprocess.run(
+                    ["git", "status", "--short"],
+                    cwd=cwd, capture_output=True, text=True, timeout=5
+                )
+                if git_status.returncode == 0 and git_status.stdout.strip():
+                    parts.append(f"## Git Status\n```\n{git_status.stdout.strip()}\n```\n")
+
+                git_log = subprocess.run(
+                    ["git", "log", "--oneline", "-5"],
+                    cwd=cwd, capture_output=True, text=True, timeout=5
+                )
+                if git_log.returncode == 0 and git_log.stdout.strip():
+                    parts.append(f"## Recent Commits\n```\n{git_log.stdout.strip()}\n```\n")
+
+                notepad_path = os.path.join(cwd, '.omc', 'notepad.md')
+                if os.path.exists(notepad_path):
+                    try:
+                        with open(notepad_path, 'r') as f:
+                            notepad = f.read().strip()
+                        if notepad:
+                            if len(notepad) > 1000:
+                                notepad = notepad[:1000] + "\n...(truncated)"
+                            parts.append(f"## Working Notes\n{notepad}\n")
+                    except Exception:
+                        pass
+
+                manifest_path = os.path.join(cwd, 'outputs', 'MANIFEST.yaml')
+                if os.path.exists(manifest_path):
+                    try:
+                        with open(manifest_path, 'r') as f:
+                            manifest = f.read().strip()
+                        if manifest and len(manifest) < 1500:
+                            parts.append(f"## Experiment Manifest\n```yaml\n{manifest}\n```\n")
+                    except Exception:
+                        pass
+
+        except Exception as e:
+            logger.warning(f"Failed to collect handoff context: {e}")
+            parts.append("(핸드오프 컨텍스트 수집 실패 - 이전 작업 내역을 직접 확인해주세요)\n")
+
+        parts.append("이전 작업을 이어서 진행해주세요.")
+        return "\n".join(parts)
 
     def send_completion_notification(self, session_name: str, task_completion: Optional[TaskCompletion] = None):
         """Send work completion notification for a specific session with task details

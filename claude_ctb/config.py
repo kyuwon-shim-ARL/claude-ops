@@ -138,6 +138,12 @@ class ClaudeOpsConfig:
         """Number of screen lines to analyze for state detection"""
         return int(os.getenv("SESSION_SCREEN_HISTORY_LINES", "200"))
 
+    # Context Limit Auto-Restart
+    @property
+    def context_limit_auto_restart(self) -> bool:
+        """Automatically restart sessions that hit context limit. Default: True"""
+        return os.getenv("CONTEXT_LIMIT_AUTO_RESTART", "true").lower() == "true"
+
     # Hook-Only Mode (v2.2)
     @property
     def hook_only_mode(self) -> bool:
