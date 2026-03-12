@@ -38,7 +38,13 @@ echo -e "${GREEN}Starting Claude Code Monitor...${NC}"
 tmux new-session -d -s claude-monitor \
     "cd $(pwd) && uv run python -m claude_ctb.telegram.monitor"
 
-sleep 2
+# Health check loop instead of fixed sleep
+for i in {1..10}; do
+    if tmux has-session -t claude-monitor 2>/dev/null; then
+        break
+    fi
+    sleep 0.1
+done
 
 # Check if started successfully
 if tmux has-session -t claude-monitor 2>/dev/null; then

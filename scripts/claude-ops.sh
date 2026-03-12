@@ -239,11 +239,11 @@ start_monitoring() {
     # Kill single-session monitor if running
     tmux kill-session -t claude-monitor 2>/dev/null || true
     
-    # Kill any orphaned monitoring processes
+    # Kill any orphaned monitoring processes (only python, not tmux)
     printf "${YELLOW}Checking for orphaned monitoring processes...${NC}\n"
-    if pgrep -f "multi_monitor" > /dev/null 2>&1; then
+    if pgrep -f "python.*multi_monitor" > /dev/null 2>&1; then
         printf "${YELLOW}Found orphaned multi_monitor processes, cleaning up...${NC}\n"
-        pkill -f "multi_monitor" || true
+        pkill -f "python.*multi_monitor" || true
         sleep 2
     fi
     
@@ -274,35 +274,28 @@ start_monitoring() {
     if tmux has-session -t claude-multi-monitor 2>/dev/null; then
         printf "${GREEN}✅ Multi-Session Monitor started successfully${NC}\n"
         
-        # Also start telegram bot if not already running
-        if ! tmux has-session -t telegram-bot 2>/dev/null; then
-            # 기존 telegram bot 프로세스 강제 정리
-            if pgrep -f "telegram.*bot" > /dev/null 2>&1; then
-                printf "${YELLOW}Found existing telegram bot processes, cleaning up...${NC}\n"
-                pkill -f "telegram.*bot" || true
-                sleep 3
-            fi
-            
-            printf "${GREEN}Starting Telegram Bot...${NC}\n"
-            tmux new-session -d -s telegram-bot \
-                "cd $(pwd) && uv run python -m claude_ctb.telegram.bot"
+        # Start telegram bot via systemd (auto-restart on crash, survives reboot)
+        if systemctl --user is-active claude-telegram-bridge.service >/dev/null 2>&1; then
+            printf "${GREEN}✅ Telegram Bot already running (systemd)${NC}\n"
+        else
+            printf "${GREEN}Starting Telegram Bot (systemd)...${NC}\n"
+            systemctl --user start claude-telegram-bridge.service
             sleep 2
-            
-            if tmux has-session -t telegram-bot 2>/dev/null; then
-                printf "${GREEN}✅ Telegram Bot started successfully${NC}\n"
+
+            if systemctl --user is-active claude-telegram-bridge.service >/dev/null 2>&1; then
+                printf "${GREEN}✅ Telegram Bot started successfully (systemd)${NC}\n"
             else
                 printf "${YELLOW}⚠️  Telegram Bot failed to start${NC}\n"
+                printf "${YELLOW}   Check: systemctl --user status claude-telegram-bridge${NC}\n"
             fi
-        else
-            printf "${GREEN}✅ Telegram Bot already running${NC}\n"
         fi
-        
+
         printf "\n🎯 Now monitoring ALL Claude sessions simultaneously!\n\n"
         printf "Commands:\n"
         printf "  - View monitor logs: tmux attach -t claude-multi-monitor\n"
-        printf "  - View bot logs: tmux attach -t telegram-bot\n"
+        printf "  - View bot logs: journalctl --user -u claude-telegram-bridge -f\n"
         printf "  - Stop monitor: tmux kill-session -t claude-multi-monitor\n"
-        printf "  - Stop bot: tmux kill-session -t telegram-bot\n\n"
+        printf "  - Stop bot: systemctl --user stop claude-telegram-bridge\n\n"
         printf "🚀 The monitor will automatically detect new sessions and send\n"
         printf "   notifications when ANY Claude Code task completes!\n"
         printf "📱 You can now send messages via Telegram bot!\n"
@@ -326,20 +319,22 @@ stop_monitoring() {
         printf "${GREEN}✅ Stopped single monitor${NC}\n" || \
         printf "${YELLOW}ℹ️  Single monitor not running${NC}\n"
     
-    # Kill telegram bot session
-    tmux kill-session -t telegram-bot 2>/dev/null && \
-        printf "${GREEN}✅ Stopped telegram bot${NC}\n" || \
+    # Stop telegram bot (systemd)
+    if systemctl --user is-active claude-telegram-bridge.service >/dev/null 2>&1; then
+        systemctl --user stop claude-telegram-bridge.service && \
+            printf "${GREEN}✅ Stopped telegram bot (systemd)${NC}\n"
+    else
         printf "${YELLOW}ℹ️  Telegram bot not running${NC}\n"
-    
-    # Kill background processes (강화된 프로세스 정리)
-    pkill -f "multi_monitor" 2>/dev/null && \
-        printf "${GREEN}✅ Killed background processes${NC}\n" || \
-        printf "${YELLOW}ℹ️  No background processes found${NC}\n"
-    
-    # Force kill telegram bot processes
-    pkill -f "telegram.*bot" 2>/dev/null && \
-        printf "${GREEN}✅ Force killed telegram bot processes${NC}\n" || \
-        printf "${YELLOW}ℹ️  No telegram bot processes found${NC}\n"
+    fi
+
+    # Clean up legacy tmux bot session if exists
+    tmux kill-session -t telegram-bot 2>/dev/null && \
+        printf "${GREEN}✅ Stopped legacy tmux bot session${NC}\n" || true
+
+    # Kill orphaned python processes only (not tmux sessions)
+    pkill -f "python.*multi_monitor" 2>/dev/null && \
+        printf "${GREEN}✅ Killed orphaned monitor processes${NC}\n" || \
+        printf "${YELLOW}ℹ️  No orphaned monitor processes${NC}\n"
     
     # Wait for processes to fully terminate
     sleep 2

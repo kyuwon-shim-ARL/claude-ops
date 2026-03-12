@@ -364,6 +364,9 @@ class MultiSessionMonitor:
             session_name: The session that hit the context limit
         """
         try:
+            import json
+            import requests
+
             self._log_scraping_event(session_name, "context_limit", "notified")
 
             message = (
@@ -373,21 +376,29 @@ class MultiSessionMonitor:
                 f"🔄 새 세션으로 재시작하려면 아래 버튼을 눌러주세요."
             )
 
-            # Import for inline keyboard
-            try:
-                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-                keyboard = InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton("🔄 Restart Session", callback_data=f"ctx_restart:{session_name}"),
-                        InlineKeyboardButton("❌ Ignore", callback_data=f"ctx_ignore:{session_name}"),
-                    ]
-                ])
-                message_queue.enqueue(message, parse_mode="Markdown", reply_markup=keyboard)
-            except ImportError:
-                # Fallback without inline keyboard
-                message_queue.enqueue(message, parse_mode="Markdown")
+            bot_token = self.config.telegram_bot_token
+            chat_id = self.config.telegram_chat_id
+            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 
-            logger.info(f"⚠️ Sent context limit notification for session: {session_name}")
+            keyboard = {
+                "inline_keyboard": [[
+                    {"text": "🔄 Restart Session", "callback_data": f"ctx_restart:{session_name}"},
+                    {"text": "❌ Ignore", "callback_data": f"ctx_ignore:{session_name}"},
+                ]]
+            }
+
+            data = {
+                "chat_id": chat_id,
+                "text": message,
+                "parse_mode": "Markdown",
+                "reply_markup": json.dumps(keyboard),
+            }
+
+            response = requests.post(url, data=data, timeout=10)
+            if response.status_code == 200:
+                logger.info(f"⚠️ Sent context limit notification for session: {session_name}")
+            else:
+                logger.error(f"Telegram API error {response.status_code}: {response.text}")
 
         except Exception as e:
             logger.error(f"Error sending context limit notification for {session_name}: {e}")

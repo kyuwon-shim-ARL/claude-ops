@@ -31,40 +31,64 @@ class PromptRecallSystem:
     
     def extract_last_user_prompt(self, session_name: str) -> str:
         """
-        마지막 사용자 프롬프트 추출
-        
+        마지막 사용자 프롬프트 추출 with fallback mechanism
+
         Args:
             session_name: tmux 세션 이름
-            
+
         Returns:
             str: 마지막 사용자 프롬프트 또는 오류 메시지
         """
+        # Tier 1: Try 200 lines first (fast path)
+        prompt = self._extract_prompt_with_lines(session_name, lines=200)
+
+        if prompt and prompt not in ["프롬프트를 찾을 수 없습니다", ""]:
+            return prompt
+
+        # Tier 2: Fallback to 500 lines if not found
+        logger.debug(f"Prompt not found in 200 lines, trying 500 for {session_name}")
+        prompt = self._extract_prompt_with_lines(session_name, lines=500)
+
+        if prompt and prompt not in ["프롬프트를 찾을 수 없습니다", ""]:
+            return prompt
+
+        # Final fallback: return explicit failure message
+        return "최근 프롬프트 없음 (500줄 내)"
+
+    def _extract_prompt_with_lines(self, session_name: str, lines: int) -> str:
+        """
+        Internal helper to extract prompt with specified line depth
+
+        Args:
+            session_name: tmux 세션 이름
+            lines: 검색할 줄 수
+
+        Returns:
+            str: 추출된 프롬프트 또는 빈 문자열
+        """
         try:
-            # tmux 히스토리에서 더 많은 라인 검색 (2000줄)
             result = subprocess.run(
-                f"tmux capture-pane -t {session_name} -p -S -2000",
-                shell=True, 
-                capture_output=True, 
-                text=True, 
+                f"tmux capture-pane -t {session_name} -p -S -{lines}",
+                shell=True,
+                capture_output=True,
+                text=True,
                 timeout=5
             )
-            
-            if result.returncode == 0:
-                prompts = self._detect_user_prompts(result.stdout)
-                if prompts:
-                    return prompts[-1]  # 가장 최근 프롬프트
-                else:
-                    return "프롬프트를 찾을 수 없습니다"
-            else:
-                logger.warning(f"Failed to capture tmux pane for {session_name}: {result.stderr}")
-                return "프롬프트 추출 실패"
-                
+
+            if result.returncode != 0:
+                return ""
+
+            prompts = self._detect_user_prompts(result.stdout)
+            if prompts:
+                return prompts[-1]
+            return ""
+
         except subprocess.TimeoutExpired:
-            logger.warning(f"Timeout capturing screen content for {session_name}")
-            return "프롬프트 추출 시간 초과"
+            logger.warning(f"Timeout extracting prompt ({lines} lines) for {session_name}")
+            return ""
         except Exception as e:
-            logger.error(f"Error extracting user prompt for {session_name}: {e}")
-            return "프롬프트 추출 오류"
+            logger.error(f"Error extracting prompt: {e}")
+            return ""
     
     def _detect_user_prompts(self, screen_content: str) -> List[str]:
         """

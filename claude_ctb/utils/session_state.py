@@ -583,20 +583,20 @@ class SessionStateAnalyzer:
     def get_state_for_notification(self, session_name: str) -> SessionState:
         """
         Get session state specifically for notification decisions
-        
+
         This method uses only the current visible screen (no scrollback) to avoid
         false positives from historical content. It's designed for real-time
         notification systems that need accurate current state detection.
-        
+
         Args:
             session_name: Name of the tmux session
-            
+
         Returns:
             Current SessionState based on visible screen only
         """
         # 알림용은 항상 현재 화면만 사용 (캐시 없음)
         screen_content = self.get_current_screen_only(session_name)
-        
+
         if screen_content is None:
             return SessionState.UNKNOWN
         elif not screen_content.strip():
@@ -623,6 +623,44 @@ class SessionStateAnalyzer:
 
             # Return highest priority state
             return min(detected_states, key=lambda s: self.STATE_PRIORITY[s])
+
+    def analyze_from_content(self, content: str) -> SessionState:
+        """
+        Analyze session state from pre-fetched content (no tmux call)
+
+        This method reuses existing detection logic but operates on
+        provided content instead of calling tmux. Used for batch processing
+        to avoid multiple tmux calls per session.
+
+        Args:
+            content: Screen content already captured from tmux
+
+        Returns:
+            SessionState enum value
+        """
+        if content is None:
+            return SessionState.UNKNOWN
+        elif not content.strip():
+            return SessionState.IDLE
+
+        # Check states in priority order using existing detection methods
+        detected_states = []
+
+        if self._detect_error_state(content):
+            detected_states.append(SessionState.ERROR)
+
+        if self._detect_input_waiting(content):
+            detected_states.append(SessionState.WAITING_INPUT)
+
+        if self._detect_working_state(content):
+            detected_states.append(SessionState.WORKING)
+
+        # If no specific state detected, assume idle
+        if not detected_states:
+            detected_states.append(SessionState.IDLE)
+
+        # Return highest priority state
+        return min(detected_states, key=lambda s: self.STATE_PRIORITY[s])
     
     def clear_cache(self, session_name: Optional[str] = None) -> None:
         """

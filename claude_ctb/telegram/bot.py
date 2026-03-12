@@ -11,6 +11,7 @@ import subprocess
 import re
 import asyncio
 from typing import Optional
+from datetime import datetime
 from telegram.ext import Application, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 
@@ -24,13 +25,6 @@ from .dangerous_commands import (
     create_confirmation,
     get_confirmation,
     cleanup_expired_confirmations
-)
-from .command_picker import (
-    build_flat_commands_keyboard,
-    build_category_keyboard,
-    build_commands_keyboard,
-    get_command,
-    get_category_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -532,6 +526,7 @@ class TelegramBridge:
 📝 **주요 명령어:**
 • `/sessions` - 활성 세션 목록 보기
 • `/summary` - 대기 중 세션 요약
+• `/list` - 세션 목록 (개별 복사 가능)
 • `/board` - 세션 보드 (그리드 뷰)
 • `/log` - Claude 화면 실시간 확인
 • `/stop` - Claude 작업 중단 (ESC 키 전송)
@@ -558,19 +553,28 @@ class TelegramBridge:
         
         await update.message.reply_text(help_text, parse_mode='Markdown')
 
-    async def cmds_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Show command picker inline keyboard"""
+    async def quick_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Quick OMC picker - 최상단 3개 명령어 입력창에 복사"""
         user_id = update.effective_user.id
 
         if not self.check_user_authorization(user_id):
             await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
             return
 
-        keyboard = build_flat_commands_keyboard()
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🚀 autopilot", switch_inline_query_current_chat="/oh-my-claudecode:autopilot "),
+                InlineKeyboardButton("📋 ralplan", switch_inline_query_current_chat="/oh-my-claudecode:ralplan "),
+                InlineKeyboardButton("🔬 research", switch_inline_query_current_chat="/oh-my-claudecode:research "),
+            ]
+        ])
+
         await update.message.reply_text(
-            "📝 **Quick Commands**\n\n⭐ = 자주 사용\n\n클릭하면 입력창에 복사됩니다. 인자를 추가하고 전송하세요!",
+            "⚡ **Quick OMC**\n\n"
+            "클릭하면 입력창에 명령어가 복사됩니다.\n"
+            "인자를 추가하고 전송하세요!",
             reply_markup=keyboard,
-            parse_mode="Markdown"
+            parse_mode='Markdown'
         )
 
     async def log_command(self, update, context):
@@ -1331,8 +1335,8 @@ class TelegramBridge:
             from ..utils.session_summary import summary_helper
             from ..telegram.message_utils import safe_send_message
 
-            # Generate summary
-            summary_message = summary_helper.generate_summary()
+            # Generate summary (async - parallel batch fetching)
+            summary_message = await summary_helper.generate_summary_async()
 
             # Send with HTML mode - allows <code> tags for copyable commands
             await safe_send_message(
@@ -1344,7 +1348,59 @@ class TelegramBridge:
         except Exception as e:
             logger.error(f"세션 요약 생성 오류: {str(e)}")
             await update.message.reply_text("❌ 세션 요약 생성 중 오류가 발생했습니다.")
-    
+
+    async def list_command(self, update, context):
+        """Show sessions as individual copyable items"""
+        user_id = update.effective_user.id
+
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+
+        try:
+            from ..utils.session_summary import summary_helper
+
+            all_sessions = await summary_helper.get_all_sessions_with_status_async()
+
+            if not all_sessions:
+                await update.message.reply_text("활성 세션이 없습니다.")
+                return
+
+            waiting_count = sum(1 for s in all_sessions if s[3] == 'waiting')
+            working_count = sum(1 for s in all_sessions if s[3] == 'working')
+            current_time = datetime.now().strftime("%H:%M")
+
+            # Header message
+            header = (
+                f"<b>📋 Sessions</b> ({current_time})\n"
+                f"Total: {len(all_sessions)} (waiting: {waiting_count}, working: {working_count})"
+            )
+            await update.message.reply_text(header, parse_mode='HTML')
+
+            # Each session as individual message
+            for sess_name, wait_time, last_prompt, status, has_record, context_warning, screen_summary in all_sessions:
+                display_name = sess_name.replace('claude_', '') if sess_name.startswith('claude_') else sess_name
+
+                if status == 'working':
+                    line = f"🔨 <b>{display_name}</b> (working)\n"
+                else:
+                    wait_str = summary_helper.format_wait_time(wait_time)
+                    line = f"🎯 <b>{display_name}</b> ({wait_str} 대기)\n"
+
+                line += f"<code>/sessions {sess_name}</code>"
+
+                if last_prompt and len(last_prompt) > 2:
+                    escaped = last_prompt.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    if len(escaped) > 60:
+                        escaped = escaped[:57] + "..."
+                    line += f"\n💬 <i>{escaped}</i>"
+
+                await update.message.reply_text(line, parse_mode='HTML')
+
+        except Exception as e:
+            logger.error(f"List command error: {e}")
+            await update.message.reply_text("❌ 세션 목록 생성 중 오류가 발생했습니다.")
+
     async def _switch_to_session(self, update, target_session: str, switch_type: str = "direct"):
         """Switch to specified session with common logic"""
         try:
@@ -2241,7 +2297,7 @@ class TelegramBridge:
         self.app.add_handler(CommandHandler("status", self.status_command))
         self.app.add_handler(CommandHandler("new_project", self.start_claude_command))  # Primary command
         self.app.add_handler(CommandHandler("help", self.help_command))
-        self.app.add_handler(CommandHandler("cmds", self.cmds_command))
+        self.app.add_handler(CommandHandler("q", self.quick_command))  # Quick OMC picker
         self.app.add_handler(CommandHandler("log", self.log_command))
         self.app.add_handler(CommandHandler("logs", self.log_command))  # Alias for common typo
         self.app.add_handler(CommandHandler("log50", self.log50_command))
@@ -2262,6 +2318,7 @@ class TelegramBridge:
         self.app.add_handler(CommandHandler("connect", self.connect_command))
         self.app.add_handler(CommandHandler("board", self.board_command))
         self.app.add_handler(CommandHandler("summary", self.summary_command))
+        self.app.add_handler(CommandHandler("list", self.list_command))
         # REMOVED: fix_terminal command handler
         # self.app.add_handler(CommandHandler("fix_terminal", self.fix_terminal_command))
         
@@ -2303,11 +2360,13 @@ class TelegramBridge:
     async def setup_bot_commands(self):
         """Setup bot command menu"""
         commands = [
-            BotCommand("cmds", "🎯 슬래시 명령어 선택"),
+            # 🚀 Quick OMC commands at TOP - /를 치면 최상단에 표시
+            BotCommand("q", "⚡ Quick OMC (autopilot/ralplan/research)"),
             BotCommand("sessions", "🔄 활성 세션 목록 보기"),
             BotCommand("connect", "📁 기존 프로젝트에 세션 연결"),
             BotCommand("board", "🎯 세션 보드"),
             BotCommand("summary", "📊 대기 중 세션 요약"),
+            BotCommand("list", "📋 세션 목록 (개별 복사 가능)"),
             BotCommand("log", "📺 현재 Claude 화면 실시간 확인"),
             BotCommand("stop", "⛔ Claude 작업 중단 (ESC 키 전송)"),
             BotCommand("erase", "🧹 현재 입력 지우기 (Ctrl+C 전송)"),
@@ -2456,9 +2515,17 @@ class TelegramBridge:
                     switch_message,
                     parse_mode='Markdown'
                 )
-                
-                # Restart monitoring for new session
-                await self._restart_monitoring()
+
+                # Fire-and-forget monitoring restart with error handling
+                async def _safe_restart():
+                    """Background restart with error handling"""
+                    try:
+                        await self._restart_monitoring()
+                        logger.info("Background monitoring restart completed successfully")
+                    except Exception as e:
+                        logger.error(f"Background monitoring restart failed: {e}")
+
+                asyncio.create_task(_safe_restart())
                 
             else:
                 await query.edit_message_text(
@@ -2749,11 +2816,9 @@ class TelegramBridge:
             
             # Kill existing monitor
             subprocess.run("tmux kill-session -t claude-monitor 2>/dev/null", shell=True)
-            
-            # Wait a moment
-            import asyncio
-            await asyncio.sleep(1)
-            
+
+            # No sleep needed - tmux kill is synchronous
+
             # Start new monitor
             subprocess.run(
                 "cd /home/kyuwon/projects/claude-ops && ./scripts/start_monitoring.sh > /dev/null 2>&1 &",
@@ -2801,11 +2866,11 @@ class TelegramBridge:
         try:
             # Use same session list as summary for consistency (ALL sessions)
             from ..utils.session_summary import summary_helper
-            all_sessions = summary_helper.get_all_sessions_with_status()
+            all_sessions = await summary_helper.get_all_sessions_with_status_async()
 
-            # Extract session info - unpack 5-tuple correctly
+            # Extract session info - unpack 5-tuple correctly (preserve last_prompt to avoid N+1 query)
             # Reverse order for board: recent sessions (short wait time) at bottom
-            sessions_info = [(session_name, wait_time, status, has_record) for session_name, wait_time, _, status, has_record in reversed(all_sessions)]
+            sessions_info = [(sn, wt, lp, st, hr) for sn, wt, lp, st, hr, *_ in reversed(all_sessions)]
 
             if not sessions_info:
                 await reply_func(
@@ -2825,7 +2890,7 @@ class TelegramBridge:
                 row_sessions = sessions_info[i:i+2]
                 session_row = []
 
-                for idx_in_row, (session_name, wait_time, status, has_record) in enumerate(row_sessions):
+                for idx_in_row, (session_name, wait_time, last_prompt, status, has_record) in enumerate(row_sessions):
                     display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
                     current_icon = "⭐" if session_name == self.config.session_name else ""
 
@@ -2841,8 +2906,14 @@ class TelegramBridge:
                     else:
                         wait_str = ""
 
-                    # Get very short prompt hint for button
-                    hint = await self._get_session_hint_short(session_name)
+                    # Use already-fetched prompt from tuple (no additional subprocess - N+1 query fix)
+                    if last_prompt and len(last_prompt.strip()) > 3:
+                        if len(last_prompt) > 12:
+                            hint = f"\n📝{last_prompt[:9]}..."
+                        else:
+                            hint = f"\n📝{last_prompt}"
+                    else:
+                        hint = ""
 
                     # Build button text with wait time
                     if wait_str:
@@ -2865,9 +2936,9 @@ class TelegramBridge:
             
             reply_markup = InlineKeyboardMarkup(keyboard)
 
-            # Count working and waiting sessions
-            waiting_count = sum(1 for _, _, status, _ in sessions_info if status == 'waiting')
-            working_count = sum(1 for _, _, status, _ in sessions_info if status == 'working')
+            # Count working and waiting sessions (5-tuple: session_name, wait_time, last_prompt, status, has_record)
+            waiting_count = sum(1 for _, _, _, status, _ in sessions_info if status == 'waiting')
+            working_count = sum(1 for _, _, _, status, _ in sessions_info if status == 'working')
 
             # Inside backticks (inline code), no escaping needed
             await reply_func(
@@ -3278,9 +3349,17 @@ class TelegramBridge:
                     f"모니터링 시스템이 자동으로 업데이트됩니다.",
                     parse_mode='HTML'
                 )
-                
-                # Restart monitoring for new session
-                await self._restart_monitoring()
+
+                # Fire-and-forget monitoring restart with error handling
+                async def _safe_restart():
+                    """Background restart with error handling"""
+                    try:
+                        await self._restart_monitoring()
+                        logger.info("Background monitoring restart completed successfully")
+                    except Exception as e:
+                        logger.error(f"Background monitoring restart failed: {e}")
+
+                asyncio.create_task(_safe_restart())
                 
             else:
                 await query.edit_message_text(
@@ -4094,9 +4173,9 @@ ARGUMENTS: {args_text}
                 except Exception as e:
                     if "terminated by other getUpdates request" in str(e) and attempt < max_retries - 1:
                         logger.warning(f"getUpdates 충돌 감지 (시도 {attempt + 1}), 잠시 후 재시도...")
-                        # Kill any existing bot processes to prevent conflicts
+                        # Kill any existing bot python processes (not tmux)
                         import subprocess
-                        subprocess.run("pkill -f 'claude_ctb.telegram.bot'", shell=True)
+                        subprocess.run("pkill -f 'python.*claude_ctb\\.telegram\\.bot'", shell=True)
                         time.sleep(3)
                         continue
                     else:

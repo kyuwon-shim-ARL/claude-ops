@@ -11,7 +11,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 PRIORITY_COMMANDS = [
     ("autopilot", "/oh-my-claudecode:autopilot", "Full autonomous execution"),
     ("ralplan", "/oh-my-claudecode:ralplan", "Iterative planning loop"),
-    ("ralph", "/oh-my-claudecode:ralph", "Self-referential loop"),
+    ("research", "/oh-my-claudecode:research", "Deep research mode"),
 ]
 
 
@@ -68,10 +68,21 @@ COMMAND_CATEGORIES = [
 
 
 def build_flat_commands_keyboard() -> InlineKeyboardMarkup:
-    """Build flat keyboard with priority commands at BOTTOM (for mobile UX)."""
+    """Build flat keyboard with priority commands at TOP (for instant access)."""
     buttons = []
 
-    # Other commands first (less used)
+    # 🚀 Priority commands at TOP (most used - instant access)
+    for name, full_cmd, desc in PRIORITY_COMMANDS:
+        btn = InlineKeyboardButton(
+            text=f"⭐ {name}",
+            switch_inline_query_current_chat=full_cmd + " "
+        )
+        buttons.append([btn])
+
+    # Separator
+    buttons.append([InlineKeyboardButton("─── 📂 More Commands ───", callback_data="cmd:noop")])
+
+    # Other commands after (less used)
     for category in COMMAND_CATEGORIES:
         icon = category["icon"]
         for cmd_name, full_cmd, desc in category["commands"]:
@@ -83,17 +94,6 @@ def build_flat_commands_keyboard() -> InlineKeyboardMarkup:
                 switch_inline_query_current_chat=full_cmd + " "
             )
             buttons.append([btn])
-
-    # Separator
-    buttons.append([InlineKeyboardButton("─── ⭐ Quick Access ───", callback_data="cmd:noop")])
-
-    # Priority commands at BOTTOM (visible without scrolling on mobile)
-    for name, full_cmd, desc in PRIORITY_COMMANDS:
-        btn = InlineKeyboardButton(
-            text=f"⭐ {name}",
-            switch_inline_query_current_chat=full_cmd + " "
-        )
-        buttons.append([btn])
 
     # Close button at very bottom
     buttons.append([

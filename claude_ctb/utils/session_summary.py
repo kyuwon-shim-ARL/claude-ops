@@ -6,9 +6,14 @@ Provides summary and analysis of Claude sessions with wait time tracking
 
 import re
 import subprocess
+import logging
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Tuple, Optional
 from datetime import datetime
 from ..utils.session_state import SessionStateAnalyzer, SessionState
+
+logger = logging.getLogger(__name__)
 # Import improved tracker with auto-recovery
 try:
     from ..utils.wait_time_tracker_v2 import ImprovedWaitTimeTracker, migrate_to_v2
@@ -26,7 +31,216 @@ class SessionSummaryHelper:
         self.state_analyzer = SessionStateAnalyzer()
         self.tracker = wait_tracker  # Use the global tracker instance
         self.prompt_recall = PromptRecallSystem()  # Reuse existing prompt extraction
-        
+
+    def _get_session_data_batch(self, session_name: str) -> dict:
+        """
+        Single tmux call, multiple data extraction
+
+        IMPORTANT: Uses 500 lines to match Task 2 fallback depth.
+        This ensures prompt extraction can succeed without additional tmux calls.
+
+        Returns:
+            dict with keys: content, state, prompt, context_warning, screen_summary
+        """
+        try:
+            # One call with 500 lines (matches Task 2 fallback depth)
+            result = subprocess.run(
+                f"tmux capture-pane -t {session_name} -p -S -500",
+                shell=True, capture_output=True, text=True, timeout=5
+            )
+
+            content = result.stdout if result.returncode == 0 else ""
+
+            return {
+                'content': content,
+                'state': self.state_analyzer.analyze_from_content(content),  # DRY: reuse existing logic
+                'prompt': self._extract_prompt_from_content(content),
+                'context_warning': self._detect_context_from_content(content),
+                'screen_summary': self._extract_summary_from_content(content, lines=3)
+            }
+        except Exception as e:
+            logger.error(f"Error in batch session data fetch for {session_name}: {e}")
+            return {
+                'content': '',
+                'state': SessionState.UNKNOWN,
+                'prompt': '',
+                'context_warning': None,
+                'screen_summary': '데이터 조회 실패'
+            }
+
+    def _extract_prompt_from_content(self, content: str) -> str:
+        """
+        Extract last user prompt from pre-fetched content
+        """
+        if not content:
+            return ""
+
+        lines = content.split('\n')
+
+        # Simple patterns for user prompts
+        simple_patterns = [
+            r'^>\s*(.+)$',                    # > 프롬프트
+            r'^❯\s*(.+)$',                   # ❯ 프롬프트
+            r'^Human:\s*(.+)$',              # Human: 프롬프트
+            r'^사용자:\s*(.+)$',              # 한글 사용자:
+            r'^@[\w가-힣]+\s+(.+)$',         # @명령어 형태
+        ]
+
+        for line in reversed(lines):
+            stripped = line.strip()
+            for pattern in simple_patterns:
+                match = re.match(pattern, stripped)
+                if match:
+                    prompt_text = match.group(1).strip()
+                    if prompt_text and len(prompt_text) >= 5 and len(prompt_text) <= 500:
+                        return prompt_text[:100]  # Truncate to 100 chars
+
+        return ""
+
+    def _detect_context_from_content(self, content: str) -> Optional[dict]:
+        """
+        Detect context warning from pre-fetched content
+        """
+        if not content:
+            return None
+
+        patterns = [
+            r'Context\s+left\s+until\s+auto-compact:\s*(\d+)%',
+            r'(\d+)%\s*used.*?([~\d,]+[kK]?)\s*(?:tokens?\s*)?remaining',
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, content, re.IGNORECASE)
+            if match:
+                if "auto-compact" in pattern:
+                    remaining_pct = int(match.group(1))
+                    usage_pct = 100 - remaining_pct
+                    return {
+                        'usage_percent': usage_pct,
+                        'remaining_tokens': int(200000 * remaining_pct / 100 / 1000)
+                    }
+                else:
+                    return {
+                        'usage_percent': int(match.group(1)),
+                        'remaining_tokens': int(match.group(2).replace(',', '').replace('k', '000').replace('K', '000').replace('~', ''))
+                    }
+
+        return None
+
+    def _extract_summary_from_content(self, content: str, lines: int = 3) -> str:
+        """
+        Extract screen summary from pre-fetched content
+        """
+        if not content:
+            return "빈 화면"
+
+        all_lines = content.split('\n')
+        cleaned = []
+
+        skip_patterns = [
+            'accept edits', 'shift+tab', 'esc to interrupt',
+            'auto-updating', '? for shortcuts'
+        ]
+
+        for line in reversed(all_lines):
+            stripped = line.strip()
+
+            if not stripped or len(stripped) < 4:
+                continue
+            if all(c in '─│╭╮╯╰┌┐└┘├┤┬┴┼ >?' for c in stripped):
+                continue
+            if any(p in stripped.lower() for p in skip_patterns):
+                continue
+
+            safe = stripped.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            if len(safe) > 70:
+                safe = safe[:67] + "..."
+
+            cleaned.insert(0, f"  {safe}")
+            if len(cleaned) >= lines:
+                break
+
+        return '\n'.join(cleaned) if cleaned else "화면 대기 중"
+
+    def _get_session_status_sync(self, session_name: str) -> Tuple[str, float, str, str, bool, Optional[dict], str]:
+        """
+        Synchronous helper for parallel execution (single tmux call via batch).
+        Returns 7-tuple: (session_name, wait_time, last_prompt, status, has_record, context_warning, screen_summary)
+        """
+        try:
+            # Single tmux call via batch (replaces 3-5 individual calls)
+            batch = self._get_session_data_batch(session_name)
+            state = batch['state']
+            context_warning = batch['context_warning']
+            screen_summary = batch['screen_summary']
+
+            # Quality-checked prompt extraction (reuses PromptRecallSystem logic
+            # including _is_meaningful_prompt() filtering and deduplication)
+            detected_prompts = self.prompt_recall._detect_user_prompts(batch['content'])
+            last_prompt = detected_prompts[-1] if detected_prompts else ""
+
+            # Clean prompt
+            if "프롬프트" in last_prompt or "실패" in last_prompt:
+                last_prompt = ""
+
+            # Get wait time (unchanged logic)
+            if hasattr(self.tracker, 'get_wait_time_since_completion'):
+                result = self.tracker.get_wait_time_since_completion(session_name)
+                if isinstance(result, tuple) and len(result) == 2:
+                    wait_time, has_record = result
+                else:
+                    wait_time = result
+                    has_record = self.tracker.has_completion_record(session_name)
+            else:
+                wait_time = self.tracker.get_wait_time_since_completion(session_name)
+                has_record = self.tracker.has_completion_record(session_name)
+
+            status = 'working' if state == SessionState.WORKING else 'waiting'
+            return (session_name, wait_time, last_prompt, status, has_record, context_warning, screen_summary)
+
+        except Exception as e:
+            logger.error(f"Error getting status for {session_name}: {e}")
+            return (session_name, 0.0, "", 'waiting', False, None, '데이터 조회 실패')
+
+    async def get_all_sessions_with_status_async(self) -> List[Tuple[str, float, str, str, bool, Optional[dict], str]]:
+        """
+        Get ALL sessions with parallel processing using ThreadPoolExecutor.
+
+        Returns:
+            List of 7-tuples: (session_name, wait_time, last_prompt, status, has_record, context_warning, screen_summary)
+        """
+        sessions = session_manager.get_all_claude_sessions()
+
+        if not sessions:
+            return []
+
+        # Use ThreadPoolExecutor for parallel tmux calls
+        # Each worker runs 1 subprocess (tmux capture-pane) - safe to parallelize all sessions
+        with ThreadPoolExecutor(max_workers=len(sessions)) as executor:
+            loop = asyncio.get_event_loop()
+            tasks = [
+                loop.run_in_executor(executor, self._get_session_status_sync, session)
+                for session in sessions
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Filter out exceptions and sort
+        all_sessions = []
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"Parallel session fetch error: {result}")
+                continue
+            all_sessions.append(result)
+
+        # Sort: working sessions first, then waiting sessions by wait time DESC
+        all_sessions.sort(key=lambda x: (
+            0 if x[3] == 'working' else 1,
+            -x[1] if x[3] == 'waiting' else 0,
+            x[0]
+        ))
+
+        return all_sessions
+
     def get_waiting_sessions_with_times(self) -> List[Tuple[str, float, str]]:
         """
         Get all waiting/idle sessions with their wait times
@@ -539,11 +753,104 @@ class SessionSummaryHelper:
             message += f"💡 <b>가장 오래 대기</b>: {longest_name} ({self.format_wait_time(longest_time)})"
         
         return message
-    
+
+    async def generate_summary_async(self, session_name: str = None) -> str:
+        """
+        Async version of generate_summary() - uses parallel batch fetching.
+        Eliminates N+1 tmux queries by using enriched 7-tuple data.
+
+        Args:
+            session_name: Optional session name for single session summary
+
+        Returns:
+            Formatted summary message for Telegram (identical HTML to sync version)
+        """
+        # For single session summary (used in tests) - delegate to sync
+        if session_name:
+            return self._generate_single_session_summary(session_name)
+
+        # Async parallel fetch - 1 tmux call per session, all in parallel
+        all_sessions = await self.get_all_sessions_with_status_async()
+
+        if not all_sessions:
+            return "📊 **세션 요약**\n\n✅ 현재 활성 세션이 없습니다."
+
+        # Count waiting and working sessions
+        waiting_count = sum(1 for s in all_sessions if s[3] == 'waiting')
+        working_count = sum(1 for s in all_sessions if s[3] == 'working')
+
+        # Header with HTML formatting
+        current_time = datetime.now().strftime("%H:%M")
+        message = f"📊 <b>세션 요약</b> ({current_time} 기준)\n\n"
+        message += f"<b>전체 세션: {len(all_sessions)}개</b> (대기: {waiting_count}, 작업중: {working_count})\n\n"
+
+        # Session details - uses enriched 7-tuple (no additional tmux calls)
+        for i, (sess_name, wait_time, last_prompt, status, has_record, context_warning, screen_summary) in enumerate(all_sessions, 1):
+            # Format session name
+            display_name = sess_name.replace('claude_', '') if sess_name.startswith('claude_') else sess_name
+
+            # Add separator
+            message += "━" * 25 + "\n"
+
+            # Session header with bold
+            if status == 'working':
+                message += f"🔨 <b>{display_name}</b> (작업 중)\n"
+            else:
+                wait_str = self.format_wait_time(wait_time)
+                message += f"🎯 <b>{display_name}</b> ({wait_str} 대기)\n"
+
+            # Add copyable command wrapped in HTML code tag
+            message += f"    ↳ <code>/sessions {sess_name}</code>\n"
+
+            # Last prompt if available
+            if last_prompt and len(last_prompt) > 2:
+                # Escape HTML special characters
+                escaped_prompt = last_prompt.replace('&', '&amp;')
+                escaped_prompt = escaped_prompt.replace('<', '&lt;')
+                escaped_prompt = escaped_prompt.replace('>', '&gt;')
+                # Truncate if too long
+                if len(escaped_prompt) > 60:
+                    escaped_prompt = escaped_prompt[:57] + "..."
+                message += f"💬 <i>{escaped_prompt}</i>\n"
+
+            # Context status from batch data (no additional tmux call)
+            try:
+                if context_warning:
+                    usage_percent = context_warning['usage_percent']
+                    remaining_tokens = context_warning['remaining_tokens']
+
+                    if usage_percent >= 90:
+                        message += f"⚠️ 컨텍스트: {usage_percent}% ({remaining_tokens}K 남음)\n"
+                    else:
+                        message += f"📊 컨텍스트: {usage_percent}% ({remaining_tokens}K 남음)\n"
+                else:
+                    message += f"📊 컨텍스트: 여유\n"
+            except Exception:
+                message += f"📊 컨텍스트: 확인 불가\n"
+
+            # Screen summary from batch data (no additional tmux call)
+            if screen_summary and screen_summary not in ["화면 대기 중", "빈 화면", "화면 캡처 실패", "데이터 조회 실패"]:
+                # Ensure no unclosed tags - double check HTML escaping
+                safe_summary = screen_summary.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                # Avoid double escaping
+                safe_summary = safe_summary.replace('&amp;amp;', '&amp;').replace('&amp;lt;', '&lt;').replace('&amp;gt;', '&gt;')
+                message += f"\n<pre>{safe_summary}</pre>\n\n"
+            else:
+                message += "\n"
+
+        # Footer with longest waiting session
+        waiting_sessions = [(s[0], s[1]) for s in all_sessions if s[3] == 'waiting']
+        if waiting_sessions:
+            longest_session, longest_time = max(waiting_sessions, key=lambda x: x[1])
+            longest_name = longest_session.replace('claude_', '') if longest_session.startswith('claude_') else longest_session
+            message += f"💡 <b>가장 오래 대기</b>: {longest_name} ({self.format_wait_time(longest_time)})"
+
+        return message
+
     def get_session_wait_time(self, session_name: str) -> Optional[float]:
         """
         Get wait time for a specific session
-        
+
         Args:
             session_name: Name of the session
             
