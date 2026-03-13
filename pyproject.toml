@@ -34,5 +34,8 @@ dev = [
     "pytest-asyncio>=1.1.0",
 ]
 
+[project.scripts]
+ctb-dashboard = "claude_ctb.web_dashboard.server:run_server"
+
 [tool.setuptools]
 packages = ["claude_ctb", "tadd"]
