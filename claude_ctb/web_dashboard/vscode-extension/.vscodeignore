@@ -1,0 +1,6 @@
+.omc/
+node_modules/
+src/
+tsconfig.json
+**/*.ts
+!out/**
