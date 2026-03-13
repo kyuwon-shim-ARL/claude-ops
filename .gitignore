@@ -100,6 +100,18 @@ debug_session_*.json
 test_real_*.py
 *test_scenario*.py
 
+# OMC Experiment Workflow
+outputs/**/*.csv
+outputs/**/*.png
+outputs/**/*.pkl
+outputs/**/*.html
+!outputs/MANIFEST.yaml
+.omc-config.sh
+
+# Node.js (VS Code extension)
+node_modules/
+out/
+
 # uv
 .uv/
 uv.lockdata/cpu_optimized_models/

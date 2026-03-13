@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude-CTB Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse-dot { 0%,100%{opacity:.4} 50%{opacity:1} }
+    .pulse-dot { animation: pulse-dot 1.5s ease-in-out infinite; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen">
+
+  <!-- Header -->
+  <header class="border-b border-gray-800 px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <h1 class="text-lg font-semibold tracking-tight">Claude-CTB Dashboard</h1>
+      <span id="badge-count" class="bg-gray-800 text-xs px-2 py-0.5 rounded-full">0 sessions</span>
+    </div>
+    <div class="flex items-center gap-2 text-xs text-gray-500">
+      <span id="conn-status" class="flex items-center gap-1">
+        <span id="conn-dot" class="inline-block w-2 h-2 rounded-full bg-gray-600"></span>
+        Connecting…
+      </span>
+      <span id="last-update" class="hidden">Updated <time></time></span>
+    </div>
+  </header>
+
+  <!-- Session Grid -->
+  <main id="grid" class="p-4 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <div class="col-span-full text-center text-gray-600 py-20 text-sm" id="empty-state">
+      No sessions detected. Start a Claude session to see it here.
+    </div>
+  </main>
+
+  <script>
+    // --- State color map ---
+    const STATE_CONFIG = {
+      working:       { color: 'emerald', label: 'Working',       dot: 'bg-emerald-400 pulse-dot', border: 'border-emerald-500/30', bg: 'bg-emerald-500/5' },
+      waiting:       { color: 'amber',   label: 'Waiting Input', dot: 'bg-amber-400 pulse-dot',   border: 'border-amber-500/30',   bg: 'bg-amber-500/5'   },
+      idle:          { color: 'gray',    label: 'Idle',          dot: 'bg-gray-500',               border: 'border-gray-700',       bg: 'bg-gray-500/5'    },
+      error:         { color: 'red',     label: 'Error',         dot: 'bg-red-400 pulse-dot',      border: 'border-red-500/30',     bg: 'bg-red-500/5'     },
+      context_limit: { color: 'rose',    label: 'Context Limit', dot: 'bg-rose-400 pulse-dot',     border: 'border-rose-500/30',    bg: 'bg-rose-500/5'    },
+      unknown:       { color: 'slate',   label: 'Unknown',       dot: 'bg-slate-500',              border: 'border-slate-700',      bg: 'bg-slate-500/5'   },
+    };
+
+    const grid = document.getElementById('grid');
+    const emptyState = document.getElementById('empty-state');
+    const badgeCount = document.getElementById('badge-count');
+    const connDot = document.getElementById('conn-dot');
+    const connStatus = document.getElementById('conn-status');
+    const lastUpdateEl = document.getElementById('last-update');
+
+    function formatAge(ts) {
+      if (!ts || ts === 0) return '—';
+      const diff = Math.floor(Date.now() / 1000 - ts);
+      if (diff < 0) return 'just now';
+      if (diff < 60) return `${diff}s ago`;
+      if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+      if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+      return `${Math.floor(diff / 86400)}d ago`;
+    }
+
+    function shortName(name) {
+      // claude_my-project → my-project
+      return name.replace(/^claude[_-]/, '');
+    }
+
+    function renderCard(session) {
+      const cfg = STATE_CONFIG[session.state] || STATE_CONFIG.unknown;
+      return `
+        <div class="rounded-lg border ${cfg.border} ${cfg.bg} p-4 flex flex-col gap-2 transition-all duration-300">
+          <div class="flex items-center justify-between">
+            <span class="font-mono text-sm font-medium truncate" title="${session.name}">${shortName(session.name)}</span>
+            <span class="flex items-center gap-1.5 text-xs text-gray-400">
+              <span class="inline-block w-2 h-2 rounded-full ${cfg.dot}"></span>
+              ${cfg.label}
+            </span>
+          </div>
+          <div class="flex items-center justify-between text-xs text-gray-500">
+            <span>Activity: ${formatAge(session.last_activity)}</span>
+            ${session.notification_sent ? '<span class="text-blue-400" title="Notification sent">🔔</span>' : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    function render(data) {
+      const sessions = data.sessions || [];
+      badgeCount.textContent = `${sessions.length} session${sessions.length !== 1 ? 's' : ''}`;
+
+      if (sessions.length === 0) {
+        emptyState.classList.remove('hidden');
+        // Remove all cards but keep empty state
+        Array.from(grid.children).forEach(el => {
+          if (el !== emptyState) el.remove();
+        });
+        return;
+      }
+
+      emptyState.classList.add('hidden');
+
+      // Sort: working first, then waiting, then others
+      const order = { working: 0, waiting: 1, context_limit: 2, error: 3, idle: 4, unknown: 5 };
+      sessions.sort((a, b) => (order[a.state] ?? 9) - (order[b.state] ?? 9));
+
+      // Replace grid content (keep empty state node)
+      const cards = sessions.map(renderCard).join('');
+      // Remove old cards
+      Array.from(grid.children).forEach(el => {
+        if (el !== emptyState) el.remove();
+      });
+      grid.insertAdjacentHTML('afterbegin', cards);
+
+      // Update timestamp
+      if (data.updated_at) {
+        lastUpdateEl.classList.remove('hidden');
+        lastUpdateEl.querySelector('time').textContent = formatAge(data.updated_at);
+      }
+    }
+
+    // --- SSE Connection ---
+    let evtSource = null;
+    let reconnectTimer = null;
+
+    function setConnected(ok) {
+      connDot.className = `inline-block w-2 h-2 rounded-full ${ok ? 'bg-emerald-400' : 'bg-red-400'}`;
+      connStatus.lastChild.textContent = ok ? ' Connected' : ' Disconnected';
+    }
+
+    function connect() {
+      if (evtSource) evtSource.close();
+
+      // Initial fetch for immediate render
+      fetch('/api/sessions')
+        .then(r => r.json())
+        .then(render)
+        .catch(() => {});
+
+      evtSource = new EventSource('/api/sessions/stream');
+
+      evtSource.addEventListener('sessions', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          render(data);
+        } catch (err) {
+          console.error('Failed to parse SSE data:', err);
+        }
+      });
+
+      evtSource.onopen = () => {
+        setConnected(true);
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      };
+
+      evtSource.onerror = () => {
+        setConnected(false);
+        evtSource.close();
+        // Reconnect with backoff
+        reconnectTimer = setTimeout(connect, 3000);
+      };
+    }
+
+    // --- Auto-refresh age labels ---
+    setInterval(() => {
+      fetch('/api/sessions')
+        .then(r => r.json())
+        .then(render)
+        .catch(() => {});
+    }, 30000);
+
+    // Start
+    connect();
+  </script>
+</body>
+</html>

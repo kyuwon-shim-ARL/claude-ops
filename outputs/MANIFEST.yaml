@@ -1,5 +1,5 @@
 version: 1
-updated: "2026-03-12T00:00:00Z"
+updated: "2026-03-13T23:55:00Z"
 scan_paths:
   - outputs/
 experiments:
@@ -27,3 +27,61 @@ experiments:
     tasks:
       - "bot.py에 ctx_restart/ctx_ignore 콜백 + _context_limit_restart_callback()"
       - "bot.py에 _build_handoff_prompt() (git status + .omc state → handoff)"
+  e003:
+    path: outputs/e003/
+    script: claude_ctb/web_dashboard/server.py
+    params: {port: 8420, bind: "127.0.0.1", poll_interval: 3}
+    outputs: []
+    status: experimental
+    description: "Web Dashboard 백엔드 (FastAPI + SSE, e006 JSON 읽기)"
+    issue: 4
+    branch: null
+    depends_on: [e006]
+    tasks:
+      - "pyproject.toml에 fastapi, uvicorn 추가"
+      - "/api/sessions JSON 엔드포인트 (ctb-sessions.json 읽기)"
+      - "/api/sessions/stream SSE 스트림"
+      - "127.0.0.1 바인딩 (보안)"
+  e004:
+    path: outputs/e004/
+    script: claude_ctb/web_dashboard/static/index.html
+    params: {}
+    outputs: []
+    status: experimental
+    description: "Web Dashboard 프론트엔드 (HTML + Vanilla JS + Tailwind)"
+    issue: 5
+    branch: null
+    depends_on: [e003]
+    tasks:
+      - "색상 코딩 세션 카드 그리드"
+      - "EventSource 실시간 업데이트"
+      - "반응형 모바일 대응"
+  e005:
+    path: outputs/e005/
+    script: null
+    params: {}
+    outputs: []
+    status: experimental
+    description: "VS Code Extension (WebView 래퍼 + Status Bar) — stretch goal"
+    issue: 6
+    branch: null
+    depends_on: [e003, e004]
+    tasks:
+      - "WebView Panel 대시보드 로드"
+      - "Status Bar 요약 메트릭"
+      - "TreeView 세션 목록"
+  e006:
+    path: outputs/e006/
+    script: claude_ctb/web_dashboard/shared_state.py
+    params: {}
+    outputs: []
+    status: experimental
+    description: "SharedSessionState — multi_monitor.py → JSON 공유 레이어"
+    issue: 7
+    branch: null
+    depends_on: []
+    tasks:
+      - "SharedSessionState 모듈 (원자적 JSON 쓰기)"
+      - "JSON 스키마 정의 + 3초 갱신"
+      - "multi_monitor.py 1줄 통합"
+      - "기존 Telegram 알림 영향 없음 테스트"

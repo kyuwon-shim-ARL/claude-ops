@@ -25,6 +25,7 @@ from .completion_event_system import (
     CompletionTimeRecorder, CompletionNotifier, emit_completion
 )
 from ..telegram.message_queue import message_queue
+from ..web_dashboard.shared_state import SharedSessionState
 # Import improved tracker with state-based completion detection
 try:
     from ..utils.wait_time_tracker_v2 import ImprovedWaitTimeTracker, migrate_to_v2
@@ -45,6 +46,9 @@ class MultiSessionMonitor:
         self.state_analyzer = SessionStateAnalyzer()  # Unified state detection
         self.tracker = wait_tracker  # Use global wait time tracker
         self.debugger = get_debugger()  # NEW: Debug tracking
+
+        # e006: Shared session state for web dashboard consumers
+        self.shared_state = SharedSessionState()
 
         # Initialize event-based completion system
         self.event_bus = CompletionEventBus()
@@ -747,6 +751,16 @@ class MultiSessionMonitor:
                                 state_name = 'working' if curr_state == SessionState.WORKING else 'waiting'
                                 self.tracker.mark_state_transition(session_name, state_name)
                     
+                    # e006: Update shared session state for web dashboard
+                    current_state_val = self.last_state.get(session_name, SessionState.UNKNOWN)
+                    self.shared_state.update_session(session_name, {
+                        "state": current_state_val.value,
+                        "last_activity": self.last_activity_time.get(session_name, 0),
+                        "screen_hash": self.last_screen_hash.get(session_name, ""),
+                        "notification_sent": self.notification_sent.get(session_name, False),
+                    })
+                    self.shared_state.flush_if_due(interval=3.0)
+
                     # Wait before next check
                     time.sleep(self.config.check_interval)
                     
@@ -784,6 +798,9 @@ class MultiSessionMonitor:
                 self.state_analyzer.clear_cache(session_name)
                 # Remove from wait time tracker
                 self.tracker.remove_session(session_name)
+                # e006: Remove from shared state and flush
+                self.shared_state.remove_session(session_name)
+                self.shared_state.flush()
     
     def start_session_thread(self, session_name: str) -> bool:
         """Start monitoring thread for a session (thread-safe)"""
