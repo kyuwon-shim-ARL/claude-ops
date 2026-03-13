@@ -3,22 +3,44 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as http from 'http';
 
-const STATE_FILE = '/tmp/ctb-sessions.json';
 const DASHBOARD_URL = 'http://127.0.0.1:8420';
+const API_SESSIONS_URL = `${DASHBOARD_URL}/api/sessions`;
 const POLL_INTERVAL = 5000; // 5 seconds
 
 interface SessionData {
   name: string;
   state: string;
-  last_activity: number;
+  path: string;
   updated_at: number;
-  notification_sent?: boolean;
 }
 
 interface SharedState {
   version: number;
   updated_at: number;
   sessions: SessionData[];
+}
+
+// --- Shared Data Fetcher (single HTTP call shared by StatusBar + TreeView) ---
+
+let _cachedState: SharedState | null = null;
+
+function fetchSessions(): Promise<SharedState | null> {
+  return new Promise((resolve) => {
+    const req = http.get(API_SESSIONS_URL, { timeout: 3000 }, (res) => {
+      let data = '';
+      res.on('data', (chunk: string) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          _cachedState = JSON.parse(data) as SharedState;
+          resolve(_cachedState);
+        } catch {
+          resolve(null);
+        }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+  });
 }
 
 // --- Status Bar ---
@@ -36,8 +58,8 @@ class StatusBarManager {
     this.timer = setInterval(() => this.refresh(), POLL_INTERVAL);
   }
 
-  refresh(): void {
-    const state = readStateFile();
+  async refresh(): Promise<void> {
+    const state = _cachedState;
     if (!state) {
       this.item.text = '$(terminal) CTB: offline';
       this.item.color = undefined;
@@ -58,7 +80,7 @@ class StatusBarManager {
     if (waiting > 0) {
       this.item.color = new vscode.ThemeColor('statusBarItem.warningForeground');
     } else if (working > 0) {
-      this.item.color = new vscode.ThemeColor('statusBarItem.prominentForeground');
+      this.item.color = undefined; // default color for working
     } else {
       this.item.color = undefined;
     }
@@ -76,15 +98,6 @@ class SessionItem extends vscode.TreeItem {
   constructor(public readonly session: SessionData) {
     super(session.name.replace(/^claude[_-]/, ''), vscode.TreeItemCollapsibleState.None);
 
-    const stateIcons: Record<string, string> = {
-      working: '$(sync~spin)',
-      waiting: '$(bell)',
-      idle: '$(circle-outline)',
-      error: '$(error)',
-      context_limit: '$(warning)',
-      unknown: '$(question)',
-    };
-
     this.description = session.state;
     this.iconPath = new vscode.ThemeIcon(
       session.state === 'working' ? 'sync~spin' :
@@ -94,8 +107,8 @@ class SessionItem extends vscode.TreeItem {
       'circle-outline'
     );
 
-    const age = formatAge(session.last_activity);
-    this.tooltip = `${session.name}\nState: ${session.state}\nActivity: ${age}`;
+    const age = formatAge(session.updated_at);
+    this.tooltip = `${session.name}\nState: ${session.state}\nPath: ${session.path || 'unknown'}\nUpdated: ${age}`;
   }
 }
 
@@ -105,13 +118,19 @@ class SessionTreeProvider implements vscode.TreeDataProvider<SessionItem> {
   private timer: NodeJS.Timeout | undefined;
 
   constructor() {
-    this.timer = setInterval(() => this._onDidChange.fire(undefined), POLL_INTERVAL);
+    // Unified poll: fetch once, then refresh both tree and status bar
+    this.timer = setInterval(async () => {
+      await fetchSessions();
+      this._onDidChange.fire(undefined);
+    }, POLL_INTERVAL);
+    // Initial fetch
+    fetchSessions().then(() => this._onDidChange.fire(undefined));
   }
 
   getTreeItem(element: SessionItem): vscode.TreeItem { return element; }
 
   getChildren(): SessionItem[] {
-    const state = readStateFile();
+    const state = _cachedState;
     if (!state) { return []; }
 
     const order: Record<string, number> = { working: 0, waiting: 1, context_limit: 2, error: 3, idle: 4, unknown: 5 };
@@ -147,23 +166,29 @@ class DashboardPanel {
       { enableScripts: true, retainContextWhenHidden: true }
     );
 
-    DashboardPanel.panel.webview.html = getWebviewContent();
+    DashboardPanel.panel.webview.html = getWebviewContent(context);
     DashboardPanel.panel.onDidDispose(() => { DashboardPanel.panel = undefined; });
   }
 }
 
-function getWebviewContent(): string {
-  // Try to load the static HTML from the Python package
-  const htmlPath = path.join(__dirname, '..', '..', 'static', 'index.html');
-  try {
-    if (fs.existsSync(htmlPath)) {
-      let html = fs.readFileSync(htmlPath, 'utf-8');
-      // Rewrite API URLs to point at the local server
-      html = html.replace(/fetch\('\/api/g, `fetch('${DASHBOARD_URL}/api`);
-      html = html.replace(/EventSource\('\/api/g, `EventSource('${DASHBOARD_URL}/api`);
-      return html;
-    }
-  } catch { /* fall through */ }
+function getWebviewContent(context: vscode.ExtensionContext): string {
+  // Try to load the static HTML from the extension's bundled files
+  const possiblePaths = [
+    path.join(context.extensionPath, 'static', 'index.html'),
+    path.join(context.extensionPath, '..', 'static', 'index.html'),
+  ];
+
+  for (const htmlPath of possiblePaths) {
+    try {
+      if (fs.existsSync(htmlPath)) {
+        let html = fs.readFileSync(htmlPath, 'utf-8');
+        // Rewrite API URLs to point at the local server
+        html = html.replace(/fetch\('\/api/g, `fetch('${DASHBOARD_URL}/api`);
+        html = html.replace(/EventSource\('\/api/g, `EventSource('${DASHBOARD_URL}/api`);
+        return html;
+      }
+    } catch { /* fall through */ }
+  }
 
   // Fallback: iframe to the running server
   return `<!DOCTYPE html>
@@ -172,15 +197,6 @@ function getWebviewContent(): string {
 }
 
 // --- Helpers ---
-
-function readStateFile(): SharedState | null {
-  try {
-    const raw = fs.readFileSync(STATE_FILE, 'utf-8');
-    return JSON.parse(raw) as SharedState;
-  } catch {
-    return null;
-  }
-}
 
 function formatAge(ts: number): string {
   if (!ts) { return '—'; }
@@ -201,7 +217,8 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider('claudeCtbSessions', treeProvider),
     vscode.commands.registerCommand('claudeCtb.openDashboard', () => DashboardPanel.show(context)),
-    vscode.commands.registerCommand('claudeCtb.refreshSessions', () => {
+    vscode.commands.registerCommand('claudeCtb.refreshSessions', async () => {
+      await fetchSessions();
       statusBar.refresh();
       treeProvider.refresh();
     }),

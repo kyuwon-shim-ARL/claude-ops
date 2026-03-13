@@ -8,13 +8,13 @@ e003: Web Dashboard backend experiment
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
-import subprocess
 import time
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Dict, Any, List
+from typing import AsyncGenerator, Dict, Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,119 +22,65 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
+from ..utils.session_state import SessionStateAnalyzer
+from ..session_manager import session_manager
+
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 3  # seconds between state refreshes
 BIND_HOST = "127.0.0.1"
 BIND_PORT = 8420
 
-# --- Session Poller (self-contained, no multi_monitor dependency) ---
+# --- Session Poller (reuses SessionStateAnalyzer for accurate detection) ---
 
-_cached_state: Dict[str, Any] = {"version": 1, "updated_at": 0, "sessions": []}
-
-
-def _discover_claude_sessions() -> List[str]:
-    """Discover active Claude tmux sessions."""
-    try:
-        result = subprocess.run(
-            "tmux list-sessions 2>/dev/null | grep '^claude' | cut -d: -f1",
-            shell=True, capture_output=True, text=True, timeout=5
-        )
-        if result.returncode == 0:
-            sessions = [s.strip() for s in result.stdout.split('\n') if s.strip()]
-            exclude = {'claude-multi-monitor', 'claude-monitor', 'claude-telegram-bridge'}
-            return [s for s in sessions if s not in exclude]
-    except Exception as e:
-        logger.warning(f"Failed to discover sessions: {e}")
-    return []
-
-
-def _detect_session_state(session_name: str) -> str:
-    """Detect session state from tmux screen content (lightweight)."""
-    try:
-        result = subprocess.run(
-            f"tmux capture-pane -t {session_name} -p",
-            shell=True, capture_output=True, text=True, timeout=5
-        )
-        if result.returncode != 0:
-            return "unknown"
-
-        content = result.stdout
-        lines = content.split('\n')
-        recent = '\n'.join(lines[-25:])
-
-        # Priority order: working > waiting > idle
-        working_indicators = [
-            "esc to interrupt", "ctrl+c to interrupt",
-            "Running…", "Thinking…", "ctrl+b to run in background",
-            "Building", "Testing", "Installing", "Processing", "Analyzing",
-        ]
-        for pattern in working_indicators:
-            if pattern in recent:
-                return "working"
-
-        # Context limit
-        limit_patterns = ["Context limit reached", "Conversation is too long", "context window exceeded"]
-        for pattern in limit_patterns:
-            if pattern.lower() in recent.lower():
-                return "context_limit"
-
-        # Waiting for input
-        input_patterns = [
-            "Do you want to proceed?", "Choose an option:", "Question ",
-            "❯ 1.", "❯ 2.", "┌────────┬",
-        ]
-        for pattern in input_patterns:
-            if pattern in '\n'.join(lines[-10:]):
-                return "waiting"
-
-        # Check for prompt (idle)
-        for line in reversed(lines[-6:]):
-            stripped = line.strip()
-            if not stripped:
-                continue
-            if stripped in ['>', '│ >'] or line.endswith(('$ ', '> ', '❯ ')):
-                return "idle"
-
-        return "idle"
-
-    except Exception as e:
-        logger.warning(f"Failed to detect state for {session_name}: {e}")
-        return "unknown"
-
-
-def _get_session_path(session_name: str) -> str:
-    """Get working directory of a tmux session."""
-    try:
-        result = subprocess.run(
-            ["tmux", "display-message", "-t", session_name, "-p", "#{pane_current_path}"],
-            capture_output=True, text=True, timeout=5
-        )
-        return result.stdout.strip() if result.returncode == 0 else ""
-    except Exception:
-        return ""
+_cached_state: Dict[str, Any] = {"version": 1, "updated_at": 0, "sessions": [], "_hash": ""}
+_prev_session_timestamps: Dict[str, float] = {}  # track per-session state change time
+_state_analyzer = SessionStateAnalyzer()
 
 
 def _poll_sessions() -> Dict[str, Any]:
-    """Poll all tmux sessions and return state dict."""
-    sessions = _discover_claude_sessions()
+    """Poll all tmux sessions and return state dict using SessionStateAnalyzer."""
+    global _prev_session_timestamps
+    sessions = session_manager.get_all_claude_sessions()
     now = time.time()
 
     session_list = []
     for name in sessions:
-        state = _detect_session_state(name)
-        path = _get_session_path(name)
+        state = _state_analyzer.get_state(name)
+        state_val = state.value
+        path = session_manager.get_session_path(name)
+
+        # Only update timestamp when state actually changes
+        prev_ts = _prev_session_timestamps.get(name, 0)
+        prev_state = None
+        for s in _cached_state.get("sessions", []):
+            if s["name"] == name:
+                prev_state = s.get("state")
+                break
+        if prev_state != state_val or prev_ts == 0:
+            _prev_session_timestamps[name] = now
+            prev_ts = now
+
         session_list.append({
             "name": name,
-            "state": state,
+            "state": state_val,
             "path": path,
-            "updated_at": now,
+            "updated_at": prev_ts,
         })
+
+    # Content hash for SSE change detection (ignores updated_at fluctuations)
+    content_key = json.dumps([(s["name"], s["state"]) for s in session_list], sort_keys=True)
+    content_hash = hashlib.md5(content_key.encode()).hexdigest()[:8]
+
+    # Clean up timestamps for removed sessions
+    active_names = {s["name"] for s in session_list}
+    _prev_session_timestamps = {k: v for k, v in _prev_session_timestamps.items() if k in active_names}
 
     return {
         "version": 1,
         "updated_at": now,
         "sessions": session_list,
+        "_hash": content_hash,
     }
 
 
@@ -173,7 +119,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:8420"],
+    allow_origins=["*"],  # safe: server only binds to loopback (127.0.0.1)
     allow_methods=["GET"],
     allow_headers=["*"],
 )
@@ -201,12 +147,12 @@ async def get_sessions():
 
 
 async def _session_event_generator() -> AsyncGenerator[dict, None]:
-    """Yield session state as SSE events when data changes."""
-    last_updated_at = 0.0
+    """Yield session state as SSE events only when session data actually changes."""
+    last_hash = ""
     while True:
-        current_updated = _cached_state.get("updated_at", 0)
-        if current_updated != last_updated_at:
-            last_updated_at = current_updated
+        current_hash = _cached_state.get("_hash", "")
+        if current_hash and current_hash != last_hash:
+            last_hash = current_hash
             yield {"event": "sessions", "data": json.dumps(_cached_state, ensure_ascii=False)}
         await asyncio.sleep(POLL_INTERVAL)
 

@@ -62,25 +62,39 @@
       return `${Math.floor(diff / 86400)}d ago`;
     }
 
+    function escapeHtml(s) {
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
     function shortName(name) {
       // claude_my-project → my-project
       return name.replace(/^claude[_-]/, '');
     }
 
+    function shortPath(p) {
+      if (!p) return '';
+      const home = '/home/';
+      const idx = p.indexOf(home);
+      return idx >= 0 ? '~/' + p.slice(p.indexOf('/', idx + home.length) + 1) : p;
+    }
+
     function renderCard(session) {
       const cfg = STATE_CONFIG[session.state] || STATE_CONFIG.unknown;
+      const name = escapeHtml(session.name);
+      const display = escapeHtml(shortName(session.name));
+      const pathStr = session.path ? escapeHtml(shortPath(session.path)) : '';
       return `
         <div class="rounded-lg border ${cfg.border} ${cfg.bg} p-4 flex flex-col gap-2 transition-all duration-300">
           <div class="flex items-center justify-between">
-            <span class="font-mono text-sm font-medium truncate" title="${session.name}">${shortName(session.name)}</span>
+            <span class="font-mono text-sm font-medium truncate" title="${name}">${display}</span>
             <span class="flex items-center gap-1.5 text-xs text-gray-400">
               <span class="inline-block w-2 h-2 rounded-full ${cfg.dot}"></span>
               ${cfg.label}
             </span>
           </div>
+          ${pathStr ? `<div class="text-xs text-gray-600 font-mono truncate" title="${escapeHtml(session.path || '')}">${pathStr}</div>` : ''}
           <div class="flex items-center justify-between text-xs text-gray-500">
-            <span>Activity: ${formatAge(session.last_activity)}</span>
-            ${session.notification_sent ? '<span class="text-blue-400" title="Notification sent">🔔</span>' : ''}
+            <span>Updated: ${formatAge(session.updated_at)}</span>
           </div>
         </div>
       `;
