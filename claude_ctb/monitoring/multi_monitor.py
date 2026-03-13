@@ -230,36 +230,49 @@ class MultiSessionMonitor:
             if previous_state != SessionState.WORKING:
                 self.tracker.reset_session(session_name)
             return False, None
-        
-        # Enhanced duplicate prevention
+
+        # 0. Context limit detected (highest priority - requires immediate action)
+        # CRITICAL: Check BEFORE notification_sent guard because context limit
+        # requires auto-restart regardless of whether a regular completion
+        # notification was already sent. Without this, the sequence
+        # WORKING→IDLE(notified)→CONTEXT_LIMIT would be permanently blocked.
+        restart_cooldown = 60
+        last_restart = self._context_limit_restart_time.get(session_name, 0)
+        if current_state == SessionState.CONTEXT_LIMIT and previous_state != SessionState.CONTEXT_LIMIT and (current_time - last_restart) > restart_cooldown:
+            self.notification_sent[session_name] = True
+            self.last_notification_time[session_name] = current_time
+            logger.info(f"📢 Notification: {session_name} - Context limit reached - session needs restart")
+            self.debugger.log_notification(
+                session_name, NotificationEvent.SENT,
+                "Context limit reached - session needs restart", current_state
+            )
+            # NOTE: Event bus CompletionEvent is intentionally NOT emitted here.
+            # CONTEXT_LIMIT is handled via send_context_limit_notification() which
+            # triggers auto-restart, not the regular completion event pipeline.
+            return True, None
+
+        # Enhanced duplicate prevention (does not apply to CONTEXT_LIMIT above)
         if self.notification_sent.get(session_name, False):
             return False, None
-        
+
         # Prevent rapid successive notifications (30-second cooldown)
         last_notification_time = self.last_notification_time.get(session_name, 0)
         if current_time - last_notification_time < 30:
             logger.debug(f"Notification cooldown active for {session_name}")
             return False, None
-        
+
         # Check for task-specific completions
         screen_content = self.state_analyzer.get_current_screen_only(session_name)
         task_completion = None
         if screen_content:
             task_completion = task_detector.detect_completion(screen_content)
-        
+
         # Reasons for notification
         notification_reason = ""
         should_notify = False
-        
-        # 0. Context limit detected (highest priority - requires immediate action)
-        # Skip if recently auto-restarted (60s cooldown to avoid re-detection from residual scroll buffer)
-        restart_cooldown = 60
-        last_restart = self._context_limit_restart_time.get(session_name, 0)
-        if current_state == SessionState.CONTEXT_LIMIT and previous_state != SessionState.CONTEXT_LIMIT and (current_time - last_restart) > restart_cooldown:
-            should_notify = True
-            notification_reason = "Context limit reached - session needs restart"
-        # 1. Task-specific completion detected (highest priority)
-        elif task_completion and task_completion.confidence > 0.7:
+
+        # 1. Task-specific completion detected
+        if task_completion and task_completion.confidence > 0.7:
             should_notify = True
             notification_reason = f"Task completed: {task_completion.message}"
             # Adjust cooldown based on priority
@@ -508,6 +521,9 @@ class MultiSessionMonitor:
 
         except Exception as e:
             logger.error(f"❌ Auto-restart failed for {session_name}: {e}")
+            # Set cooldown even on failure to prevent rapid-retry storm
+            with self.thread_lock:
+                self._context_limit_restart_time[session_name] = time.time()
             return False
 
     def _build_handoff_prompt(self, session_name: str) -> str:

@@ -446,6 +446,77 @@ class TestFullRestartFlow:
             f"Expected 6 send-keys (no handoff), got {len(send_keys_calls)}: {send_keys_calls}"
 
 
+class TestContextLimitBypassesNotificationSent:
+    """Regression test: CONTEXT_LIMIT must bypass notification_sent guard.
+
+    Bug scenario (2026-03-14):
+    1. Session WORKING → subagents complete → state becomes IDLE
+    2. Regular completion notification sent → notification_sent = True
+    3. Screen shows "Context limit reached" from subagent output
+    4. CONTEXT_LIMIT detected but notification_sent guard blocked it
+    Fix: CONTEXT_LIMIT check moved before notification_sent guard.
+    """
+
+    def test_context_limit_detected_after_idle_notification(self, monitor):
+        """CONTEXT_LIMIT should fire even when notification_sent=True from prior IDLE notification."""
+        session = "claude_uni-mol-QSAR"
+
+        # Simulate: a regular IDLE notification was already sent
+        monitor.last_state[session] = SessionState.IDLE
+        monitor.notification_sent[session] = True
+        monitor.last_notification_time[session] = time.time() - 5  # 5s ago
+
+        # Now the state transitions to CONTEXT_LIMIT
+        with patch.object(monitor, 'get_session_state', return_value=SessionState.CONTEXT_LIMIT):
+            should_notify, _ = monitor.should_send_completion_notification(session)
+
+        assert should_notify is True, \
+            "REGRESSION: notification_sent=True from IDLE must NOT block CONTEXT_LIMIT"
+
+    def test_context_limit_detected_after_waiting_input_notification(self, monitor):
+        """CONTEXT_LIMIT should fire even after a WAITING_INPUT notification."""
+        session = "claude_test"
+
+        # Simulate: WAITING_INPUT notification was sent
+        monitor.last_state[session] = SessionState.WAITING_INPUT
+        monitor.notification_sent[session] = True
+        monitor.last_notification_time[session] = time.time() - 10
+
+        with patch.object(monitor, 'get_session_state', return_value=SessionState.CONTEXT_LIMIT):
+            should_notify, _ = monitor.should_send_completion_notification(session)
+
+        assert should_notify is True, \
+            "CONTEXT_LIMIT must bypass notification_sent from WAITING_INPUT"
+
+    def test_context_limit_respects_own_cooldown(self, monitor):
+        """CONTEXT_LIMIT should still respect its own 60s restart cooldown."""
+        session = "claude_test"
+
+        monitor.last_state[session] = SessionState.IDLE
+        monitor.notification_sent[session] = True
+        monitor._context_limit_restart_time[session] = time.time() - 30  # 30s ago (within cooldown)
+
+        with patch.object(monitor, 'get_session_state', return_value=SessionState.CONTEXT_LIMIT):
+            should_notify, _ = monitor.should_send_completion_notification(session)
+
+        assert should_notify is False, \
+            "CONTEXT_LIMIT should still respect 60s restart cooldown"
+
+    def test_context_limit_not_re_triggered_same_state(self, monitor):
+        """Once CONTEXT_LIMIT is the last_state, it should not re-trigger (no transition)."""
+        session = "claude_test"
+
+        # Already in CONTEXT_LIMIT state
+        monitor.last_state[session] = SessionState.CONTEXT_LIMIT
+        monitor.notification_sent[session] = True
+
+        with patch.object(monitor, 'get_session_state', return_value=SessionState.CONTEXT_LIMIT):
+            should_notify, _ = monitor.should_send_completion_notification(session)
+
+        assert should_notify is False, \
+            "CONTEXT_LIMIT→CONTEXT_LIMIT should NOT re-trigger"
+
+
 class TestBotExitSequence:
     """Test that bot.py callback uses the same fixed exit sequence."""
 
