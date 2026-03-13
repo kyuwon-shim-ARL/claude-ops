@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Dict, Any
 
@@ -38,18 +39,25 @@ _prev_session_timestamps: Dict[str, float] = {}  # track per-session state chang
 _state_analyzer = SessionStateAnalyzer()
 
 
+def _probe_session(name: str) -> tuple:
+    """Probe a single session's state and path (called in thread pool)."""
+    state = _state_analyzer.get_state(name)
+    path = session_manager.get_session_path(name)
+    return name, state.value, path
+
+
 def _poll_sessions() -> Dict[str, Any]:
     """Poll all tmux sessions and return state dict using SessionStateAnalyzer."""
     global _prev_session_timestamps
     sessions = session_manager.get_all_claude_sessions()
     now = time.time()
 
-    session_list = []
-    for name in sessions:
-        state = _state_analyzer.get_state(name)
-        state_val = state.value
-        path = session_manager.get_session_path(name)
+    # Parallel probe: ~1-2s instead of ~30s for 26 sessions
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(_probe_session, sessions))
 
+    session_list = []
+    for name, state_val, path in results:
         # Only update timestamp when state actually changes
         prev_ts = _prev_session_timestamps.get(name, 0)
         prev_state = None
@@ -87,11 +95,14 @@ def _poll_sessions() -> Dict[str, Any]:
 async def _background_poller():
     """Background task that polls sessions every POLL_INTERVAL seconds."""
     global _cached_state
+    logger.info("Background poller started")
     while True:
         try:
-            _cached_state = await asyncio.get_event_loop().run_in_executor(None, _poll_sessions)
+            loop = asyncio.get_running_loop()
+            _cached_state = await loop.run_in_executor(None, _poll_sessions)
+            logger.debug(f"Polled {len(_cached_state.get('sessions', []))} sessions")
         except Exception as e:
-            logger.warning(f"Poller error: {e}")
+            logger.warning(f"Poller error: {e}", exc_info=True)
         await asyncio.sleep(POLL_INTERVAL)
 
 
