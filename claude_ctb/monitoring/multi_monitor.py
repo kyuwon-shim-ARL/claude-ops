@@ -765,8 +765,14 @@ class MultiSessionMonitor:
                     self.last_state[session_name] = SessionState.UNKNOWN
 
                 self.last_notification_time[session_name] = 0
-                # Initialize wait time tracking
-                self.tracker.reset_session(session_name)
+                # Preserve existing wait time records across restarts.
+                # Only reset if the session has no completion record — this prevents
+                # bot restarts from wiping all wait time data.
+                has_record = session_name in getattr(self.tracker, 'completion_times', {})
+                if not has_record:
+                    self.tracker.reset_session(session_name)
+                else:
+                    logger.info(f"📊 Preserved completion record for {session_name}")
                 # Initialize activity tracking
                 self.last_activity_time[session_name] = time.time()
 
