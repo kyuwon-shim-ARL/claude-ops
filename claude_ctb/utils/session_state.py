@@ -303,20 +303,39 @@ class SessionStateAnalyzer:
 
         # Additional working patterns that also indicate active work
         working_patterns = [
-            "Running…",                   # Bash command execution
-            "Thinking…",                  # Claude Code thinking/analyzing
             "ctrl+b to run in background", # Background execution option
-            "Building",                   # Build process
-            "Testing",                    # Test execution
-            "Installing",                 # Package installation
-            "Processing",                 # General processing
-            "Analyzing",                  # Code analysis
+            "| thinking |",              # OMC status bar thinking indicator
+            "tokens \xb7 thought for",   # Claude Code thinking status (· = U+00B7)
         ]
 
         # Check for other working patterns in recent content
         for pattern in working_patterns:
             if pattern in recent_content:
                 logger.debug(f"🎯 WORKING: '{pattern}' detected in recent lines")
+                return True
+
+        # Structural patterns (regex-based) for Claude Code activity indicators
+        import re
+        structural_patterns = [
+            # Claude Code active tool execution: ● Running, ● Reading, ● Writing, etc.
+            r'● \w',
+            # Claude Code creative thinking messages: * Thinking…, ✶ Noodling…, · Running…, etc.
+            # Any line starting with bullet + word + … + time/tokens
+            r'[*✶·•] \w+…',
+            # Token streaming indicator: ↓ 404 tokens, ↑ 36 tokens
+            r'[↓↑] [\d.,]+k? tokens',
+            # Agent/Skill execution: Running N agents, Skill(
+            r'Running \d+ ',
+            r'Skill\(',
+            # Collapsed output during active work
+            r'ctrl\+o to expand',
+            # Retrying/overloaded (still working, just delayed)
+            r'Retrying in \d+',
+            r'attempt \d+/\d+',
+        ]
+        for pattern in structural_patterns:
+            if re.search(pattern, recent_content):
+                logger.debug(f"🎯 WORKING: structural pattern '{pattern}' matched")
                 return True
 
         # PRIORITY 2: Check for prompts (only in last 10 lines)
