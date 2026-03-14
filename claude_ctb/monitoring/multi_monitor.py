@@ -232,7 +232,14 @@ class MultiSessionMonitor:
         
         # Reset notification flag if currently working
         if current_state == SessionState.WORKING:
-            self.notification_sent[session_name] = False
+            # Only re-arm notification if enough time has passed since last notification.
+            # This prevents the repeated false alarm cycle:
+            #   WORKING → micro-gap(notify) → WORKING(re-arm) → micro-gap(notify again)
+            # By keeping notification_sent=True for 30s after a notification,
+            # micro-gaps within that window are suppressed.
+            last_notif = self.last_notification_time.get(session_name, 0)
+            if current_time - last_notif > 30:
+                self.notification_sent[session_name] = False
             if previous_state != SessionState.WORKING:
                 self.tracker.reset_session(session_name)
             return False, None

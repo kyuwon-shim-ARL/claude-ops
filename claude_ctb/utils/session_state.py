@@ -177,6 +177,11 @@ class SessionStateAnalyzer:
         # NEW: Track screen stability for quiet completion detection
         self._last_screen_hash: Dict[str, str] = {}
         self._screen_stable_count: Dict[str, int] = {}
+
+        # WORKING state hold timer: once WORKING is detected, maintain it for
+        # hold_seconds even if working indicators briefly disappear (tool transitions)
+        self._last_working_time: Dict[str, float] = {}
+        self._working_hold_seconds = 10  # Smooth out micro-gaps up to 10 seconds
     
     def get_screen_content(self, session_name: str, use_cache: bool = True) -> Optional[str]:
         """
@@ -609,12 +614,19 @@ class SessionStateAnalyzer:
         false positives from historical content. It's designed for real-time
         notification systems that need accurate current state detection.
 
+        Includes a WORKING hold timer: once WORKING is detected, the state is
+        maintained for _working_hold_seconds even if working indicators briefly
+        disappear during tool transitions (micro-gaps). This prevents false
+        completion notifications during continuous active work.
+
         Args:
             session_name: Name of the tmux session
 
         Returns:
             Current SessionState based on visible screen only
         """
+        import time as _time
+
         # 알림용은 항상 현재 화면만 사용 (캐시 없음)
         screen_content = self.get_current_screen_only(session_name)
 
@@ -635,12 +647,25 @@ class SessionStateAnalyzer:
             if self._detect_input_waiting(screen_content):
                 detected_states.append(SessionState.WAITING_INPUT)
 
-            if self._detect_working_state(screen_content):
+            is_working = self._detect_working_state(screen_content)
+            if is_working:
                 detected_states.append(SessionState.WORKING)
+                # Update hold timer
+                self._last_working_time[session_name] = _time.time()
 
-            # If no specific state detected, assume idle
+            # If no specific state detected, check hold timer before assuming idle
             if not detected_states:
-                detected_states.append(SessionState.IDLE)
+                last_working = self._last_working_time.get(session_name, 0)
+                hold_remaining = self._working_hold_seconds - (_time.time() - last_working)
+                if hold_remaining > 0:
+                    # Within hold period — maintain WORKING to smooth micro-gaps
+                    logger.debug(
+                        f"⏳ WORKING hold active for {session_name}: "
+                        f"{hold_remaining:.1f}s remaining"
+                    )
+                    detected_states.append(SessionState.WORKING)
+                else:
+                    detected_states.append(SessionState.IDLE)
 
             # Return highest priority state
             return min(detected_states, key=lambda s: self.STATE_PRIORITY[s])
