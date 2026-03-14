@@ -1963,21 +1963,59 @@ class TelegramBridge:
             subprocess.run(["tmux", "send-keys", "-t", session_name, "Escape"], timeout=5)
             await asyncio.sleep(0.3)
             subprocess.run(["tmux", "send-keys", "-t", session_name, "Enter"], timeout=5)
-            await asyncio.sleep(3)
+
+            # Wait for shell prompt instead of fixed delay
+            for _ in range(15):
+                result = subprocess.run(
+                    ["tmux", "capture-pane", "-t", session_name, "-p"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0:
+                    lines = result.stdout.strip().split('\n')
+                    if any(l.rstrip().endswith('$ ') or l.rstrip().endswith('❯') for l in lines[-5:]):
+                        break
+                await asyncio.sleep(1)
 
             # Step 2: Collect handoff context
             handoff = self._build_handoff_prompt(session_name)
 
             # Step 3: Start fresh Claude session (NO --continue)
             subprocess.run(["tmux", "send-keys", "-t", session_name, "claude --dangerously-skip-permissions", "Enter"], timeout=5)
-            await asyncio.sleep(5)
 
-            # Step 4: Send handoff prompt to the new session
+            # Wait for Claude's input prompt instead of fixed 5s delay
+            for _ in range(30):
+                result = subprocess.run(
+                    ["tmux", "capture-pane", "-t", session_name, "-p"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0:
+                    lines = result.stdout.strip().split('\n')
+                    if any(l.rstrip().endswith('❯') or l.rstrip().endswith('❯ ') for l in lines[-5:]):
+                        break
+                await asyncio.sleep(1)
+
+            # Step 4: Send handoff prompt with robust Enter delivery
             if handoff:
                 # Truncate if too long (keep under 4000 chars to avoid token waste)
                 if len(handoff) > 4000:
                     handoff = handoff[:3900] + "\n\n[핸드오프 프롬프트가 잘렸습니다. 상태 파일을 직접 확인해주세요.]"
-                subprocess.run(["tmux", "send-keys", "-t", session_name, handoff, "Enter"], timeout=10)
+                # Send text first, then Enter separately to prevent Enter loss
+                subprocess.run(["tmux", "send-keys", "-t", session_name, handoff], timeout=10)
+                await asyncio.sleep(0.5)
+                subprocess.run(["tmux", "send-keys", "-t", session_name, "Enter"], timeout=5)
+                await asyncio.sleep(1)
+
+                # Verify: if Claude prompt still visible, Enter was lost — retry
+                result = subprocess.run(
+                    ["tmux", "capture-pane", "-t", session_name, "-p"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0:
+                    last_lines = result.stdout.strip().split('\n')[-5:]
+                    if any(l.rstrip().endswith('❯') or l.rstrip().endswith('❯ ') for l in last_lines):
+                        logger.warning(f"⚠️ {session_name}: Enter may have been lost, retrying...")
+                        await asyncio.sleep(1)
+                        subprocess.run(["tmux", "send-keys", "-t", session_name, "Enter"], timeout=5)
 
             await query.edit_message_text(
                 f"✅ `{session_display}` 새 세션으로 재시작 완료!\n\n"

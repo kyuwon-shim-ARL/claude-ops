@@ -463,12 +463,47 @@ class MultiSessionMonitor:
         except Exception as e:
             logger.error(f"Error sending context limit notification for {session_name}: {e}")
 
+    def _wait_for_prompt(self, session_name: str, timeout: int = 30, prompt_chars: tuple = ('❯ ', '$ ')) -> bool:
+        """Wait for a shell/Claude prompt to appear in the tmux session.
+
+        Polls the last 5 lines of the tmux pane until a prompt character
+        is found or timeout is reached.
+
+        Args:
+            session_name: The tmux session to poll
+            timeout: Maximum seconds to wait
+            prompt_chars: Tuple of prompt endings to look for
+
+        Returns:
+            True if prompt detected, False if timeout
+        """
+        start = time.time()
+        while time.time() - start < timeout:
+            try:
+                result = subprocess.run(
+                    ["tmux", "capture-pane", "-t", session_name, "-p"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0:
+                    lines = result.stdout.strip().split('\n')
+                    for line in lines[-5:]:
+                        if any(line.rstrip().endswith(p.rstrip()) for p in prompt_chars):
+                            return True
+            except Exception:
+                pass
+            time.sleep(1)
+        return False
+
     def _auto_restart_session(self, session_name: str) -> bool:
         """Auto-restart a Claude session that hit context limit.
 
         Exits the current session, clears the terminal (to prevent re-detection
         from old scroll buffer), collects handoff context, and starts
         a fresh Claude session with the handoff prompt.
+
+        Uses prompt-polling instead of fixed delays to ensure each step
+        completes before proceeding. Sends Enter separately from handoff
+        text with verification retry.
 
         Args:
             session_name: The tmux session to restart
@@ -489,7 +524,10 @@ class MultiSessionMonitor:
             subprocess.run(["tmux", "send-keys", "-t", session_name, "Escape"], timeout=5)
             time.sleep(0.3)
             subprocess.run(["tmux", "send-keys", "-t", session_name, "Enter"], timeout=5)
-            time.sleep(3)
+
+            # Wait for shell prompt instead of fixed 3s delay
+            if not self._wait_for_prompt(session_name, timeout=15, prompt_chars=('❯ ', '$ ')):
+                logger.warning(f"⚠️ {session_name}: shell prompt not detected after /exit, proceeding anyway")
 
             # Step 2: Collect handoff context BEFORE clearing screen
             handoff = self._build_handoff_prompt(session_name)
@@ -501,13 +539,38 @@ class MultiSessionMonitor:
 
             # Step 4: Start fresh Claude session (NO --continue)
             subprocess.run(["tmux", "send-keys", "-t", session_name, "claude --dangerously-skip-permissions", "Enter"], timeout=5)
-            time.sleep(5)
 
-            # Step 5: Send handoff prompt
+            # Wait for Claude's input prompt (❯) instead of fixed 5s delay
+            if not self._wait_for_prompt(session_name, timeout=30, prompt_chars=('❯ ',)):
+                logger.warning(f"⚠️ {session_name}: Claude prompt not detected after startup, proceeding anyway")
+
+            # Step 5: Send handoff prompt with robust Enter delivery
             if handoff:
                 if len(handoff) > 4000:
                     handoff = handoff[:3900] + "\n\n[핸드오프 프롬프트가 잘렸습니다. 상태 파일을 직접 확인해주세요.]"
-                subprocess.run(["tmux", "send-keys", "-t", session_name, handoff, "Enter"], timeout=10)
+
+                # Send text first, then Enter separately to prevent Enter loss
+                subprocess.run(["tmux", "send-keys", "-t", session_name, handoff], timeout=10)
+                time.sleep(0.5)
+                subprocess.run(["tmux", "send-keys", "-t", session_name, "Enter"], timeout=5)
+                time.sleep(1)
+
+                # Verify: check if Claude started working (not still showing prompt)
+                # If prompt still visible, Enter was lost — retry
+                result = subprocess.run(
+                    ["tmux", "capture-pane", "-t", session_name, "-p"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0:
+                    last_lines = result.stdout.strip().split('\n')[-5:]
+                    still_prompting = any(
+                        line.rstrip().endswith('❯') or line.rstrip().endswith('❯ ')
+                        for line in last_lines
+                    )
+                    if still_prompting:
+                        logger.warning(f"⚠️ {session_name}: Enter may have been lost, retrying...")
+                        time.sleep(1)
+                        subprocess.run(["tmux", "send-keys", "-t", session_name, "Enter"], timeout=5)
 
             logger.info(f"✅ Auto-restart completed for {session_name}")
 
