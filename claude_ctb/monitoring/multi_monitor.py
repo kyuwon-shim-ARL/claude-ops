@@ -325,20 +325,23 @@ class MultiSessionMonitor:
                     should_notify = True
                     notification_reason = "Completion message detected"
         
+        # EMIT COMPLETION EVENT unconditionally on state transition
+        # This MUST be outside the should_notify guard because:
+        # 1. Screen stability may suppress notification for 1-2 poll cycles
+        # 2. But completion_time must be recorded immediately for wait time tracking
+        # 3. previous_state is consumed (updated to current) after this method returns
+        if previous_state == SessionState.WORKING and current_state != SessionState.WORKING:
+            logger.info(f"🎯 Emitting completion event for {session_name} (WORKING → {current_state})")
+            self.event_bus.emit(CompletionEvent(
+                session_name=session_name,
+                event_type=CompletionEventType.STATE_TRANSITION,
+                timestamp=current_time,
+                previous_state=previous_state.value,
+                new_state=current_state.value,
+                metadata={'reason': notification_reason or 'state_transition'}
+            ))
+
         if should_notify:
-            # EMIT COMPLETION EVENT (decoupled from notification)
-            # Event-based system ensures completion is always recorded
-            if previous_state == SessionState.WORKING and current_state != SessionState.WORKING:
-                logger.info(f"🎯 Emitting completion event for {session_name} (WORKING → {current_state})")
-                self.event_bus.emit(CompletionEvent(
-                    session_name=session_name,
-                    event_type=CompletionEventType.STATE_TRANSITION,
-                    timestamp=current_time,
-                    previous_state=previous_state.value,
-                    new_state=current_state.value,
-                    metadata={'reason': notification_reason}
-                ))
-            
             self.notification_sent[session_name] = True
             self.last_notification_time[session_name] = current_time
             logger.info(f"📢 Notification: {session_name} - {notification_reason}")
@@ -816,6 +819,9 @@ class MultiSessionMonitor:
                         logger.debug(f"📺 Screen changed in {session_name}")
                     
                     
+                    # Snapshot state BEFORE notification check (which updates last_state)
+                    prev_state_snapshot = self.last_state.get(session_name)
+
                     # Check if we should send completion notification (state transition)
                     should_notify, task_completion = self.should_send_completion_notification(session_name)
                     if should_notify:
@@ -835,22 +841,22 @@ class MultiSessionMonitor:
                         )
                     
                     # Enhanced state change logging with debugger
-                    if session_name in self.last_state:
-                        prev_state = self.last_state[session_name]
-                        curr_state = self.get_session_state(session_name)
-                        if prev_state != curr_state:
-                            logger.info(f"🔄 {session_name}: {prev_state} → {curr_state}")
-                            
-                            # Log to debugger for analysis
-                            self.debugger.log_state_change(
-                                session_name, prev_state, curr_state,
-                                "Monitor loop state change"
-                            )
-                            
-                            # Update state in tracker for auto-completion detection
-                            if hasattr(self.tracker, 'mark_state_transition'):
-                                state_name = 'working' if curr_state == SessionState.WORKING else 'waiting'
-                                self.tracker.mark_state_transition(session_name, state_name)
+                    # Use prev_state_snapshot (captured BEFORE should_send_completion_notification
+                    # updates self.last_state) to detect actual state transitions
+                    curr_state_now = self.last_state.get(session_name)
+                    if prev_state_snapshot is not None and prev_state_snapshot != curr_state_now:
+                        logger.info(f"🔄 {session_name}: {prev_state_snapshot} → {curr_state_now}")
+
+                        # Log to debugger for analysis
+                        self.debugger.log_state_change(
+                            session_name, prev_state_snapshot, curr_state_now,
+                            "Monitor loop state change"
+                        )
+
+                        # Update state in tracker for auto-completion detection
+                        if hasattr(self.tracker, 'mark_state_transition'):
+                            state_name = 'working' if curr_state_now == SessionState.WORKING else 'waiting'
+                            self.tracker.mark_state_transition(session_name, state_name)
                     
                     # e006: Update shared session state for web dashboard
                     current_state_val = self.last_state.get(session_name, SessionState.UNKNOWN)
