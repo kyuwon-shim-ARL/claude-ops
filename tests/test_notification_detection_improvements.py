@@ -95,19 +95,22 @@ class TestCompletionMessageDetection:
     """Test detection of explicit completion messages"""
     
     def test_detect_success_messages(self):
-        """Test various success message patterns"""
+        """Test various success message patterns
+
+        Note: completion_patterns were narrowed to avoid false alarms from
+        Claude's working output (e.g., "✓ Edit applied", "Successfully wrote").
+        Only specific, unambiguous patterns are detected.
+        """
         analyzer = SessionStateAnalyzer()
-        
+
         test_cases = [
             "Build succeeded in 5.2s",
             "Tests passed: 42/42",
             "✅ All tests passed",
-            "Successfully completed deployment",
-            "Task finished",
             "Done!",
             "Process completed with 0 errors"
         ]
-        
+
         for message in test_cases:
             screen = f"Some output\n{message}\nuser@host$ "
             assert analyzer.has_completion_indicators(screen) == True, f"Failed to detect: {message}"

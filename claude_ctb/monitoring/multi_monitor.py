@@ -68,6 +68,10 @@ class MultiSessionMonitor:
         # Activity tracking for proper state management
         self.last_activity_time: Dict[str, float] = {}  # session -> last_activity_timestamp
 
+        # Screen change tracking for race condition prevention
+        # Tracks when screen last changed to detect tool-transition micro-gaps
+        self.last_screen_change_time: Dict[str, float] = {}  # session -> timestamp
+
         # Context limit auto-restart cooldown (prevent re-detection from residual scroll buffer)
         self._context_limit_restart_time: Dict[str, float] = {}  # session -> restart_timestamp
 
@@ -195,7 +199,9 @@ class MultiSessionMonitor:
             # Screen changes happen AFTER work completion too (output being displayed)
             # Wait time should only be reset when WORKING state is detected (line 223)
             # Reset activity tracking only
-            self.last_activity_time[session_name] = time.time()
+            now = time.time()
+            self.last_activity_time[session_name] = now
+            self.last_screen_change_time[session_name] = now
             return True
             
         return False
@@ -267,6 +273,15 @@ class MultiSessionMonitor:
         if screen_content:
             task_completion = task_detector.detect_completion(screen_content)
 
+        # RACE CONDITION GUARD: If screen was changing very recently,
+        # we might be in a tool-transition micro-gap where "esc to interrupt"
+        # briefly disappeared. Require screen stability before notifying.
+        last_change = self.last_screen_change_time.get(session_name, 0)
+        screen_stable_duration = current_time - last_change if last_change else float('inf')
+        # Require at least 2 poll intervals (6s) of screen stability
+        # to avoid false alarms during rapid tool transitions
+        min_stability = self.config.check_interval * 2  # default: 6 seconds
+
         # Reasons for notification
         notification_reason = ""
         should_notify = False
@@ -284,8 +299,15 @@ class MultiSessionMonitor:
                     return False, None
         # 2. Original triggers: WORKING->completed or any->WAITING_INPUT
         elif previous_state == SessionState.WORKING and current_state != SessionState.WORKING:
-            should_notify = True
-            notification_reason = f"Work completed (WORKING → {current_state})"
+            # RACE CONDITION FIX: During tool transitions, Claude briefly shows no
+            # working indicators. Require screen stability to confirm real completion.
+            if screen_stable_duration >= min_stability:
+                should_notify = True
+                notification_reason = f"Work completed (WORKING → {current_state})"
+            else:
+                logger.debug(f"Suppressed notification for {session_name}: "
+                           f"screen changed {screen_stable_duration:.1f}s ago "
+                           f"(need {min_stability}s stability)")
         elif current_state == SessionState.WAITING_INPUT and previous_state != SessionState.WAITING_INPUT:
             # BUGFIX: Ignore UNKNOWN -> WAITING_INPUT transitions (restart false positive)
             if previous_state != SessionState.UNKNOWN:
@@ -298,8 +320,8 @@ class MultiSessionMonitor:
         # 4. Completion message detection
         elif current_state == SessionState.IDLE:
             if screen_content and self.state_analyzer.has_completion_indicators(screen_content):
-                # Check if we haven't notified recently
-                if current_time - last_notification_time > 10:
+                # Require screen stability AND cooldown to prevent false alarms
+                if current_time - last_notification_time > 10 and screen_stable_duration >= min_stability:
                     should_notify = True
                     notification_reason = "Completion message detected"
         

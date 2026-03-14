@@ -134,25 +134,20 @@ class SessionStateAnalyzer:
             "(<=",                        # Character limit hint like "(<=5 words)"
         ]
         
-        # NEW: Completion message patterns
+        # Completion message patterns
+        # IMPORTANT: These must be specific enough to avoid matching Claude's
+        # working output (e.g., "✓ Edit applied", "Successfully wrote file").
+        # Overly broad patterns like "✓", "done.", "Successfully" cause false alarms.
         self.completion_patterns = [
-            "Successfully",
-            "successfully",
-            "Completed",
-            "completed", 
-            "Done!",
-            "done.",
-            "Finished",
-            "finished",
-            "✓",
-            "✅",
             "Build succeeded",
             "Tests passed",
             "All tests passed",
             "0 errors",
             "0 failures",
-            r"took \d+\.\d+s",      # Execution time pattern
-            r"in \d+\.\d+ seconds",  # Time duration pattern
+            "Done!",                    # Standalone "Done!" is intentional
+            "✅ All",                   # "✅ All tests passed" etc (not bare ✅)
+            r"took \d+\.\d+s",         # Execution time pattern
+            r"in \d+\.\d+ seconds",    # Time duration pattern
         ]
         
         # NEW: Command prompt patterns (regex)
@@ -324,6 +319,13 @@ class SessionStateAnalyzer:
             r'[*✶·•] \w+…',
             # Token streaming indicator: ↓ 404 tokens, ↑ 36 tokens
             r'[↓↑] [\d.,]+k? tokens',
+            # Active progress: time counter with tokens on status bar
+            # Matches "2m 13s · 15.2k tokens", "45s · 1.2k tokens" etc.
+            # This catches corrupted screens where "esc to interrupt" is garbled
+            # but the time/token counter line remains visible
+            r'\d+s\s+·\s+[\d.,]+k?\s+tokens',
+            # Active time display: "Xm Ys" format (specific to working status bar)
+            r'\d+m\s+\d+s',
             # Agent/Skill execution: Running N agents, Skill(
             r'Running \d+ ',
             r'Skill\(',
@@ -757,10 +759,11 @@ class SessionStateAnalyzer:
             return False
 
         # CRITICAL: First check if work is still running
-        # Don't detect quiet completion if working indicators are present
-        for pattern in self.working_patterns:
-            if pattern in current_screen:
-                return False  # Still working, not a quiet completion!
+        # Use full working detection (including structural regex patterns)
+        # to catch time/token displays and other indicators that the simple
+        # string-based self.working_patterns would miss
+        if self._detect_working_state(current_screen):
+            return False  # Still working, not a quiet completion!
 
         # NEW: Exclude UI prompts that are NOT command completions
         ui_prompt_patterns = [
@@ -834,18 +837,28 @@ class SessionStateAnalyzer:
     def has_completion_indicators(self, screen_content: str) -> bool:
         """
         Check if screen has explicit completion indicators
-        
+
+        IMPORTANT: Returns False if working state patterns are also detected,
+        to handle tmux screen corruption where stale time/token displays
+        coexist with completion text.
+
         Args:
             screen_content: Screen content to check
-            
+
         Returns:
-            bool: True if completion indicators found
+            bool: True if completion indicators found AND no working indicators
         """
         import re
-        
+
         if not screen_content:
             return False
-        
+
+        # GUARD: If working state detected, completion indicators are likely
+        # artifacts from Claude's output (e.g., "✓ Edit applied") or stale
+        # screen content from tmux corruption
+        if self._detect_working_state(screen_content):
+            return False
+
         # Check for completion patterns
         for pattern in self.completion_patterns:
             if pattern.startswith('r"'):
