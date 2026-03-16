@@ -673,25 +673,38 @@ class TelegramBridge:
                         
                         # Send each part as a separate message with session info
                         session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+                        total_lines = len(filtered_lines)
+                        # Track which line range each part covers
+                        part_line_ranges = []
+                        line_cursor = 0
+                        for part in parts:
+                            part_count = part.count('\n')
+                            start_from_end = total_lines - line_cursor
+                            end_from_end = total_lines - line_cursor - part_count + 1
+                            part_line_ranges.append((end_from_end, start_from_end))
+                            line_cursor += part_count
+
                         for i, part in enumerate(parts):
+                            range_start, range_end = part_line_ranges[i]
                             if i == 0:
                                 header = f"📺 **Claude 화면 로그** [{target_session}]\n\n"
                                 header += f"📁 **프로젝트**: `{session_display}`\n"
                                 header += f"🎯 **세션**: `{target_session}`\n"
-                                header += f"📏 **라인 수**: {len(filtered_lines)}줄 - Part {i+1}/{len(parts)}\n\n"
+                                header += f"📏 **라인**: 끝에서 -{range_end}~-{range_start} ({total_lines}줄 중) - Part {i+1}/{len(parts)}\n\n"
                                 header += "**로그 내용:**\n```\n"
                             else:
-                                header = f"📺 **Part {i+1}/{len(parts)}** [{target_session}]\n```\n"
+                                header = f"📺 **Part {i+1}/{len(parts)}** 끝에서 -{range_end}~-{range_start} [{target_session}]\n```\n"
                             # Wrap log content in code block to prevent Markdown parsing errors
                             message = f"{header}{part.strip()}\n```"
                             await update.message.reply_text(message, parse_mode="Markdown")
                     else:
                         # Use Markdown for proper line break formatting with session info
                         session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+                        total_lines = len(filtered_lines)
                         header = f"📺 **Claude 화면 로그** [{target_session}]\n\n"
                         header += f"📁 **프로젝트**: `{session_display}`\n"
                         header += f"🎯 **세션**: `{target_session}`\n"
-                        header += f"📏 **라인 수**: {len(filtered_lines)}줄\n\n"
+                        header += f"📏 **라인**: 끝에서 -{total_lines}~-1 ({total_lines}줄)\n\n"
                         header += "**로그 내용:**\n```\n"
                         # Wrap log content in code block to prevent Markdown parsing errors
                         message = f"{header}{screen_text}\n```"
