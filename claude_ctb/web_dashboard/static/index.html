@@ -115,9 +115,14 @@
 
       emptyState.classList.add('hidden');
 
-      // Sort: working first, then waiting, then others
+      // Sort: state priority first, then most recently updated within each state
       const order = { working: 0, waiting: 1, context_limit: 2, error: 3, idle: 4, unknown: 5 };
-      sessions.sort((a, b) => (order[a.state] ?? 9) - (order[b.state] ?? 9));
+      sessions.sort((a, b) => {
+        const stateDiff = (order[a.state] ?? 9) - (order[b.state] ?? 9);
+        if (stateDiff !== 0) return stateDiff;
+        // Within same state: most recently updated first
+        return (b.updated_at || 0) - (a.updated_at || 0);
+      });
 
       // Replace grid content (keep empty state node)
       const cards = sessions.map(renderCard).join('');

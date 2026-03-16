@@ -272,18 +272,22 @@ class SessionStateAnalyzer:
         IMPROVED: Check for RECENT work indicators only
 
         Priority order:
-        1. Check last 25 lines for 'esc to interrupt' → WORKING
-        2. Check for prompts in last 10 lines → IDLE
-        3. Check for other working patterns → WORKING
+        1. Check last 25 lines for 'esc to interrupt' → WORKING (definitive)
+        2. Check working patterns on FILTERED content (OMC bars removed) → WORKING
+           This runs BEFORE prompt detection because OMC always renders ❯ cursor
+           below working content, and bottom-up prompt scan would hit it first.
+        3. Check for prompts in last 10 lines → IDLE
+        4. Default → not working
 
-        This prevents false positives from old 'esc to interrupt' text
-        that remains on screen after work completes.
-
-        Note: Increased from 15 to 25 lines to handle scrolling output
-        when large amounts of content are generated (e.g., file edits, logs).
+        This prevents false positives from:
+        - Old 'esc to interrupt' text that remains on screen
+        - OMC status bar lines (session:Xm, ctx:Y%, etc.)
+        - Past output bullets (● 완료, ● 보고 etc.) in scrollback
         """
         if not screen_content:
             return False
+
+        import re
 
         lines = screen_content.split('\n')
 
@@ -293,7 +297,7 @@ class SessionStateAnalyzer:
         recent_lines = lines[-25:]  # Last 25 lines (was 15, increased for scrolling)
         recent_content = '\n'.join(recent_lines)
 
-        # PRIORITY 1: Check for interrupt indicators in RECENT content
+        # PRIORITY 1: Check for interrupt indicators in RECENT content (definitive)
         # Claude Code shows either 'esc to interrupt' or 'ctrl+c to interrupt' when working
         interrupt_patterns = ["esc to interrupt", "ctrl+c to interrupt"]
         for pattern in interrupt_patterns:
@@ -301,51 +305,99 @@ class SessionStateAnalyzer:
                 logger.debug(f"🎯 WORKING: '{pattern}' detected in recent lines")
                 return True
 
-        # Additional working patterns that also indicate active work
-        working_patterns = [
-            "ctrl+b to run in background", # Background execution option
-            "| thinking |",              # OMC status bar thinking indicator
-            "tokens \xb7 thought for",   # Claude Code thinking status (· = U+00B7)
-        ]
+        # Build FILTERED content early: remove OMC status bar lines and separators
+        # This is used by PRIORITY 2 (working patterns) and prevents OMC artifacts
+        # from interfering with pattern matching
+        filtered_recent = []
+        for line in recent_lines:
+            # Skip OMC status bar lines
+            if any(marker in line for marker in ['[OMC#', '⏵⏵', 'bypass permissions']):
+                continue
+            # Skip separator lines
+            stripped = line.strip()
+            if stripped and stripped.startswith('─') and stripped.endswith('─'):
+                continue
+            filtered_recent.append(line)
+        filtered_content = '\n'.join(filtered_recent)
 
-        # Check for other working patterns in recent content
+        # PRIORITY 2: Working patterns on FILTERED content (before prompt check)
+        # OMC layout places ❯ cursor directly below working content (3 lines gap).
+        # If we check prompts first, ❯ is detected as idle before we see spinners/tokens above it.
+        # By checking working patterns on filtered content first, we catch active work correctly.
+        #
+        # KEY: Find the ❯ prompt position, then check if the last non-blank
+        # content line before ❯ is a working indicator or output text.
+        # If it's output (⎿, regular text), any working patterns above are stale.
+        # If no prompt found (vanilla Claude), check last 8 filtered lines.
+        prompt_idx = None
+        for i in range(len(filtered_recent) - 1, -1, -1):
+            s = filtered_recent[i].strip()
+            if s in ['❯', '❯\xa0', '❯ ']:
+                prompt_idx = i
+                break
+
+        if prompt_idx is not None:
+            # Take up to 6 lines before prompt as candidates
+            check_lines = filtered_recent[max(0, prompt_idx - 6):prompt_idx]
+            # Guard: if output indicator (⎿) appears in these lines, it means
+            # Claude produced output after working → any patterns above ⎿ are stale.
+            # Only keep lines BELOW the last ⎿ line.
+            last_output_idx = None
+            for i in range(len(check_lines) - 1, -1, -1):
+                if '⎿' in check_lines[i]:
+                    last_output_idx = i
+                    break
+            if last_output_idx is not None:
+                # Only check lines after the last output (between output and prompt)
+                check_lines = check_lines[last_output_idx + 1:]
+        else:
+            # No prompt found (vanilla Claude Code without OMC), check last 8 lines
+            check_lines = filtered_recent[-8:]
+        filtered_narrow = '\n'.join(check_lines)
+
+        # 2a: String-based working patterns (checked on narrow filtered window)
+        working_patterns = [
+            "ctrl+b to run in background",  # Background execution option
+            "tokens \xb7 thought for",      # Claude Code thinking status (· = U+00B7)
+            "background tasks still running",  # Main work done but background tasks active
+        ]
+        # Note: "| thinking |" is NOT checked here because it appears in OMC status bar
+        # (e.g., "[OMC#4.5.1] | thinking | session:11m") and would false-positive on IDLE sessions.
+        # It's only valid as a working signal if found in filtered content (OMC bars removed).
+        if "| thinking |" in filtered_narrow:
+            logger.debug("🎯 WORKING: '| thinking |' detected in filtered content")
+            return True
+
         for pattern in working_patterns:
-            if pattern in recent_content:
-                logger.debug(f"🎯 WORKING: '{pattern}' detected in recent lines")
+            if pattern in filtered_narrow:
+                logger.debug(f"🎯 WORKING: '{pattern}' detected in filtered content")
                 return True
 
-        # Structural patterns (regex-based) for Claude Code activity indicators
-        import re
+        # 2b: Structural regex patterns on narrow filtered content
         structural_patterns = [
             # Claude Code active tool execution: ● Running, ● Reading, ● Writing, etc.
-            r'● \w',
-            # Claude Code creative thinking messages: * Thinking…, ✶ Noodling…, · Running…, etc.
-            # Any line starting with bullet + word + … + time/tokens
-            r'[*✶·•] \w+…',
+            r'^\s*● (?:Running|Reading|Writing|Editing|Searching|Calling|Fetching|Executing)',
             # Token streaming indicator: ↓ 404 tokens, ↑ 36 tokens
             r'[↓↑] [\d.,]+k? tokens',
             # Active progress: time counter with tokens on status bar
-            # Matches "2m 13s · 15.2k tokens", "45s · 1.2k tokens" etc.
-            # This catches corrupted screens where "esc to interrupt" is garbled
-            # but the time/token counter line remains visible
             r'\d+s\s+·\s+[\d.,]+k?\s+tokens',
-            # Active time display: "Xm Ys" format (specific to working status bar)
-            r'\d+m\s+\d+s',
+            # Active time display with minutes
+            r'\d+m\s+\d+s\s+·\s+[\d.,]+k?\s+tokens',
             # Agent/Skill execution: Running N agents, Skill(
             r'Running \d+ ',
             r'Skill\(',
-            # Collapsed output during active work
-            r'ctrl\+o to expand',
             # Retrying/overloaded (still working, just delayed)
             r'Retrying in \d+',
             r'attempt \d+/\d+',
         ]
         for pattern in structural_patterns:
-            if re.search(pattern, recent_content):
+            if re.search(pattern, filtered_narrow, re.MULTILINE):
                 logger.debug(f"🎯 WORKING: structural pattern '{pattern}' matched")
                 return True
 
-        # PRIORITY 2: Check for prompts (only in last 10 lines)
+        # PRIORITY 3: Check for prompts → IDLE
+        # Only reached if no working patterns found on filtered content
+        # Check last 10 lines bottom-up
         for i in range(len(lines) - 1, max(len(lines) - 10, -1), -1):
             line = lines[i]
             stripped = line.strip()
@@ -353,10 +405,21 @@ class SessionStateAnalyzer:
             if not stripped:
                 continue
 
+            # Skip OMC status bar lines
+            if any(marker in line for marker in ['[OMC#', '⏵⏵', 'bypass permissions']):
+                continue
+
+            # Skip separator lines (────)
+            if stripped.startswith('─') and stripped.endswith('─'):
+                continue
+
             # Check for various prompt patterns
-            if stripped in ['>', '│ >'] or line.endswith(('$ ', '> ', '❯ ')):
-                logger.debug("⏸️ IDLE: Prompt detected, no recent working patterns")
+            if stripped in ['>', '❯', '│ >', '│ ❯'] or line.endswith(('$ ', '> ', '❯ ')):
+                logger.debug("⏸️ IDLE: Prompt detected, no working patterns found")
                 return False
+
+            # Found a non-empty, non-status-bar line — stop looking for prompts
+            break
 
         # No recent working patterns and no clear prompt
         return False

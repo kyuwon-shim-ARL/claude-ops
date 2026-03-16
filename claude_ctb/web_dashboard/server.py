@@ -38,10 +38,29 @@ _cached_state: Dict[str, Any] = {"version": 1, "updated_at": 0, "sessions": [], 
 _prev_session_timestamps: Dict[str, float] = {}  # track per-session state change time
 _state_analyzer = SessionStateAnalyzer()
 
+# Hold timer: keep WORKING state for a few seconds after indicators disappear
+# This prevents flickering during tool transitions (e.g., between Read → Edit)
+_working_hold: Dict[str, float] = {}  # session_name → last_seen_working_time
+_WORKING_HOLD_SECONDS = 8  # hold WORKING for 8s after last working indicator
+
 
 def _probe_session(name: str) -> tuple:
     """Probe a single session's state and path (called in thread pool)."""
+    from ..utils.session_state import SessionState
     state = _state_analyzer.get_state(name)
+    now = time.time()
+
+    # Hold timer: if state was recently WORKING, keep it WORKING through brief gaps
+    if state == SessionState.WORKING:
+        _working_hold[name] = now
+    elif state == SessionState.IDLE and name in _working_hold:
+        elapsed = now - _working_hold[name]
+        if elapsed < _WORKING_HOLD_SECONDS:
+            logger.debug(f"⏳ Hold WORKING for {name} ({elapsed:.1f}s < {_WORKING_HOLD_SECONDS}s)")
+            state = SessionState.WORKING
+        else:
+            del _working_hold[name]
+
     path = session_manager.get_session_path(name)
     return name, state.value, path
 
