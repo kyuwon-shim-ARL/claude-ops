@@ -203,9 +203,30 @@ async def health():
     }
 
 
+def _kill_previous_on_port(port: int):
+    """Kill any previous process occupying the port to avoid EADDRINUSE."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["lsof", "-ti", f":{port}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        pids = result.stdout.strip().split('\n')
+        my_pid = os.getpid()
+        for pid_str in pids:
+            if pid_str and pid_str.isdigit():
+                pid = int(pid_str)
+                if pid != my_pid:
+                    os.kill(pid, 9)
+                    logger.info(f"Killed previous dashboard process (PID {pid}) on port {port}")
+    except Exception:
+        pass  # lsof not found or no process — fine
+
+
 def run_server(host: str = BIND_HOST, port: int = BIND_PORT):
-    """Run the dashboard server (blocking)."""
+    """Run the dashboard server (blocking). Auto-kills previous instance."""
     import uvicorn
+    _kill_previous_on_port(port)
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 
