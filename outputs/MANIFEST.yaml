@@ -1,5 +1,5 @@
 version: 1
-updated: "2026-03-13T23:55:00Z"
+updated: "2026-03-17T14:30:00Z"
 scan_paths:
   - outputs/
 experiments:
@@ -85,3 +85,19 @@ experiments:
       - "JSON 스키마 정의 + 3초 갱신"
       - "multi_monitor.py 1줄 통합"
       - "기존 Telegram 알림 영향 없음 테스트"
+  e007:
+    path: outputs/e007/
+    script: null
+    params: {}
+    outputs: []
+    status: experimental
+    description: "CTB State Detection Hardening — ⎿ Guard Fix + 회귀테스트 체계화"
+    issue: 8
+    branch: null
+    tasks:
+      - "parent-line fix 검증 및 테스트 지속화 (4개 인라인 → test suite)"
+      - "기존 깨진 테스트 5개 수정 (25-line recency window 반영)"
+      - "pytest 인프라 정비 (pythonpath, asyncio_mode, conftest.py)"
+      - "golden fixture 체계 구축 (실제 tmux screen snapshot 기반)"
+      - "패턴 커버리지 개선: ERROR guard, Compacting, dead code 정리"
+      - "tmux line-wrap 대응 및 edge case 테스트 추가"

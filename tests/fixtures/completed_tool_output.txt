@@ -1,0 +1,6 @@
+● Bash(python run_analysis.py)
+  ⎿  Results: AUC=0.88, accuracy=0.92
+     Process completed successfully.
+     Total time: 45.2s
+
+❯

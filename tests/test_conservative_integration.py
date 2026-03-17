@@ -72,17 +72,15 @@ class TestConservativeSystemIntegration:
     
     def test_backward_compatibility(self):
         """기존 코드와의 호환성"""
-        
+
         analyzer = SessionStateAnalyzer()
-        
+
         # 기존 메서드들이 여전히 동작
         assert hasattr(analyzer, '_detect_working_state')
-        assert hasattr(analyzer, '_detect_working_state_original')
         assert hasattr(analyzer, 'get_state')
-        
-        # 원본 메서드도 여전히 호출 가능
-        original_result = analyzer._detect_working_state_original("Some content")
-        assert isinstance(original_result, bool)
+
+        # _detect_working_state_original removed in e007 (dead code)
+        assert not hasattr(analyzer, '_detect_working_state_original')
     
     def test_configuration_flexibility(self):
         """설정 변경 가능성 테스트"""

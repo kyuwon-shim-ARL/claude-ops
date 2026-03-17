@@ -28,3 +28,11 @@
 - **Security**: list-form subprocess로 shell injection 방지
 - **Architect**: APPROVED
 - **Status**: done
+
+## 2026-03-17: e007 시작
+- **목표**: CTB State Detection Hardening — ⎿ Guard Fix + 회귀테스트 체계화
+- **Issue**: #8
+- **Branch**: main
+- **Milestone**: none
+- **Status**: started
+- **배경**: antibiotic_platform 세션이 thinking 중인데 dashboard에서 idle로 오감지. ⎿ output guard가 parent line의 working 지표를 잘라냄. parent-line fix 적용 후 테스트 인프라 전반 정비 필요.

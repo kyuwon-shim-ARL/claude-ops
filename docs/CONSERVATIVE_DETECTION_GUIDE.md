@@ -193,7 +193,7 @@ A: `/detection_improve`로 개선 제안 확인 후 패턴 추가 고려
 A: 프롬프트 패턴 확장 또는 신뢰도 임계값 상향 조정
 
 ### Q: 이전 방식으로 돌아가고 싶어요
-A: `session_state.py`에서 `_detect_working_state_original()` 메서드 활성화
+A: `_detect_working_state_original()`은 e007에서 제거됨 (dead code). 현재 `_detect_working_state()`가 priority-based 감지를 수행하며, git history에서 이전 버전을 복원할 수 있음.
 
 ## 🏁 결론
 

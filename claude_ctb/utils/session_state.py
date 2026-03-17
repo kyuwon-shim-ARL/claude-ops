@@ -90,21 +90,22 @@ class SessionStateAnalyzer:
     }
     
     def __init__(self):
-        # Patterns indicating active work in progress
+        # NOTE: These patterns are used ONLY by _detect_input_waiting() as a
+        # working-state guard (lines 534-550) and get_state_details() for debug
+        # output. The primary detection logic in _detect_working_state() uses
+        # its own priority-based pattern cascade and does NOT read this list.
         self.working_patterns = [
-            "esc to interrupt",           # Standard working indicator - 가장 신뢰할 수 있는 패턴
-            "Running…",                   # Bash command execution
-            "Thinking…",                  # Claude Code thinking/analyzing
-            "ctrl+b to run in background", # Background execution option
-            "Building",                   # Build process
-            "Testing",                    # Test execution
-            "Installing",                 # Package installation
-            "Downloading",                # Download in progress
-            "Compiling",                  # Compilation process
-            "Processing",                 # General processing
-            "Analyzing",                  # Code analysis
-            "Searching",                  # Search operations
-            "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"  # Spinner characters
+            "esc to interrupt",
+            "ctrl+c to interrupt",
+            "ctrl+b to run in background",
+            "Thinking…",
+            "Running…",
+            "Building",
+            "Testing",
+            "Installing",
+            "Processing",
+            "Analyzing",
+            "Compacting context",
         ]
         
         # Patterns indicating user input is required
@@ -298,12 +299,21 @@ class SessionStateAnalyzer:
         recent_content = '\n'.join(recent_lines)
 
         # PRIORITY 1: Check for interrupt indicators in RECENT content (definitive)
-        # Claude Code shows either 'esc to interrupt' or 'ctrl+c to interrupt' when working
+        # Claude Code shows either 'esc to interrupt' or 'ctrl+c to interrupt' when working.
+        # Also check with adjacent lines joined to handle tmux line-wrap where the
+        # pattern might be split across two lines (e.g., "esc to inter" + "rupt").
         interrupt_patterns = ["esc to interrupt", "ctrl+c to interrupt"]
         for pattern in interrupt_patterns:
             if pattern in recent_content:
                 logger.debug(f"🎯 WORKING: '{pattern}' detected in recent lines")
                 return True
+        # Line-wrap fallback: join consecutive line pairs and re-check
+        for i in range(len(recent_lines) - 1):
+            joined = recent_lines[i].rstrip() + recent_lines[i + 1].lstrip()
+            for pattern in interrupt_patterns:
+                if pattern in joined:
+                    logger.debug(f"🎯 WORKING: '{pattern}' detected via line-wrap join")
+                    return True
 
         # Build FILTERED content early: remove OMC status bar lines and separators
         # This is used by PRIORITY 2 (working patterns) and prevents OMC artifacts
@@ -348,8 +358,15 @@ class SessionStateAnalyzer:
                     last_output_idx = i
                     break
             if last_output_idx is not None:
-                # Only check lines after the last output (between output and prompt)
-                check_lines = check_lines[last_output_idx + 1:]
+                # When last_output_idx == 0, parent_lines is empty (no parent exists)
+                # — this is correct: ⎿ on the first check line has no initiator above.
+                # Keep the parent line (initiator of ⎿ output block) + lines after output.
+                # The parent line often contains working indicators like:
+                #   ✢ Building... (27m 45s · ↓ 1.5k tokens · thinking)
+                #   ⎿  ◼ task list...   ← ⎿ is sub-output of active thinking
+                # Cutting the parent would misclassify active thinking as idle.
+                parent_lines = check_lines[max(0, last_output_idx - 1):last_output_idx]
+                check_lines = parent_lines + check_lines[last_output_idx + 1:]
         else:
             # No prompt found (vanilla Claude Code without OMC), check last 8 lines
             check_lines = filtered_recent[-8:]
@@ -360,6 +377,7 @@ class SessionStateAnalyzer:
             "ctrl+b to run in background",  # Background execution option
             "tokens \xb7 thought for",      # Claude Code thinking status (· = U+00B7)
             "background tasks still running",  # Main work done but background tasks active
+            "Compacting context",           # Context compaction in progress
         ]
         # Note: "| thinking |" is NOT checked here because it appears in OMC status bar
         # (e.g., "[OMC#4.5.1] | thinking | session:11m") and would false-positive on IDLE sessions.
@@ -424,87 +442,8 @@ class SessionStateAnalyzer:
         # No recent working patterns and no clear prompt
         return False
     
-    def _detect_working_state_original(self, screen_content: str) -> bool:
-        """
-        Detect if session is actively working based on recent screen content
-        
-        Uses context-aware detection that focuses on recent activity
-        and ignores historical artifacts in the scroll buffer.
-        
-        Working Patterns Detected:
-            - "esc to interrupt": Claude Code work that can be interrupted
-            - "Running…": Command execution in progress  
-            - "ctrl+b to run in background": Background execution option
-            - "tokens · esc to interrupt)": AI token generation in progress
-            
-        Algorithm (PRIORITY ORDER):
-            1. Split content into lines
-            2. FIRST check if at a prompt (highest priority)
-            3. If at prompt, return False (not working)
-            4. Check last 10 lines for working patterns
-            5. Return True if working patterns found
-            6. Return False otherwise
-            
-        Returns:
-            bool: True if working patterns found and NOT at prompt, False otherwise
-            
-        Note:
-            Prompt detection has PRIORITY over working patterns to prevent
-            false positives when "esc to interrupt" text remains on screen
-            from previous operations.
-        """
-        if not screen_content:
-            return False
-        
-        lines = screen_content.split('\n')
-        
-        # PRIORITY 1: Check for prompts FIRST to avoid false positives
-        # Check if we're at a REAL prompt (must be at line end, not in middle of text)
-        # Check last few lines for prompt patterns
-        for i in range(len(lines) - 1, max(len(lines) - 6, -1), -1):
-            line = lines[i]
-            stripped = line.strip()
-            
-            # Skip completely empty lines
-            if not stripped:
-                continue
-                
-            # Check for Claude's edit prompt (single '>' with any amount of spacing)
-            if stripped == '>':
-                # Single '>' on its own line is Claude's edit prompt
-                return False
-            
-            # Check for Claude's boxed prompt
-            if stripped == '│ >':
-                return False
-                
-            # Check if line ends with standard prompt patterns
-            is_real_prompt = (
-                line.endswith('$ ') or      # Bash prompt
-                line.endswith('> ') or      # Generic prompt with space
-                line.endswith(' >') or      # Generic prompt space before >
-                stripped.endswith('>') or   # Any line ending with > (catch all)
-                line.endswith('❯ ') or      # Zsh prompt
-                line == '>>>' or            # Python prompt
-                line == '>>> ' or           # Python prompt with space
-                line.endswith(']: ')        # IPython prompt
-            )
-            
-            if is_real_prompt:
-                # We're at a real prompt, not working
-                return False
-        
-        # PRIORITY 2: Check for working patterns only if NOT at a prompt
-        # Only check the last 10 lines for working patterns (reduced from 20)
-        # This prevents false positives from old completed commands
-        recent_content = '\n'.join(lines[-10:])
-        
-        # If any working pattern is found, return True
-        if any(pattern in recent_content for pattern in self.working_patterns):
-            return True
-        
-        # No working patterns and no prompts detected
-        return False
+    # _detect_working_state_original removed in e007 (dead code since commit 099a52d).
+    # Superseded by priority-based _detect_working_state() with OMC-aware filtering.
     
     def _detect_input_waiting(self, screen_content: str) -> bool:
         """
@@ -591,12 +530,27 @@ class SessionStateAnalyzer:
     def _detect_error_state(self, screen_content: str) -> bool:
         """
         Detect if session is in an error state
-        
+
         Looks for error indicators, timeout messages, or other failure conditions.
+        Suppressed when working indicators are present (same guard as _detect_input_waiting).
         """
         if not screen_content:
             return False
-        
+
+        lines = screen_content.split('\n')
+        recent_lines = lines[-25:]
+        recent_content_wide = '\n'.join(recent_lines)
+
+        # Guard: if working indicators are present, error strings are likely
+        # part of Claude's analysis output, not actual session errors.
+        working_guards = [
+            "esc to interrupt", "ctrl+c to interrupt",
+            "ctrl+b to run in background",
+            "Thinking…", "Running…",
+        ]
+        if any(guard in recent_content_wide for guard in working_guards):
+            return False
+
         error_patterns = [
             "Error:",
             "Failed:",
@@ -605,10 +559,9 @@ class SessionStateAnalyzer:
             "Connection refused",
             "Permission denied",
         ]
-        
-        lines = screen_content.split('\n')
+
         recent_content = '\n'.join(lines[-10:])
-        
+
         return any(pattern in recent_content for pattern in error_patterns)
     
     def get_state(self, session_name: str, use_cache: bool = True) -> SessionState:

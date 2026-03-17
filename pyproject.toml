@@ -37,5 +37,8 @@ dev = [
 [project.scripts]
 ctb-dashboard = "claude_ctb.web_dashboard.server:run_server"
 
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
 [tool.setuptools]
 packages = ["claude_ctb", "tadd"]
