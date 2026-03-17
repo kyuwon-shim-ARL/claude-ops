@@ -576,6 +576,282 @@ Do you want to proceed with deployment?
             assert state == SessionState.UNKNOWN
 
 
+class TestCollapseSubOutput:
+    """Unit tests for _collapse_sub_output() — T1 of e008."""
+
+    def setup_method(self):
+        self.collapse = SessionStateAnalyzer._collapse_sub_output
+
+    def test_basic_sub_output_removed(self):
+        """⎿ line is discarded, initiator kept."""
+        lines = ["● Tool(args)", "  ⎿  output line", "❯"]
+        assert self.collapse(lines) == ["● Tool(args)", "❯"]
+
+    def test_blank_ends_sub_output_block(self):
+        """Blank line terminates sub-output; blank itself is kept."""
+        lines = ["● Tool", "  ⎿  out", "     cont", "", "❯"]
+        assert self.collapse(lines) == ["● Tool", "", "❯"]
+
+    def test_deep_indent_continuation_discarded(self):
+        """Lines with leading >= 5 spaces inside sub-output are discarded."""
+        lines = ["● T", "  ⎿  line1", "     line2", "     line3", "❯"]
+        assert self.collapse(lines) == ["● T", "❯"]
+
+    def test_low_indent_ends_sub_output(self):
+        """Non-blank line with < 5 leading spaces exits sub-output mode."""
+        lines = ["● T1", "  ⎿  sub", "     c", "● T2"]
+        assert self.collapse(lines) == ["● T1", "● T2"]
+
+    def test_eof_inside_sub_output(self):
+        """Sub-output at end of input — no terminator."""
+        lines = ["● T", "  ⎿  line1", "     line2"]
+        assert self.collapse(lines) == ["● T"]
+
+    def test_four_space_indent_exits_sub_output(self):
+        """4-space indent is < 5, so it exits sub-output and is kept."""
+        lines = ["● T", "  ⎿  out", "    four"]
+        assert self.collapse(lines) == ["● T", "    four"]
+
+    def test_five_space_indent_stays_in_sub_output(self):
+        """5-space indent is >= 5, so it stays in sub-output and is discarded."""
+        lines = ["● T", "  ⎿  out", "     five"]
+        assert self.collapse(lines) == ["● T"]
+
+    def test_consecutive_sub_output_blocks(self):
+        """Two ⎿ blocks separated by blank, both collapsed."""
+        lines = [
+            "● Tool1", "  ⎿  out1", "     c1", "",
+            "● Tool2", "  ⎿  out2", "     c2", "",
+            "✶ Spinner"
+        ]
+        assert self.collapse(lines) == ["● Tool1", "", "● Tool2", "", "✶ Spinner"]
+
+    def test_nested_sub_output(self):
+        """Two consecutive ⎿ lines — both discarded."""
+        lines = ["● T", "  ⎿  first", "  ⎿  second", "❯"]
+        assert self.collapse(lines) == ["● T", "❯"]
+
+    def test_empty_input(self):
+        """Empty list returns empty list."""
+        assert self.collapse([]) == []
+
+    def test_no_sub_output(self):
+        """Lines without ⎿ pass through unchanged."""
+        lines = ["line1", "line2", "line3"]
+        assert self.collapse(lines) == ["line1", "line2", "line3"]
+
+
+class TestWideWindowAndOMCSignals:
+    """Tests for collapse-based detection and OMC-specific signals.
+
+    These cover real-world scenarios where sub-output blocks are arbitrarily
+    long and OMC background task signals need special handling.
+    """
+
+    def setup_method(self):
+        self.analyzer = SessionStateAnalyzer()
+
+    def test_long_task_list_pushes_indicator_beyond_6_lines(self):
+        """Working indicator above 6 lines from prompt must still be detected.
+
+        Real scenario: OMC task list with 10+ sub-items pushes the
+        '● Creating… (↓ 4.3k tokens)' line far above the ❯ prompt.
+        """
+        screen = (
+            "● Creating experiment tickets… (6m 46s · ↓ 4.3k tokens)\n"
+            "  ⎿  ✔ Phase A1: SOTA-expand\n"
+            "     ✔ Phase A2: Fetch missing abstracts\n"
+            "     ✔ Phase A3: L1 abstract analysis\n"
+            "     ✔ Phase A4: Positioning analysis\n"
+            "     ✔ Phase A5: Gap identification\n"
+            "     ◼ Phase B1: Initialize exp-workflow\n"
+            "     ◻ Phase B2: Critic review\n"
+            "     ◻ Phase B3: Final plan\n"
+            "     ◻ Phase C1: Execute converged plans\n"
+            "     ◻ Phase C2: Validation\n"
+            "\n"
+            "❯\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is True
+
+    def test_spinner_glyph_variants_with_tokens(self):
+        """Claude Code uses various spinner glyphs: ✶, ✻, ✢, ●.
+
+        Token patterns like '↓ 24.6k tokens' must be detected regardless
+        of which glyph is used.
+        """
+        for glyph in ['✶', '✻', '✢', '●']:
+            screen = (
+                f"● Some tool output\n"
+                f"  ⎿  result\n"
+                f"\n"
+                f"{glyph} Working… (5m · ↓ 12.3k tokens)\n"
+                f"\n"
+                f"❯\n"
+            )
+            assert self.analyzer._detect_working_state(screen) is True, \
+                f"Failed for glyph {glyph}"
+
+    def test_omc_background_task_running(self):
+        """⏵⏵ line with '(running)' indicates active background agent."""
+        screen = (
+            "Some previous output\n"
+            "✻ Worked for 57s\n"
+            "\n"
+            "❯\n"
+            "───\n"
+            "  [OMC#4.5.1] | session:1m\n"
+            "  ⏵⏵ bypass permissions on · Task name (running)\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is True
+
+    def test_omc_background_no_running_is_idle(self):
+        """⏵⏵ without '(running)' is NOT a working signal."""
+        screen = (
+            "Task completed.\n"
+            "✻ Worked for 57s\n"
+            "\n"
+            "❯\n"
+            "───\n"
+            "  [OMC#4.5.1] | session:1m\n"
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle)\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is False
+
+    def test_past_tense_worked_for_is_idle(self):
+        """'Worked for 57s' (past tense) must NOT be detected as working."""
+        screen = (
+            "  Best regards,\n"
+            "  Kyuwon\n"
+            "\n"
+            "✻ Worked for 57s\n"
+            "\n"
+            "❯\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is False
+
+    def test_stale_scrollback_not_detected_as_working(self):
+        """Stale working indicators in scrollback must not cause false positives.
+
+        After a tool completes and Claude writes response text, the old
+        spinner line (with token count) remains in scrollback. The collapse
+        + 2-non-blank-line window must exclude it.
+        """
+        screen = (
+            "✶ Old analysis… (15m · ↓ 30k tokens)\n"
+            "  ⎿  ✔ Step 1 done\n"
+            "     ✔ Step 2 done\n"
+            "\n"
+            "● Here is the analysis:\n"
+            "\n"
+            "The model shows significant improvement from 0.75 to 0.92.\n"
+            "Key factors: better tokenization, larger batch size.\n"
+            "Recommendation: proceed with the larger model.\n"
+            "\n"
+            "❯\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is False
+
+    def test_100_sub_items_still_detected(self):
+        """Working indicator must be found regardless of sub-output length.
+
+        Validates the structural fix: collapse removes sub-output before
+        windowing, so even 100 task items don't push the indicator out.
+        """
+        lines = ["● Creating tickets… (6m · ↓ 4.3k tokens)", "  ⎿  ✔ Task 1"]
+        for i in range(2, 101):
+            lines.append(f"     ✔ Task {i}")
+        lines.extend(["", "❯", ""])
+        assert self.analyzer._detect_working_state("\n".join(lines)) is True
+
+    def test_real_world_piu_v2_pattern(self):
+        """Real PIU-v2 session: many tool outputs then spinner with tokens."""
+        screen = (
+            "● Bash(gh issue close 10)\n"
+            "  ⎿  ✓ Closed issue #10\n"
+            "\n"
+            "● plugin:runpod-mcp:runpod - list_pods (MCP)\n"
+            "  ⎿  ID: spf0ifdqo18vq5\n"
+            "     Name: piu-v2\n"
+            "     Status: EXITED\n"
+            "\n"
+            "  Searching for 4 patterns\n"
+            "  ⎿  \"scripts/*train*\"\n"
+            "\n"
+            "✶ Boondoggling… (22m 49s · ↑ 8.2k tokens · thought for 4s)\n"
+            "\n"
+            "───\n"
+            "❯\n"
+            "───\n"
+            "  [OMC#4.5.1] | thinking | session:22m\n"
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle)\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is True
+
+    # --- T4: 2-non-blank boundary tests ---
+
+    def test_spinner_as_only_nonblank_before_prompt(self):
+        """Single non-blank line (spinner) before ❯ → WORKING."""
+        screen = "\n\n✶ Thinking… (↓ 404 tokens)\n\n❯\n"
+        assert self.analyzer._detect_working_state(screen) is True
+
+    def test_spinner_at_second_nonblank_not_detected(self):
+        """Spinner is 2nd-to-last non-blank but outside 1-line window → NOT working."""
+        screen = (
+            "✶ Working… (5m · ↓ 10k tokens)\n"
+            "\n"
+            "Some response text\n"
+            "\n"
+            "❯\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is False
+
+    def test_spinner_at_third_nonblank_excluded(self):
+        """Spinner is 3rd-from-last non-blank (outside [-2:] window) → IDLE."""
+        screen = (
+            "✶ Old work… (5m · ↓ 10k tokens)\n"
+            "\n"
+            "Response line A\n"
+            "\n"
+            "Response line B\n"
+            "\n"
+            "❯\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is False
+
+    def test_all_blank_before_prompt_is_idle(self):
+        """Zero non-blank lines after collapse → IDLE."""
+        screen = "  ⎿  orphan output\n     cont\n\n❯\n"
+        assert self.analyzer._detect_working_state(screen) is False
+
+    # --- T2 verification: structural regex with all glyphs ---
+
+    def test_structural_regex_all_glyphs(self):
+        """All _TOOL_GLYPHS (●✢✶✻) match the structural verb regex."""
+        for glyph in ['●', '✢', '✶', '✻']:
+            screen = f"{glyph} Running tests\n\n❯\n"
+            assert self.analyzer._detect_working_state(screen) is True, \
+                f"Structural regex missed glyph {glyph}"
+
+    # --- T7: collapse path performance test ---
+
+    def test_performance_collapse_500_blocks(self):
+        """500 tool blocks must collapse+detect in < 50ms."""
+        import time
+        lines = []
+        for i in range(500):
+            lines.extend([f"● Tool{i}(args)", f"  ⎿  output{i}", f"     cont{i}", ""])
+        lines.extend(["✶ Working… (↓ 5k tokens)", "", "❯", ""])
+        screen = "\n".join(lines)
+
+        t0 = time.time()
+        result = self.analyzer._detect_working_state(screen)
+        elapsed = time.time() - t0
+
+        assert result is True
+        assert elapsed < 0.05, f"Collapse too slow: {elapsed:.3f}s"
+
+
 class TestErrorHandling:
     """Test error handling and edge cases"""
 

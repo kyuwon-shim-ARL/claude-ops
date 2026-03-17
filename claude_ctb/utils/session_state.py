@@ -89,24 +89,31 @@ class SessionStateAnalyzer:
         SessionState.UNKNOWN: 5
     }
     
+    # Claude Code spinner/bullet glyphs used for tool execution and thinking.
+    # Keep in sync with Claude Code source when new glyphs are introduced.
+    _TOOL_GLYPHS = '●✢✶✻'
+
+    # Working-state guard patterns: shared by _detect_input_waiting() and
+    # get_state_details(). If any of these appear in recent screen content,
+    # Claude is working and NOT waiting for user input.
+    _WORKING_GUARD_PATTERNS = [
+        "esc to interrupt",
+        "ctrl+c to interrupt",
+        "ctrl+b to run in background",
+        "Thinking…",
+        "Running…",
+        "Implementing",
+        "Building",
+        "Testing",
+        "Installing",
+        "Processing",
+        "Analyzing",
+        "Compacting context",
+    ]
+
     def __init__(self):
-        # NOTE: These patterns are used ONLY by _detect_input_waiting() as a
-        # working-state guard (lines 534-550) and get_state_details() for debug
-        # output. The primary detection logic in _detect_working_state() uses
-        # its own priority-based pattern cascade and does NOT read this list.
-        self.working_patterns = [
-            "esc to interrupt",
-            "ctrl+c to interrupt",
-            "ctrl+b to run in background",
-            "Thinking…",
-            "Running…",
-            "Building",
-            "Testing",
-            "Installing",
-            "Processing",
-            "Analyzing",
-            "Compacting context",
-        ]
+        # Legacy alias — kept for get_state_details() compatibility
+        self.working_patterns = self._WORKING_GUARD_PATTERNS
         
         # Patterns indicating user input is required
         self.input_waiting_patterns = [
@@ -268,22 +275,63 @@ class SessionStateAnalyzer:
             logger.error(f"Error getting current screen for {session_name}: {e}")
             return None
     
-    def _detect_working_state(self, screen_content: str) -> bool:
+    @staticmethod
+    def _collapse_sub_output(lines: list) -> list:
+        """Remove ⎿ sub-output lines and their indented continuations.
+
+        Claude Code renders tool output as:
+            ● Tool(args)
+              ⎿  output line 1
+                 continuation line 2  (5+ leading spaces)
+                 ...N more lines...
+
+        Sub-output blocks can be arbitrarily long (20+ task list items).
+        Collapsing them keeps only initiator/status lines, so a small
+        fixed-size window always reaches the working indicator regardless
+        of how many sub-items exist.
         """
-        IMPROVED: Check for RECENT work indicators only
+        result = []
+        in_sub_output = False
+        for line in lines:
+            stripped = line.strip()
+            leading = len(line) - len(line.lstrip()) if stripped else 0
 
-        Priority order:
-        1. Check last 25 lines for 'esc to interrupt' → WORKING (definitive)
-        2. Check working patterns on FILTERED content (OMC bars removed) → WORKING
-           This runs BEFORE prompt detection because OMC always renders ❯ cursor
-           below working content, and bottom-up prompt scan would hit it first.
-        3. Check for prompts in last 10 lines → IDLE
-        4. Default → not working
+            if '⎿' in line:
+                in_sub_output = True
+                continue
 
-        This prevents false positives from:
-        - Old 'esc to interrupt' text that remains on screen
-        - OMC status bar lines (session:Xm, ctx:Y%, etc.)
-        - Past output bullets (● 완료, ● 보고 etc.) in scrollback
+            if in_sub_output:
+                if not stripped:
+                    # Blank line ends sub-output block
+                    in_sub_output = False
+                    result.append(line)
+                    continue
+                if leading >= 5:
+                    # Deep indent = continuation of ⎿ output
+                    continue
+                # Non-blank, low indent = new block
+                in_sub_output = False
+
+            result.append(line)
+        return result
+
+    def _detect_working_state(self, screen_content: str) -> bool:
+        """Detect whether Claude is actively working based on screen content.
+
+        Priority cascade:
+        1.  'esc to interrupt' / 'ctrl+c to interrupt' in last 25 lines → WORKING
+        1b. OMC '⏵⏵ (running)' background task in last 25 lines → WORKING
+        2.  Filtered content (OMC bars removed), prompt-anchored, collapse-compressed:
+            2a. String patterns (ctrl+b, tokens·thought, Compacting, etc.) → WORKING
+            2b. Structural regex (tool glyphs, token arrows, time counters) → WORKING
+        3.  Bottom-up prompt scan in last 10 lines → IDLE (returns False)
+        4.  Default → not working (returns False)
+
+        Key design decisions:
+        - P1 uses last 25 raw lines (interrupt strings are always near bottom).
+        - P2 uses ALL lines because _collapse_sub_output() compresses arbitrarily
+          long ⎿ blocks, and the 2-non-blank-line window prevents stale scrollback.
+        - _TOOL_GLYPHS covers ●✢✶✻ (Claude Code spinner variants).
         """
         if not screen_content:
             return False
@@ -315,11 +363,21 @@ class SessionStateAnalyzer:
                     logger.debug(f"🎯 WORKING: '{pattern}' detected via line-wrap join")
                     return True
 
-        # Build FILTERED content early: remove OMC status bar lines and separators
-        # This is used by PRIORITY 2 (working patterns) and prevents OMC artifacts
-        # from interfering with pattern matching
-        filtered_recent = []
+        # PRIORITY 1b: Check for OMC background task actively running
+        # ⏵⏵ lines with "(running)" indicate an active background agent.
+        # Must check BEFORE OMC bar filtering strips these lines.
         for line in recent_lines:
+            if '⏵⏵' in line and '(running)' in line:
+                logger.debug("🎯 WORKING: OMC background task '(running)' detected")
+                return True
+
+        # Build FILTERED content: remove OMC status bar lines and separators.
+        # Uses ALL lines (not just recent_lines) because _collapse_sub_output()
+        # will compress arbitrarily long tool output blocks. The 25-line limit
+        # is only appropriate for P1 (esc to interrupt); P2 needs full context
+        # so that initiator lines aren't truncated before collapse can reach them.
+        filtered_lines = []
+        for line in lines:
             # Skip OMC status bar lines
             if any(marker in line for marker in ['[OMC#', '⏵⏵', 'bypass permissions']):
                 continue
@@ -327,8 +385,8 @@ class SessionStateAnalyzer:
             stripped = line.strip()
             if stripped and stripped.startswith('─') and stripped.endswith('─'):
                 continue
-            filtered_recent.append(line)
-        filtered_content = '\n'.join(filtered_recent)
+            filtered_lines.append(line)
+        filtered_content = '\n'.join(filtered_lines)
 
         # PRIORITY 2: Working patterns on FILTERED content (before prompt check)
         # OMC layout places ❯ cursor directly below working content (3 lines gap).
@@ -340,37 +398,33 @@ class SessionStateAnalyzer:
         # If it's output (⎿, regular text), any working patterns above are stale.
         # If no prompt found (vanilla Claude), check last 8 filtered lines.
         prompt_idx = None
-        for i in range(len(filtered_recent) - 1, -1, -1):
-            s = filtered_recent[i].strip()
+        for i in range(len(filtered_lines) - 1, -1, -1):
+            s = filtered_lines[i].strip()
             if s in ['❯', '❯\xa0', '❯ ']:
                 prompt_idx = i
                 break
 
         if prompt_idx is not None:
-            # Take up to 6 lines before prompt as candidates
-            check_lines = filtered_recent[max(0, prompt_idx - 6):prompt_idx]
-            # Guard: if output indicator (⎿) appears in these lines, it means
-            # Claude produced output after working → any patterns above ⎿ are stale.
-            # Only keep lines BELOW the last ⎿ line.
-            last_output_idx = None
-            for i in range(len(check_lines) - 1, -1, -1):
-                if '⎿' in check_lines[i]:
-                    last_output_idx = i
-                    break
-            if last_output_idx is not None:
-                # When last_output_idx == 0, parent_lines is empty (no parent exists)
-                # — this is correct: ⎿ on the first check line has no initiator above.
-                # Keep the parent line (initiator of ⎿ output block) + lines after output.
-                # The parent line often contains working indicators like:
-                #   ✢ Building... (27m 45s · ↓ 1.5k tokens · thinking)
-                #   ⎿  ◼ task list...   ← ⎿ is sub-output of active thinking
-                # Cutting the parent would misclassify active thinking as idle.
-                parent_lines = check_lines[max(0, last_output_idx - 1):last_output_idx]
-                check_lines = parent_lines + check_lines[last_output_idx + 1:]
+            # Collapse sub-output blocks (⎿ + indented continuations) before
+            # windowing. This structurally solves the "window too narrow" problem:
+            # no matter how many sub-items a task list has (20+), the initiator
+            # line (with token/time indicators) is always within reach.
+            pre_prompt = filtered_lines[:prompt_idx]
+            collapsed = self._collapse_sub_output(pre_prompt)
+            # Take only the last 1 non-blank line from collapsed view.
+            # When Claude is actively working, the spinner/status line is
+            # ALWAYS the last non-blank line before ❯. If response text
+            # appears after a spinner, work is complete — the spinner is stale.
+            # Checking only [-1:] eliminates false positives from stale
+            # spinners that sit at [-2] when Claude writes a short response.
+            non_blank = [l for l in collapsed if l.strip()]
+            check_lines = non_blank[-1:] if non_blank else []
         else:
             # No prompt found (vanilla Claude Code without OMC), check last 8 lines
-            check_lines = filtered_recent[-8:]
-        filtered_narrow = '\n'.join(check_lines)
+            collapsed = self._collapse_sub_output(filtered_lines)
+            non_blank = [l for l in collapsed if l.strip()]
+            check_lines = non_blank[-8:]
+        check_content = '\n'.join(check_lines)
 
         # 2a: String-based working patterns (checked on narrow filtered window)
         working_patterns = [
@@ -382,19 +436,19 @@ class SessionStateAnalyzer:
         # Note: "| thinking |" is NOT checked here because it appears in OMC status bar
         # (e.g., "[OMC#4.5.1] | thinking | session:11m") and would false-positive on IDLE sessions.
         # It's only valid as a working signal if found in filtered content (OMC bars removed).
-        if "| thinking |" in filtered_narrow:
+        if "| thinking |" in check_content:
             logger.debug("🎯 WORKING: '| thinking |' detected in filtered content")
             return True
 
         for pattern in working_patterns:
-            if pattern in filtered_narrow:
+            if pattern in check_content:
                 logger.debug(f"🎯 WORKING: '{pattern}' detected in filtered content")
                 return True
 
         # 2b: Structural regex patterns on narrow filtered content
         structural_patterns = [
-            # Claude Code active tool execution: ● Running, ● Reading, ● Writing, etc.
-            r'^\s*● (?:Running|Reading|Writing|Editing|Searching|Calling|Fetching|Executing)',
+            # Claude Code active tool execution with any known glyph
+            rf'^\s*[{SessionStateAnalyzer._TOOL_GLYPHS}] (?:Running|Reading|Writing|Editing|Searching|Calling|Fetching|Executing)',
             # Token streaming indicator: ↓ 404 tokens, ↑ 36 tokens
             r'[↓↑] [\d.,]+k? tokens',
             # Active progress: time counter with tokens on status bar
@@ -409,7 +463,7 @@ class SessionStateAnalyzer:
             r'attempt \d+/\d+',
         ]
         for pattern in structural_patterns:
-            if re.search(pattern, filtered_narrow, re.MULTILINE):
+            if re.search(pattern, check_content, re.MULTILINE):
                 logger.debug(f"🎯 WORKING: structural pattern '{pattern}' matched")
                 return True
 
@@ -470,21 +524,7 @@ class SessionStateAnalyzer:
 
         # CRITICAL FIX: If working indicators present, NOT waiting for input
         # Working state must take precedence to prevent false alarms
-        working_indicators = [
-            "esc to interrupt",
-            "ctrl+c to interrupt",
-            "ctrl+b to run in background",
-            "Thinking…",
-            "Running…",
-            "Implementing",
-            "Building",
-            "Testing",
-            "Installing",
-            "Processing",
-            "Analyzing",
-        ]
-
-        for indicator in working_indicators:
+        for indicator in self._WORKING_GUARD_PATTERNS:
             if indicator in recent_content:
                 return False
 
@@ -543,12 +583,7 @@ class SessionStateAnalyzer:
 
         # Guard: if working indicators are present, error strings are likely
         # part of Claude's analysis output, not actual session errors.
-        working_guards = [
-            "esc to interrupt", "ctrl+c to interrupt",
-            "ctrl+b to run in background",
-            "Thinking…", "Running…",
-        ]
-        if any(guard in recent_content_wide for guard in working_guards):
+        if any(guard in recent_content_wide for guard in self._WORKING_GUARD_PATTERNS):
             return False
 
         error_patterns = [

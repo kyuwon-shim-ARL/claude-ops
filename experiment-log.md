@@ -36,3 +36,11 @@
 - **Milestone**: none
 - **Status**: started
 - **배경**: antibiotic_platform 세션이 thinking 중인데 dashboard에서 idle로 오감지. ⎿ output guard가 parent line의 working 지표를 잘라냄. parent-line fix 적용 후 테스트 인프라 전반 정비 필요.
+
+## 2026-03-17: e008 시작
+- **목표**: Session State Structural Fix — collapse sub-output + glyph + test hardening
+- **Issue**: #9
+- **Branch**: main
+- **Depends on**: e007
+- **Status**: started
+- **배경**: e007의 고정 윈도우(6줄) 접근이 근본적 한계. task list가 길어지면 working indicator가 윈도우 밖으로 밀려남. /sciomc 비평 결과 3가지 구조적 문제 확인: (1) sub-output collapse 필요, (2) ✶✻ 글리프 누락, (3) working_indicators 중복 리스트 drift 위험. 비평 수렴 후 실행.

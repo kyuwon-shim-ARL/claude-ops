@@ -1,5 +1,5 @@
 version: 1
-updated: "2026-03-17T14:30:00Z"
+updated: "2026-03-17T15:50:00Z"
 scan_paths:
   - outputs/
 experiments:
@@ -101,3 +101,21 @@ experiments:
       - "golden fixture 체계 구축 (실제 tmux screen snapshot 기반)"
       - "패턴 커버리지 개선: ERROR guard, Compacting, dead code 정리"
       - "tmux line-wrap 대응 및 edge case 테스트 추가"
+  e008:
+    path: outputs/e008/
+    script: null
+    params: {}
+    outputs: []
+    status: experimental
+    description: "Session State Structural Fix — collapse sub-output + glyph + test hardening"
+    issue: 9
+    branch: null
+    depends_on: [e007]
+    tasks:
+      - "T1: _collapse_sub_output() 단위 테스트 (8 branches)"
+      - "T2: _TOOL_GLYPHS 상수 정의 + structural regex 글리프 통합"
+      - "T3: working_indicators 중복 리스트 통합"
+      - "T4: 2-non-blank 경계 테스트"
+      - "T5: stale scrollback false positive 테스트"
+      - "T6: filtered_narrow → check_content 리네이밍 + docstring 갱신"
+      - "T7: collapse path 성능 테스트"
