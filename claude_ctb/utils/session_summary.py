@@ -232,10 +232,10 @@ class SessionSummaryHelper:
                 continue
             all_sessions.append(result)
 
-        # Sort: working sessions first, then waiting sessions by wait time ASC (shortest wait = most recent at bottom for easy Telegram access)
+        # Sort: working first, then waiting DESC (longest wait at top, shortest/most-recent at bottom for easy Telegram access)
         all_sessions.sort(key=lambda x: (
             0 if x[3] == 'working' else 1,
-            x[1] if x[3] == 'waiting' else 0,
+            -x[1] if x[3] == 'waiting' else 0,
             x[0]
         ))
 
@@ -331,10 +331,10 @@ class SessionSummaryHelper:
                 # Include transparency info: (session, wait_time, prompt, status, has_completion_record)  
                 all_sessions.append((session_name, wait_time, last_prompt, 'working', has_record))
         
-        # Sort: working sessions first, then waiting sessions by wait time ASC (shortest wait = most recent at bottom for easy Telegram access)
+        # Sort: working first, then waiting DESC (longest wait at top, shortest/most-recent at bottom for easy Telegram access)
         all_sessions.sort(key=lambda x: (
             0 if x[3] == 'working' else 1,
-            x[1] if x[3] == 'waiting' else 0,
+            -x[1] if x[3] == 'waiting' else 0,
             x[0]
         ))
         return all_sessions
