@@ -160,7 +160,14 @@ class ImprovedWaitTimeTracker:
         if old_state == "working" and new_state == "waiting":
             logger.info(f"Auto-marking completion for {session_name} (working→waiting)")
             self.mark_completion(session_name, force=True)
-        
+
+        # Clear completion time when session starts working again
+        # Without this, wait_time keeps counting from the old completion
+        if new_state == "working" and session_name in self.completion_times:
+            logger.info(f"Clearing completion time for {session_name} (now working)")
+            del self.completion_times[session_name]
+            self._save_completions()
+
         self.session_states[session_name] = new_state
         self._save_states()
     
