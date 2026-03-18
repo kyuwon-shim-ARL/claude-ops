@@ -90,8 +90,11 @@ class SessionStateAnalyzer:
     }
     
     # Claude Code spinner/bullet glyphs used for tool execution and thinking.
-    # Keep in sync with Claude Code source when new glyphs are introduced.
-    _TOOL_GLYPHS = '●✢✶✻'
+    # Source: xQ6() spinner cycle + h5 tool bullet + st completed marker.
+    # Cycle glyphs (platform-dependent): · ✢ ✳ ✶ ✻ ✽ *
+    # Tool bullet: ● (Linux) / ⏺ (macOS)
+    # Completed marker (fixed): ✻
+    _TOOL_GLYPHS = '·✢✳✶✻✽●⏺'
 
     # Working-state guard patterns: shared by _detect_input_waiting() and
     # get_state_details(). If any of these appear in recent screen content,
@@ -156,6 +159,8 @@ class SessionStateAnalyzer:
             "✅ All",                   # "✅ All tests passed" etc (not bare ✅)
             r"took \d+\.\d+s",         # Execution time pattern
             r"in \d+\.\d+ seconds",    # Time duration pattern
+            # Claude Code past-tense completion: "✻ Cogitated for 5m 8s", "✻ Worked for 57s"
+            r"[·✢✳✶✻✽●⏺] \w+ for \d+[ms]",
         ]
         
         # NEW: Command prompt patterns (regex)
@@ -331,7 +336,7 @@ class SessionStateAnalyzer:
         - P1 uses last 25 raw lines (interrupt strings are always near bottom).
         - P2 uses ALL lines because _collapse_sub_output() compresses arbitrarily
           long ⎿ blocks, and the 2-non-blank-line window prevents stale scrollback.
-        - _TOOL_GLYPHS covers ●✢✶✻ (Claude Code spinner variants).
+        - _TOOL_GLYPHS covers ·✢✳✶✻✽●⏺ (Claude Code spinner/bullet variants).
         """
         if not screen_content:
             return False
@@ -445,8 +450,21 @@ class SessionStateAnalyzer:
                 logger.debug(f"🎯 WORKING: '{pattern}' detected in filtered content")
                 return True
 
+        # 2b-guard: Past-tense completion line → NOT working
+        # e.g. "✻ Cogitated for 5m 8s", "✻ Worked for 57s"
+        # These indicate Claude finished; must not be confused with working.
+        if re.search(
+            rf'^\s*[{SessionStateAnalyzer._TOOL_GLYPHS}] \w+ for \d+',
+            check_content, re.MULTILINE,
+        ):
+            logger.debug("⏸️ NOT WORKING: past-tense completion line detected (glyph + verb + 'for' + duration)")
+            return False
+
         # 2b: Structural regex patterns on narrow filtered content
         structural_patterns = [
+            # Generic glyph + verb + ellipsis (…) = actively working
+            # Catches ALL random verbs: Swooping…, Stewing…, Cogitating…, etc.
+            rf'^\s*[{SessionStateAnalyzer._TOOL_GLYPHS}] \S+\u2026',
             # Claude Code active tool execution with any known glyph
             rf'^\s*[{SessionStateAnalyzer._TOOL_GLYPHS}] (?:Running|Reading|Writing|Editing|Searching|Calling|Fetching|Executing)',
             # Token streaming indicator: ↓ 404 tokens, ↑ 36 tokens

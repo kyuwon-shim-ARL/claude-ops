@@ -232,10 +232,10 @@ class SessionSummaryHelper:
                 continue
             all_sessions.append(result)
 
-        # Sort: working sessions first, then waiting sessions by wait time DESC
+        # Sort: working sessions first, then waiting sessions by wait time ASC (shortest wait = most recent at bottom for easy Telegram access)
         all_sessions.sort(key=lambda x: (
             0 if x[3] == 'working' else 1,
-            -x[1] if x[3] == 'waiting' else 0,
+            x[1] if x[3] == 'waiting' else 0,
             x[0]
         ))
 
@@ -269,8 +269,8 @@ class SessionSummaryHelper:
                 # Working sessions don't affect completion time tracking
                 pass
         
-        # Sort by wait time (longest first - reverse order)
-        waiting_sessions.sort(key=lambda x: x[1], reverse=True)
+        # Sort by wait time ASC (shortest wait = most recent at top)
+        waiting_sessions.sort(key=lambda x: x[1])
         return waiting_sessions
     
     def get_all_sessions_with_status(self) -> List[Tuple[str, float, str, str]]:
@@ -331,14 +331,11 @@ class SessionSummaryHelper:
                 # Include transparency info: (session, wait_time, prompt, status, has_completion_record)  
                 all_sessions.append((session_name, wait_time, last_prompt, 'working', has_record))
         
-        # Improved Sort: working sessions first, then waiting sessions (by wait time DESC - longest wait first)
-        # Priority 1: Working sessions at the top (0 sorts before 1)
-        # Priority 2: For waiting sessions, sort by wait time DESC (longer wait = higher priority)
-        # Priority 3: Session name for stability
+        # Sort: working sessions first, then waiting sessions by wait time ASC (shortest wait = most recent at bottom for easy Telegram access)
         all_sessions.sort(key=lambda x: (
-            0 if x[3] == 'working' else 1,  # working sessions first
-            -x[1] if x[3] == 'waiting' else 0,  # waiting sessions by wait time DESC
-            x[0]  # session name for stability
+            0 if x[3] == 'working' else 1,
+            x[1] if x[3] == 'waiting' else 0,
+            x[0]
         ))
         return all_sessions
     

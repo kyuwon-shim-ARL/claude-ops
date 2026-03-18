@@ -796,7 +796,12 @@ class TelegramBridge:
                     if len(header + screen_text) > max_length:
                         # Truncate the content
                         available_space = max_length - len(header) - 60  # 60 chars for code block + truncation message
-                        truncated_text = screen_text[:available_space] + "\n\n... (내용이 길어 일부 생략됨)"
+                        tail_text = screen_text[-available_space:]
+                        # Drop potentially partial first line from tail-slice
+                        tail_lines = tail_text.split('\n')
+                        if len(tail_lines) > 1:
+                            tail_lines = tail_lines[1:]
+                        truncated_text = "... (앞부분 생략)\n\n" + '\n'.join(tail_lines)
                         message = f"{header}{truncated_text}</pre>"
                     else:
                         message = f"{header}{screen_text}</pre>"
@@ -1184,6 +1189,203 @@ class TelegramBridge:
                 "수동으로 `claude` 명령어를 실행해주세요."
             )
     
+    async def fresh_command(self, update, context):
+        """Exit current Claude session and start a fresh one (no context carry-over)"""
+        user_id = update.effective_user.id
+
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+
+        target_session = self.config.session_name
+        if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
+            original_text = update.message.reply_to_message.text
+            reply_session = self.extract_session_from_message(original_text)
+            if reply_session:
+                session_exists = os.system(f"tmux has-session -t {reply_session} 2>/dev/null") == 0
+                if session_exists:
+                    target_session = reply_session
+
+        session_exists = os.system(f"tmux has-session -t {target_session} 2>/dev/null") == 0
+        if not session_exists:
+            await update.message.reply_text(f"❌ 세션 `{target_session}`을 찾을 수 없습니다.")
+            return
+
+        try:
+            session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+            progress_msg = await update.message.reply_text(
+                f"🆕 `{session_display}` 새 세션 시작 중...\n\n"
+                f"⏳ 기존 세션 종료 → 새 세션 시작"
+            )
+
+            # Step 1: Exit current Claude
+            os.system(f"tmux send-keys -t {target_session} Escape")
+            await asyncio.sleep(0.5)
+            os.system(f"tmux send-keys -t {target_session} '/exit' Enter")
+
+            # Step 2: Wait for exit
+            await asyncio.sleep(4)
+
+            # Step 3: Start fresh Claude (no --continue)
+            result = os.system(f"tmux send-keys -t {target_session} 'claude --dangerously-skip-permissions' Enter")
+
+            if result == 0:
+                await asyncio.sleep(2)
+                await progress_msg.edit_text(
+                    f"✅ `{session_display}` 새 세션 시작 완료!\n\n"
+                    f"🆕 깨끗한 새 대화로 시작\n"
+                    f"💡 이전 컨텍스트 없이 새로 시작됩니다"
+                )
+            else:
+                await progress_msg.edit_text(f"❌ `{session_display}` 새 세션 시작 실패")
+
+        except Exception as e:
+            logger.error(f"Fresh session error: {str(e)}")
+            await update.message.reply_text("❌ 새 세션 시작 중 오류가 발생했습니다.")
+
+    async def handoff_command(self, update, context):
+        """Exit Claude, start new session, and send /sciomc with last context summary"""
+        user_id = update.effective_user.id
+
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+
+        target_session = self.config.session_name
+        if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
+            original_text = update.message.reply_to_message.text
+            reply_session = self.extract_session_from_message(original_text)
+            if reply_session:
+                session_exists = os.system(f"tmux has-session -t {reply_session} 2>/dev/null") == 0
+                if session_exists:
+                    target_session = reply_session
+
+        session_exists = os.system(f"tmux has-session -t {target_session} 2>/dev/null") == 0
+        if not session_exists:
+            await update.message.reply_text(f"❌ 세션 `{target_session}`을 찾을 수 없습니다.")
+            return
+
+        # Get additional context from command args
+        extra_context = ' '.join(context.args) if context.args else ''
+
+        try:
+            import subprocess
+            session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+            progress_msg = await update.message.reply_text(
+                f"🔄 `{session_display}` 컨텍스트 핸드오프 중...\n\n"
+                f"📋 화면 캡처 → 종료 → 새 세션 → /sciomc 전달"
+            )
+
+            # Step 1: Capture current screen context (last 100 lines)
+            capture_result = subprocess.run(
+                f"tmux capture-pane -t {target_session} -p -S -100",
+                shell=True, capture_output=True, text=True
+            )
+            captured_context = ""
+            if capture_result.returncode == 0 and capture_result.stdout.strip():
+                # Extract meaningful lines (skip empty, separator lines)
+                lines = capture_result.stdout.strip().split('\n')
+                meaningful = [l for l in lines if l.strip() and not all(c in '─ │┃▐▛▜▝▘' for c in l.strip())]
+                # Take last 30 meaningful lines as context summary
+                captured_context = '\n'.join(meaningful[-30:])
+
+            # Step 2: Exit current Claude
+            os.system(f"tmux send-keys -t {target_session} Escape")
+            await asyncio.sleep(0.5)
+            os.system(f"tmux send-keys -t {target_session} '/exit' Enter")
+
+            # Step 3: Wait for exit
+            await asyncio.sleep(4)
+
+            # Step 4: Start fresh Claude
+            os.system(f"tmux send-keys -t {target_session} 'claude --dangerously-skip-permissions' Enter")
+            await asyncio.sleep(5)  # Wait for Claude to fully initialize
+
+            # Step 5: Build and send /sciomc command with context
+            if extra_context:
+                handoff_text = extra_context
+            elif captured_context:
+                # Summarize captured context into a compact handoff prompt
+                handoff_text = f"이전 세션의 마지막 작업 내용을 이어서 진행해줘. 이전 화면 내용:\\n{captured_context}"
+            else:
+                handoff_text = "이전 세션의 작업을 이어서 진행해줘."
+
+            # Send as /sciomc command - use -l for literal text to handle special chars
+            full_command = f"/oh-my-claudecode:sciomc {handoff_text}"
+            # Truncate if too long for tmux send-keys (max ~500 chars for safety)
+            if len(full_command) > 500:
+                full_command = full_command[:497] + "..."
+
+            os.system(f"tmux send-keys -t {target_session} -l {repr(full_command)}")
+            await asyncio.sleep(0.3)
+            os.system(f"tmux send-keys -t {target_session} Enter")
+
+            await progress_msg.edit_text(
+                f"✅ `{session_display}` 핸드오프 완료!\n\n"
+                f"🆕 새 세션 시작됨\n"
+                f"📋 /sciomc 로 컨텍스트 전달 완료\n"
+                f"🚀 자동으로 작업 이어서 진행 중"
+            )
+
+        except Exception as e:
+            logger.error(f"Handoff error: {str(e)}")
+            await update.message.reply_text("❌ 핸드오프 중 오류가 발생했습니다.")
+
+    async def tfc_command(self, update, context):
+        """Run tmux-fix-claude to fix/restart a corrupted Claude session"""
+        user_id = update.effective_user.id
+
+        if not self.check_user_authorization(user_id):
+            await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
+            return
+
+        target_session = self.config.session_name
+        if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
+            original_text = update.message.reply_to_message.text
+            reply_session = self.extract_session_from_message(original_text)
+            if reply_session:
+                session_exists = os.system(f"tmux has-session -t {reply_session} 2>/dev/null") == 0
+                if session_exists:
+                    target_session = reply_session
+
+        session_exists = os.system(f"tmux has-session -t {target_session} 2>/dev/null") == 0
+        if not session_exists:
+            await update.message.reply_text(f"❌ 세션 `{target_session}`을 찾을 수 없습니다.")
+            return
+
+        try:
+            import subprocess
+            session_display = target_session.replace('claude_', '') if target_session.startswith('claude_') else target_session
+            progress_msg = await update.message.reply_text(
+                f"🔧 `{session_display}` tmux-fix-claude 실행 중..."
+            )
+
+            # Run tmux-fix-claude on the specific session
+            result = subprocess.run(
+                f"tmux-fix-claude {target_session}",
+                shell=True, capture_output=True, text=True, timeout=30
+            )
+
+            output = result.stdout.strip() if result.stdout else ""
+
+            if result.returncode == 0:
+                await progress_msg.edit_text(
+                    f"✅ `{session_display}` tmux-fix-claude 완료!\n\n"
+                    f"```\n{output}\n```"
+                )
+            else:
+                error_output = result.stderr.strip() if result.stderr else "알 수 없는 오류"
+                await progress_msg.edit_text(
+                    f"⚠️ `{session_display}` tmux-fix-claude 결과:\n\n"
+                    f"```\n{output}\n{error_output}\n```"
+                )
+
+        except subprocess.TimeoutExpired:
+            await progress_msg.edit_text(f"⏰ `{session_display}` tmux-fix-claude 타임아웃 (30초)")
+        except Exception as e:
+            logger.error(f"TFC error: {str(e)}")
+            await update.message.reply_text("❌ tmux-fix-claude 실행 중 오류가 발생했습니다.")
+
     # REMOVED: fix_terminal command - non-functional
     async def fix_terminal_command_DEPRECATED(self, update, context):
         """DEPRECATED: Fix terminal command removed"""
@@ -2372,6 +2574,9 @@ class TelegramBridge:
         self.app.add_handler(CommandHandler("up", self.up_command))
         self.app.add_handler(CommandHandler("down", self.down_command))
         self.app.add_handler(CommandHandler("restart", self.restart_command))
+        self.app.add_handler(CommandHandler("fresh", self.fresh_command))
+        self.app.add_handler(CommandHandler("handoff", self.handoff_command))
+        self.app.add_handler(CommandHandler("tfc", self.tfc_command))
         self.app.add_handler(CommandHandler("sessions", self.sessions_command))
         self.app.add_handler(CommandHandler("connect", self.connect_command))
         self.app.add_handler(CommandHandler("board", self.board_command))
@@ -2439,7 +2644,10 @@ class TelegramBridge:
             BotCommand("gdrive", "☁️ Google Drive 업로드"),
             BotCommand("status", "📊 봇 및 tmux 세션 상태 확인"),
             BotCommand("help", "❓ 도움말 보기"),
-            BotCommand("new_project", "🆕 새 Claude 프로젝트 생성")
+            BotCommand("new_project", "🆕 새 Claude 프로젝트 생성"),
+            BotCommand("fresh", "🆕 현재 세션 종료 후 새 세션 시작"),
+            BotCommand("handoff", "📋 컨텍스트 이어받기 (새 세션 + /sciomc)"),
+            BotCommand("tfc", "🔧 tmux-fix-claude 실행 (세션 수정/재시작)"),
         ]
         
         await self.app.bot.set_my_commands(commands)
@@ -2927,8 +3135,8 @@ class TelegramBridge:
             all_sessions = await summary_helper.get_all_sessions_with_status_async()
 
             # Extract session info - unpack 5-tuple correctly (preserve last_prompt to avoid N+1 query)
-            # Reverse order for board: recent sessions (short wait time) at bottom
-            sessions_info = [(sn, wt, lp, st, hr) for sn, wt, lp, st, hr, *_ in reversed(all_sessions)]
+            # Already sorted ASC: working first, then shortest wait time at top
+            sessions_info = [(sn, wt, lp, st, hr) for sn, wt, lp, st, hr, *_ in all_sessions]
 
             if not sessions_info:
                 await reply_func(
@@ -3620,7 +3828,12 @@ class TelegramBridge:
                     if len(header + screen_text) > max_length:
                         # Truncate the content
                         available_space = max_length - len(header) - 60  # 60 chars for pre tag + truncation message
-                        truncated_text = screen_text[:available_space] + "\n\n... (내용이 길어 일부 생략됨)"
+                        tail_text = screen_text[-available_space:]
+                        # Drop potentially partial first line from tail-slice
+                        tail_lines = tail_text.split('\n')
+                        if len(tail_lines) > 1:
+                            tail_lines = tail_lines[1:]
+                        truncated_text = "... (앞부분 생략)\n\n" + '\n'.join(tail_lines)
                         message = f"{header}{truncated_text}</pre>"
                     else:
                         message = f"{header}{screen_text}</pre>"

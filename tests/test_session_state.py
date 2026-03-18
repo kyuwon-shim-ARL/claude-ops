@@ -675,12 +675,12 @@ class TestWideWindowAndOMCSignals:
         assert self.analyzer._detect_working_state(screen) is True
 
     def test_spinner_glyph_variants_with_tokens(self):
-        """Claude Code uses various spinner glyphs: ✶, ✻, ✢, ●.
+        """Claude Code uses various spinner glyphs: ·✢✳✶✻✽●⏺.
 
         Token patterns like '↓ 24.6k tokens' must be detected regardless
         of which glyph is used.
         """
-        for glyph in ['✶', '✻', '✢', '●']:
+        for glyph in ['·', '✢', '✳', '✶', '✻', '✽', '●', '⏺']:
             screen = (
                 f"● Some tool output\n"
                 f"  ⎿  result\n"
@@ -827,11 +827,75 @@ class TestWideWindowAndOMCSignals:
     # --- T2 verification: structural regex with all glyphs ---
 
     def test_structural_regex_all_glyphs(self):
-        """All _TOOL_GLYPHS (●✢✶✻) match the structural verb regex."""
-        for glyph in ['●', '✢', '✶', '✻']:
+        """All _TOOL_GLYPHS (·✢✳✶✻✽●⏺) match the structural verb regex."""
+        for glyph in ['·', '✢', '✳', '✶', '✻', '✽', '●', '⏺']:
             screen = f"{glyph} Running tests\n\n❯\n"
             assert self.analyzer._detect_working_state(screen) is True, \
                 f"Structural regex missed glyph {glyph}"
+
+    # --- T: Generic ellipsis pattern (random verbs) ---
+
+    def test_random_verb_with_ellipsis_is_working(self):
+        """Random verb with … (ellipsis) must be detected as WORKING.
+
+        Claude Code uses random verbs: Swooping…, Stewing…, Cogitating…, etc.
+        The ellipsis (U+2026) is the key indicator of active work.
+        """
+        for verb in ['Swooping', 'Stewing', 'Cogitating', 'Elucidating', 'Boondoggling']:
+            screen = f"✶ {verb}\u2026 (1h 51m 11s)\n\n❯\n"
+            assert self.analyzer._detect_working_state(screen) is True, \
+                f"Random verb '{verb}…' should be WORKING"
+
+    def test_random_verb_with_ellipsis_no_parens_is_working(self):
+        """Random verb with … but NO parenthesized info still WORKING."""
+        screen = "✶ Swooping\u2026\n\n❯\n"
+        assert self.analyzer._detect_working_state(screen) is True
+
+    def test_random_verb_with_tokens_and_thinking_is_working(self):
+        """Full status line with tokens and thinking marker."""
+        screen = "✶ Swooping\u2026 (1h 51m 11s · ↓ 9.2k tokens · thinking)\n\n❯\n"
+        assert self.analyzer._detect_working_state(screen) is True
+
+    def test_past_tense_cogitated_for_is_idle(self):
+        """'Cogitated for 5m 8s' (past tense, no …) must NOT be WORKING."""
+        screen = "✻ Cogitated for 5m 8s\n\n❯\n"
+        assert self.analyzer._detect_working_state(screen) is False
+
+    def test_past_tense_cogitated_long_duration_is_idle(self):
+        """'Cogitated for 26m 55s' (past tense) must NOT be WORKING."""
+        screen = "✻ Cogitated for 26m 55s\n\n❯\n"
+        assert self.analyzer._detect_working_state(screen) is False
+
+    def test_past_tense_various_verbs_are_idle(self):
+        """Various past-tense completion forms must all be IDLE."""
+        for verb in ['Worked', 'Cogitated', 'Thought', 'Processed']:
+            screen = f"✻ {verb} for 57s\n\n❯\n"
+            assert self.analyzer._detect_working_state(screen) is False, \
+                f"Past-tense '{verb} for' should NOT be WORKING"
+
+    def test_completion_with_background_tasks_is_working(self):
+        """Completion line + 'background tasks still running' = still WORKING."""
+        screen = (
+            "✻ Cogitated for 5m 8s, background tasks still running\n"
+            "\n"
+            "❯\n"
+        )
+        # "background tasks still running" string pattern should trigger WORKING
+        assert self.analyzer._detect_working_state(screen) is True
+
+    def test_churned_with_background_tasks_is_working(self):
+        """Real-world: '✻ Churned for 47s · 2 background tasks still running' = WORKING.
+
+        Main work is done but background tasks are pending results.
+        The 'background tasks still running' string must take priority over
+        the past-tense completion guard.
+        """
+        screen = (
+            "✻ Churned for 47s \xb7 2 background tasks still running (\u2193 to manage)\n"
+            "\n"
+            "❯\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is True
 
     # --- T7: collapse path performance test ---
 
