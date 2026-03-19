@@ -1,5 +1,5 @@
 version: 1
-updated: "2026-03-17T15:50:00Z"
+updated: "2026-03-19T15:10:00Z"
 scan_paths:
   - outputs/
 experiments:
@@ -119,3 +119,30 @@ experiments:
       - "T5: stale scrollback false positive 테스트"
       - "T6: filtered_narrow → check_content 리네이밍 + docstring 갱신"
       - "T7: collapse path 성능 테스트"
+  e009:
+    path: outputs/e009/
+    script: null
+    params: {}
+    outputs: []
+    status: experimental
+    description: "Wait-time fallback 수정 + 이중 삭제 경로 통합 — /summary 정렬 드리프트 근본 수정"
+    issue: 10
+    branch: null
+    depends_on: []
+    tasks:
+      - "T1: cleanup_stale_data(24h)와 _auto_validate(72h) 이중 삭제 경로 통합 → 단일 임계값 168h"
+      - "T2: _get_intelligent_fallback()에서 session_activity 의존 제거 → last_state_change_time 딕셔너리 추가"
+      - "T3: 단위 테스트 — 24h+/72h+/168h+ 시나리오 정렬 정확성 검증"
+  e010:
+    path: outputs/e010/
+    script: null
+    params: {}
+    outputs: []
+    status: experimental
+    description: "Context-limit notification re-arm + dead code 정리"
+    issue: 11
+    branch: null
+    depends_on: []
+    tasks:
+      - "T1: should_send_completion_notification()에 context-limit cooldown 만료 후 notification_sent re-arm fallback 추가"
+      - "T2: multi_monitor.py line 828 dead code is_working 변수 제거"

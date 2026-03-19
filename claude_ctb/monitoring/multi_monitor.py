@@ -264,6 +264,14 @@ class MultiSessionMonitor:
             # triggers auto-restart, not the regular completion event pipeline.
             return True, None
 
+        # Context-limit cooldown expiry re-arm fallback:
+        # If a context-limit restart happened and the cooldown has since expired,
+        # clear notification_sent so the next completion can fire normally.
+        if last_restart > 0 and (current_time - last_restart) > restart_cooldown:
+            if self.notification_sent.get(session_name, False):
+                self.notification_sent[session_name] = False
+                logger.debug(f"Re-armed notification for {session_name} after context-limit cooldown expired")
+
         # Enhanced duplicate prevention (does not apply to CONTEXT_LIMIT above)
         if self.notification_sent.get(session_name, False):
             return False, None
@@ -823,9 +831,6 @@ class MultiSessionMonitor:
                     
                     # Check for screen changes (updates activity time)
                     screen_changed = self.has_screen_changed(session_name)
-                    
-                    # Check if currently working
-                    is_working = self.is_working(session_name)
                     
                     # Log activity changes for debugging
                     if screen_changed:

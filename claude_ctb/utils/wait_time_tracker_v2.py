@@ -25,14 +25,14 @@ class ImprovedWaitTimeTracker:
     def __init__(self, 
                  completion_path: Optional[str] = None,
                  state_path: Optional[str] = None,
-                 max_reasonable_wait_hours: float = 72):
+                 max_reasonable_wait_hours: float = 168):
         """
         Initialize improved tracker
-        
+
         Args:
             completion_path: Path to store completion times
             state_path: Path to store session states
-            max_reasonable_wait_hours: Maximum reasonable wait time before using fallback (default 72h)
+            max_reasonable_wait_hours: Maximum reasonable wait time before using fallback (default 168h)
         """
         if completion_path is None:
             completion_path = "/tmp/claude_completion_times.json"
@@ -46,6 +46,9 @@ class ImprovedWaitTimeTracker:
         # Load existing data
         self.completion_times: Dict[str, float] = self._load_completions()
         self.session_states: Dict[str, str] = self._load_states()
+
+        # In-memory state change timestamps (not persisted — reset on restart)
+        self.last_state_change_time: Dict[str, float] = {}
         
         # Track last validation time to avoid excessive validation
         self.last_validation_time = 0
@@ -155,7 +158,10 @@ class ImprovedWaitTimeTracker:
             new_state: New state (e.g., 'waiting', 'working')
         """
         old_state = self.session_states.get(session_name, "unknown")
-        
+
+        # Record state change time for fallback use (in-memory only)
+        self.last_state_change_time[session_name] = time.time()
+
         # Auto-mark completion when transitioning from working to waiting
         if old_state == "working" and new_state == "waiting":
             logger.info(f"Auto-marking completion for {session_name} (working→waiting)")
@@ -213,19 +219,33 @@ class ImprovedWaitTimeTracker:
     
     def _get_intelligent_fallback(self, session_name: str) -> float:
         """
-        Get intelligent fallback estimate based on multiple heuristics
-        
+        Get intelligent fallback estimate based on multiple heuristics.
+
+        Priority:
+        1. last_state_change_time (in-memory, set by mark_state_transition)
+        2. tmux session_activity (legacy fallback for bot-restart compat)
+        3. Screen content heuristics
+        4. Conservative fixed estimate (900s)
+
         Args:
             session_name: Name of the session
-            
+
         Returns:
             Estimated wait time in seconds
         """
         import subprocess
-        import re
-        
+
+        current_time = time.time()
+
+        # 1. Prefer in-memory last_state_change_time (no tmux call needed)
+        last_change = self.last_state_change_time.get(session_name)
+        if last_change is not None:
+            elapsed = current_time - last_change
+            logger.debug(f"Fallback using last_state_change_time for {session_name}: {elapsed:.0f}s")
+            return elapsed
+
+        # 2. Legacy tmux fallback (used only after bot restart before first state transition)
         try:
-            # Try to get session info from tmux
             result = subprocess.run(
                 f"tmux list-sessions -F '#{{session_name}}:#{{session_created}}:#{{session_activity}}' | grep '^{session_name}:'",
                 shell=True,
@@ -233,34 +253,24 @@ class ImprovedWaitTimeTracker:
                 text=True,
                 timeout=5
             )
-            
+
             if result.returncode == 0 and result.stdout.strip():
-                # Parse tmux timestamps (seconds since epoch)
                 parts = result.stdout.strip().split(':')
                 if len(parts) >= 3:
                     try:
-                        created_timestamp = int(parts[1])
                         activity_timestamp = int(parts[2])
-                        current_time = time.time()
-                        
-                        # Use activity time as a better estimate
                         time_since_activity = current_time - activity_timestamp
-                        
-                        # If activity is recent (< 5 minutes), assume just completed
+
                         if time_since_activity < 300:
                             return time_since_activity
-                        
-                        # Otherwise, use a conservative estimate
-                        # Assume work completed somewhere between last activity and now
-                        estimated_wait = time_since_activity * 0.5  # Split the difference
-                        
-                        # Cap at reasonable maximum
+
+                        estimated_wait = time_since_activity * 0.5
                         return min(estimated_wait, self.max_reasonable_wait)
-                        
+
                     except (ValueError, IndexError):
                         pass
-            
-            # Fallback: Check if session has recent screen content changes
+
+            # 3. Screen content heuristics
             capture_result = subprocess.run(
                 f"tmux capture-pane -t {session_name} -p -S -5",
                 shell=True,
@@ -268,27 +278,23 @@ class ImprovedWaitTimeTracker:
                 text=True,
                 timeout=2
             )
-            
+
             if capture_result.returncode == 0:
                 content = capture_result.stdout.strip()
-                
-                # Look for completion indicators
+
                 if any(indicator in content.lower() for indicator in ['completed', 'done', 'finished', '✓', '✅']):
-                    # Likely recently completed, estimate 5-10 minutes
                     return 300 + (300 * 0.5)  # 7.5 minutes
-                
-                # Look for waiting indicators
+
                 if any(indicator in content.lower() for indicator in ['waiting', 'ready', '>']):
-                    # Likely been waiting a while, estimate 30 minutes
                     return 1800
-            
+
         except Exception as e:
             logger.error(f"Intelligent fallback failed for {session_name}: {e}")
-        
-        # Ultimate fallback: conservative estimate
+
+        # 4. Ultimate fallback
         return 900  # 15 minutes as neutral estimate
     
-    def cleanup_stale_data(self, max_age_hours: float = 24):
+    def cleanup_stale_data(self, max_age_hours: float = 168):
         """Remove data older than max_age_hours"""
         current_time = time.time()
         max_age_seconds = max_age_hours * 3600
