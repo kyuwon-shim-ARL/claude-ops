@@ -36,30 +36,43 @@ BIND_PORT = 8420
 
 _cached_state: Dict[str, Any] = {"version": 1, "updated_at": 0, "sessions": [], "_hash": ""}
 _prev_session_timestamps: Dict[str, float] = {}  # track per-session state change time
+_completion_times: Dict[str, float] = {}  # track working→idle/waiting transitions
 _state_analyzer = SessionStateAnalyzer()
 
 # Hold timer: keep WORKING state for a few seconds after indicators disappear
 # This prevents flickering during tool transitions (e.g., between Read → Edit)
 _working_hold: Dict[str, float] = {}  # session_name → last_seen_working_time
 _WORKING_HOLD_SECONDS = 8  # hold WORKING for 8s after last working indicator
+_FRESH_TTL = 300  # seconds to keep completed_at visible (5 minutes)
 
 
 def _probe_session(name: str) -> tuple:
     """Probe a single session's state and path (called in thread pool)."""
     from ..utils.session_state import SessionState
-    state = _state_analyzer.get_state(name)
+    raw_state = _state_analyzer.get_state(name)
+    state = raw_state
     now = time.time()
 
     # Hold timer: if state was recently WORKING, keep it WORKING through brief gaps
-    if state == SessionState.WORKING:
+    if raw_state == SessionState.WORKING:
         _working_hold[name] = now
-    elif state == SessionState.IDLE and name in _working_hold:
+    elif raw_state == SessionState.IDLE and name in _working_hold:
         elapsed = now - _working_hold[name]
+        # Raw state is IDLE but was recently WORKING → work just completed
+        # Record completion time immediately (before hold timer hides the transition)
+        if name not in _completion_times:
+            _completion_times[name] = now
+            logger.info(f"✅ Fresh completion: {name}")
         if elapsed < _WORKING_HOLD_SECONDS:
             logger.debug(f"⏳ Hold WORKING for {name} ({elapsed:.1f}s < {_WORKING_HOLD_SECONDS}s)")
             state = SessionState.WORKING
         else:
             del _working_hold[name]
+
+    # Expire stale completion times
+    completed_at = _completion_times.get(name)
+    if completed_at and (now - completed_at) >= _FRESH_TTL:
+        del _completion_times[name]
 
     path = session_manager.get_session_path(name)
     return name, state.value, path
@@ -93,10 +106,11 @@ def _poll_sessions() -> Dict[str, Any]:
             "state": state_val,
             "path": path,
             "updated_at": prev_ts,
+            "completed_at": _completion_times.get(name),
         })
 
-    # Content hash for SSE change detection (ignores updated_at fluctuations)
-    content_key = json.dumps([(s["name"], s["state"]) for s in session_list], sort_keys=True)
+    # Content hash for SSE change detection (includes completed_at for fresh notifications)
+    content_key = json.dumps([(s["name"], s["state"], bool(s.get("completed_at"))) for s in session_list], sort_keys=True)
     content_hash = hashlib.md5(content_key.encode()).hexdigest()[:8]
 
     # Clean up timestamps for removed sessions

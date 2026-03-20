@@ -4,10 +4,26 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claude-CTB Dashboard</title>
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="theme-color" content="#030712">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     @keyframes pulse-dot { 0%,100%{opacity:.4} 50%{opacity:1} }
     .pulse-dot { animation: pulse-dot 1.5s ease-in-out infinite; }
+
+    /* Fresh completion glow — bright amber pulse */
+    @keyframes fresh-glow {
+      0%,100% { box-shadow: 0 0 12px 3px rgba(251,191,36,0.25), inset 0 0 8px rgba(251,191,36,0.05); }
+      50%     { box-shadow: 0 0 28px 8px rgba(251,191,36,0.5), inset 0 0 12px rgba(251,191,36,0.1); }
+    }
+    .card-fresh {
+      animation: fresh-glow 2s ease-in-out infinite;
+      border-color: rgba(251,191,36,0.5) !important;
+    }
+    @media (prefers-reduced-motion: reduce) { .card-fresh { animation: none; } }
   </style>
 </head>
 <body class="bg-gray-950 text-gray-100 min-h-screen">
@@ -17,6 +33,7 @@
     <div class="flex items-center gap-3">
       <h1 class="text-lg font-semibold tracking-tight">Claude-CTB Dashboard</h1>
       <span id="badge-count" class="bg-gray-800 text-xs px-2 py-0.5 rounded-full">0 sessions</span>
+      <button id="btn-copy-names" class="hidden bg-gray-800 hover:bg-gray-700 text-xs px-2.5 py-0.5 rounded-full transition-colors cursor-pointer" title="Copy session names to clipboard">📋 Copy Names</button>
     </div>
     <div class="flex items-center gap-2 text-xs text-gray-500">
       <span id="conn-status" class="flex items-center gap-1">
@@ -48,9 +65,12 @@
     const grid = document.getElementById('grid');
     const emptyState = document.getElementById('empty-state');
     const badgeCount = document.getElementById('badge-count');
+    const btnCopyNames = document.getElementById('btn-copy-names');
     const connDot = document.getElementById('conn-dot');
     const connStatus = document.getElementById('conn-status');
     const lastUpdateEl = document.getElementById('last-update');
+
+    let sortedSessionNames = [];
 
     function formatAge(ts) {
       if (!ts || ts === 0) return '—';
@@ -78,23 +98,53 @@
       return idx >= 0 ? '~/' + p.slice(p.indexOf('/', idx + home.length) + 1) : p;
     }
 
+    const FRESH_TTL = 300; // 5 minutes
+
+    function getFreshInfo(session) {
+      // Fresh completion: only show when idle/waiting (not while working again)
+      if (!session.completed_at) return null;
+      if (session.state !== 'idle' && session.state !== 'waiting') return null;
+      const age = Date.now() / 1000 - session.completed_at;
+      if (age < 0 || age >= FRESH_TTL) return null;
+      const remaining = FRESH_TTL - age;
+      const pct = (remaining / FRESH_TTL) * 100;
+      const mins = Math.floor(age / 60);
+      const secs = Math.floor(age % 60);
+      const label = mins > 0 ? `완료 ${mins}분 ${secs}초 전` : `완료 ${secs}초 전`;
+      return { pct, label };
+    }
+
     function renderCard(session) {
       const cfg = STATE_CONFIG[session.state] || STATE_CONFIG.unknown;
       const name = escapeHtml(session.name);
       const display = escapeHtml(shortName(session.name));
       const pathStr = session.path ? escapeHtml(shortPath(session.path)) : '';
+      const fresh = getFreshInfo(session);
+
+      const freshClass = fresh ? ' card-fresh' : '';
+      const freshBar = fresh
+        ? `<div class="absolute top-0 left-0 h-1 bg-amber-400 rounded-t-lg transition-all duration-1000" style="width:${fresh.pct.toFixed(1)}%"></div>`
+        : '';
+      const freshBadge = fresh
+        ? `<span class="text-[0.6rem] font-bold text-gray-900 bg-amber-400 px-1.5 py-0.5 rounded-full ml-1.5 whitespace-nowrap" role="status">NEW</span>`
+        : '';
+      const updatedText = fresh
+        ? `<span class="text-amber-400 font-medium">${fresh.label}</span>`
+        : `<span>Updated: ${formatAge(session.updated_at)}</span>`;
+
       return `
-        <div class="rounded-lg border ${cfg.border} ${cfg.bg} p-4 flex flex-col gap-2 transition-all duration-300">
+        <div class="relative overflow-hidden rounded-lg border ${cfg.border} ${cfg.bg} p-4 flex flex-col gap-2 transition-all duration-300${freshClass}">
+          ${freshBar}
           <div class="flex items-center justify-between">
             <span class="font-mono text-sm font-medium truncate" title="${name}">${display}</span>
             <span class="flex items-center gap-1.5 text-xs text-gray-400">
               <span class="inline-block w-2 h-2 rounded-full ${cfg.dot}"></span>
-              ${cfg.label}
+              ${cfg.label}${freshBadge}
             </span>
           </div>
           ${pathStr ? `<div class="text-xs text-gray-600 font-mono truncate" title="${escapeHtml(session.path || '')}">${pathStr}</div>` : ''}
           <div class="flex items-center justify-between text-xs text-gray-500">
-            <span>Updated: ${formatAge(session.updated_at)}</span>
+            ${updatedText}
           </div>
         </div>
       `;
@@ -106,6 +156,8 @@
 
       if (sessions.length === 0) {
         emptyState.classList.remove('hidden');
+        btnCopyNames.classList.add('hidden');
+        sortedSessionNames = [];
         // Remove all cards but keep empty state
         Array.from(grid.children).forEach(el => {
           if (el !== emptyState) el.remove();
@@ -123,6 +175,10 @@
         // Within same state: most recently updated first
         return (b.updated_at || 0) - (a.updated_at || 0);
       });
+
+      // Store sorted names for copy button
+      sortedSessionNames = sessions.map(s => s.name);
+      btnCopyNames.classList.remove('hidden');
 
       // Replace grid content (keep empty state node)
       const cards = sessions.map(renderCard).join('');
@@ -182,6 +238,19 @@
     }
 
     // --- Auto-refresh age labels ---
+    // Fast refresh (10s) when fresh sessions exist, normal (30s) otherwise
+    let lastData = null;
+    function refreshRender() {
+      if (lastData) render(lastData);
+    }
+    const origRender = render;
+    render = function(data) {
+      lastData = data;
+      origRender(data);
+    };
+    // Re-render cached data every 10s to update fresh countdowns
+    setInterval(refreshRender, 10000);
+    // Full API refresh every 30s
     setInterval(() => {
       fetch('/api/sessions')
         .then(r => r.json())
@@ -189,8 +258,35 @@
         .catch(() => {});
     }, 30000);
 
+    // --- Copy session names ---
+    btnCopyNames.addEventListener('click', () => {
+      const text = sortedSessionNames.join('\n');
+      navigator.clipboard.writeText(text).then(() => {
+        const orig = btnCopyNames.textContent;
+        btnCopyNames.textContent = '✅ Copied!';
+        setTimeout(() => { btnCopyNames.textContent = orig; }, 1500);
+      }).catch(() => {
+        // Fallback for non-HTTPS contexts
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;opacity:0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        const orig = btnCopyNames.textContent;
+        btnCopyNames.textContent = '✅ Copied!';
+        setTimeout(() => { btnCopyNames.textContent = orig; }, 1500);
+      });
+    });
+
     // Start
     connect();
+
+    // Register service worker for PWA
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+    }
   </script>
 </body>
 </html>
