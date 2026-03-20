@@ -52,6 +52,19 @@
   </main>
 
   <script>
+    // --- Pin storage helpers ---
+    const PIN_KEY = 'ctb_pinned_sessions';
+    function getPinned() {
+      try { return new Set(JSON.parse(localStorage.getItem(PIN_KEY) || '[]')); }
+      catch { return new Set(); }
+    }
+    function savePinned(s) { localStorage.setItem(PIN_KEY, JSON.stringify([...s])); }
+    function togglePin(name) {
+      const p = getPinned();
+      p.has(name) ? p.delete(name) : p.add(name);
+      savePinned(p);
+    }
+
     // --- State color map ---
     const STATE_CONFIG = {
       working:       { color: 'emerald', label: 'Working',       dot: 'bg-emerald-400 pulse-dot', border: 'border-emerald-500/30', bg: 'bg-emerald-500/5' },
@@ -114,12 +127,28 @@
       return { pct, label };
     }
 
-    function renderCard(session) {
+    function getWorkBar(session) {
+      const info = session.work_info;
+      if (!info || info.total == null || info.total === 0) return null;
+      const completed = info.completed || 0;
+      const total = info.total;
+      const pct = Math.round((completed / total) * 100);
+      const color = pct >= 70 ? 'bg-emerald-400'
+                  : pct >= 30 ? 'bg-amber-400'
+                  :             'bg-red-400';
+      const textColor = pct >= 70 ? 'text-emerald-400'
+                      : pct >= 30 ? 'text-amber-400'
+                      :             'text-red-400';
+      return { pct, color, textColor, completed, total };
+    }
+
+    function renderCard(session, isPinned) {
       const cfg = STATE_CONFIG[session.state] || STATE_CONFIG.unknown;
       const name = escapeHtml(session.name);
       const display = escapeHtml(shortName(session.name));
       const pathStr = session.path ? escapeHtml(shortPath(session.path)) : '';
       const fresh = getFreshInfo(session);
+      const wb = getWorkBar(session);
 
       const freshClass = fresh ? ' card-fresh' : '';
       const freshBar = fresh
@@ -131,20 +160,35 @@
       const updatedText = fresh
         ? `<span class="text-amber-400 font-medium">${fresh.label}</span>`
         : `<span>Updated: ${formatAge(session.updated_at)}</span>`;
+      const workText = wb
+        ? `<span class="${wb.textColor} font-medium">${wb.completed}/${wb.total} tasks</span>`
+        : '';
+      const workBar = wb
+        ? `<div class="absolute bottom-0 left-0 h-[3px] ${wb.color} rounded-b-lg transition-all duration-700 opacity-70" style="width:${wb.pct}%"></div>`
+        : '';
+
+      const pinIcon = isPinned ? '★' : '☆';
+      const pinClass = isPinned
+        ? 'text-amber-400 opacity-100'
+        : 'text-gray-600 opacity-40 hover:opacity-80';
 
       return `
-        <div class="relative overflow-hidden rounded-lg border ${cfg.border} ${cfg.bg} p-4 flex flex-col gap-2 transition-all duration-300${freshClass}">
+        <div class="group relative overflow-hidden rounded-lg border ${cfg.border} ${cfg.bg} pl-10 pr-4 pt-4 pb-4 flex flex-col gap-2 transition-all duration-300${freshClass}">
           ${freshBar}
+          ${workBar}
+          <button data-pin-session="${name}" class="${pinClass} absolute top-2 left-2 min-w-[44px] min-h-[44px] flex items-center justify-center text-lg leading-none cursor-pointer transition-opacity" style="touch-action:manipulation" title="${isPinned ? 'Unpin session' : 'Pin session'}">${pinIcon}</button>
           <div class="flex items-center justify-between">
             <span class="font-mono text-sm font-medium truncate" title="${name}">${display}</span>
             <span class="flex items-center gap-1.5 text-xs text-gray-400">
               <span class="inline-block w-2 h-2 rounded-full ${cfg.dot}"></span>
               ${cfg.label}${freshBadge}
+              <button data-copy-cmd="/sessions ${name}" class="ml-1 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 min-w-[44px] min-h-[44px] flex items-center justify-center text-gray-600 hover:text-gray-300 transition-opacity cursor-pointer select-none" style="touch-action:manipulation" title="Copy Telegram command" aria-label="Copy /sessions command for ${display}">⎘</button>
             </span>
           </div>
           ${pathStr ? `<div class="text-xs text-gray-600 font-mono truncate" title="${escapeHtml(session.path || '')}">${pathStr}</div>` : ''}
           <div class="flex items-center justify-between text-xs text-gray-500">
             ${updatedText}
+            ${workText}
           </div>
         </div>
       `;
@@ -167,12 +211,20 @@
 
       emptyState.classList.add('hidden');
 
-      // Sort: state priority first, then most recently updated within each state
+      // Pin tier sort
+      const pinned = getPinned();
+      // Prune stale pins (only keep pins for active sessions)
+      const activeNames = new Set(sessions.map(s => s.name));
+      const prunedPins = new Set([...pinned].filter(n => activeNames.has(n)));
+      if (prunedPins.size !== pinned.size) savePinned(prunedPins);
+
+      // Sort: pinned first, then state priority, then most recently updated
       const order = { working: 0, waiting: 1, context_limit: 2, error: 3, idle: 4, unknown: 5 };
       sessions.sort((a, b) => {
+        const tierDiff = (prunedPins.has(a.name) ? 0 : 1) - (prunedPins.has(b.name) ? 0 : 1);
+        if (tierDiff !== 0) return tierDiff;
         const stateDiff = (order[a.state] ?? 9) - (order[b.state] ?? 9);
         if (stateDiff !== 0) return stateDiff;
-        // Within same state: most recently updated first
         return (b.updated_at || 0) - (a.updated_at || 0);
       });
 
@@ -180,13 +232,29 @@
       sortedSessionNames = sessions.map(s => s.name);
       btnCopyNames.classList.remove('hidden');
 
-      // Replace grid content (keep empty state node)
-      const cards = sessions.map(renderCard).join('');
+      // Split into pinned and normal groups
+      const pinnedSessions = sessions.filter(s => prunedPins.has(s.name));
+      const normalSessions = sessions.filter(s => !prunedPins.has(s.name));
+      const hasBothGroups = pinnedSessions.length > 0 && normalSessions.length > 0;
+
+      // Build HTML with optional section dividers
+      let html = '';
+      if (pinnedSessions.length > 0) {
+        html += '<div class="col-span-full flex items-center gap-2 text-xs text-amber-400 mt-1"><span>★ Pinned</span><div class="flex-1 border-t border-amber-400/20"></div></div>';
+        html += pinnedSessions.map(s => renderCard(s, true)).join('');
+      }
+      if (hasBothGroups) {
+        html += '<div class="col-span-full flex items-center gap-2 text-xs text-gray-500 mt-1"><span>Others</span><div class="flex-1 border-t border-gray-700"></div></div>';
+      }
+      if (normalSessions.length > 0) {
+        html += normalSessions.map(s => renderCard(s, false)).join('');
+      }
+
       // Remove old cards
       Array.from(grid.children).forEach(el => {
         if (el !== emptyState) el.remove();
       });
-      grid.insertAdjacentHTML('afterbegin', cards);
+      grid.insertAdjacentHTML('afterbegin', html);
 
       // Update timestamp
       if (data.updated_at) {
@@ -194,6 +262,15 @@
         lastUpdateEl.querySelector('time').textContent = formatAge(data.updated_at);
       }
     }
+
+    // --- Pin button event delegation ---
+    grid.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-pin-session]');
+      if (!btn) return;
+      e.stopPropagation();
+      togglePin(btn.dataset.pinSession);
+      if (lastData) render(lastData);
+    });
 
     // --- SSE Connection ---
     let evtSource = null;
@@ -258,25 +335,50 @@
         .catch(() => {});
     }, 30000);
 
+    // --- Clipboard helper (HTTP/Tailscale safe) ---
+    function _execCopy(text) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      try { document.execCommand('copy'); } catch (_) {}
+      document.body.removeChild(ta);
+    }
+    function copyToClipboard(text, onSuccess) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(onSuccess).catch(() => { _execCopy(text); onSuccess(); });
+      } else {
+        _execCopy(text);
+        onSuccess();
+      }
+    }
+
     // --- Copy session names ---
     btnCopyNames.addEventListener('click', () => {
       const text = sortedSessionNames.join('\n');
-      navigator.clipboard.writeText(text).then(() => {
+      copyToClipboard(text, () => {
         const orig = btnCopyNames.textContent;
         btnCopyNames.textContent = '✅ Copied!';
         setTimeout(() => { btnCopyNames.textContent = orig; }, 1500);
-      }).catch(() => {
-        // Fallback for non-HTTPS contexts
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        ta.style.cssText = 'position:fixed;opacity:0';
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        const orig = btnCopyNames.textContent;
-        btnCopyNames.textContent = '✅ Copied!';
-        setTimeout(() => { btnCopyNames.textContent = orig; }, 1500);
+      });
+    });
+
+    // --- Copy command event delegation ---
+    grid.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-copy-cmd]');
+      if (!btn) return;
+      e.stopPropagation();
+      const cmd = btn.dataset.copyCmd;
+      copyToClipboard(cmd, () => {
+        const orig = btn.textContent;
+        btn.textContent = '✓';
+        btn.classList.add('text-emerald-400');
+        setTimeout(() => {
+          btn.textContent = orig;
+          btn.classList.remove('text-emerald-400');
+        }, 1500);
       });
     });
 

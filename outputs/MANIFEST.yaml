@@ -1,5 +1,5 @@
 version: 1
-updated: "2026-03-19T15:10:00Z"
+updated: "2026-03-20T22:50:00Z"
 scan_paths:
   - outputs/
 experiments:
@@ -146,3 +146,18 @@ experiments:
     tasks:
       - "T1: should_send_completion_notification()에 context-limit cooldown 만료 후 notification_sent re-arm fallback 추가"
       - "T2: multi_monitor.py line 828 dead code is_working 변수 제거"
+  e011:
+    path: outputs/e011/
+    script: claude_ctb/web_dashboard/static/index.html
+    params: {}
+    outputs: []
+    status: experimental
+    description: "Dashboard UX Enhancement: 클립보드 복사 + 핀/티어 + 작업 진행률 시각화"
+    issue: 12
+    branch: null
+    depends_on: [e003, e004]
+    tasks:
+      - "T1: 세션 카드 클릭시 텔레그램 커맨드 클립보드 복사 (copy icon + event delegation + copyToClipboard helper)"
+      - "T2: 세션 핀/티어 기능 (localStorage 2-tier pinned/normal + 코너 핀 아이콘 + section divider)"
+      - "T3: Work tracking 백엔드 (path→repo 매핑 via .omc-config.sh + GitHub API 60s TTL 캐시 + work_info JSON)"
+      - "T4: Work progress UI (하단 3px 프로그레스 바 red/amber/emerald + task count 텍스트)"
