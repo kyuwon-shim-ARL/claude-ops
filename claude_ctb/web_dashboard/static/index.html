@@ -112,6 +112,19 @@
     }
 
     const FRESH_TTL = 300; // 5 minutes
+    const STALE_FLOOR = 0.4;    // minimum opacity for stale idle sessions
+    const STALE_DURATION = 3600; // 1 hour to reach floor
+
+    function getStaleOpacity(session, fresh) {
+      // Only fade idle sessions that are past their fresh window
+      if (fresh) return 1;
+      if (session.state !== 'idle') return 1;
+      if (!session.updated_at) return 1;
+      const age = Date.now() / 1000 - session.updated_at;
+      if (age <= 0) return 1;
+      if (age >= STALE_DURATION) return STALE_FLOOR;
+      return 1 - (1 - STALE_FLOOR) * (age / STALE_DURATION);
+    }
 
     function getFreshInfo(session) {
       // Fresh completion: only show when idle/waiting (not while working again)
@@ -149,8 +162,10 @@
       const pathStr = session.path ? escapeHtml(shortPath(session.path)) : '';
       const fresh = getFreshInfo(session);
       const wb = getWorkBar(session);
+      const opacity = getStaleOpacity(session, fresh);
 
       const freshClass = fresh ? ' card-fresh' : '';
+      const staleStyle = opacity < 1 ? ` style="opacity:${opacity.toFixed(2)}"` : '';
       const freshBar = fresh
         ? `<div class="absolute top-0 left-0 h-1 bg-amber-400 rounded-t-lg transition-all duration-1000" style="width:${fresh.pct.toFixed(1)}%"></div>`
         : '';
@@ -173,7 +188,7 @@
         : 'text-gray-600 opacity-40 hover:opacity-80';
 
       return `
-        <div class="group relative overflow-hidden rounded-lg border ${cfg.border} ${cfg.bg} pl-10 pr-4 pt-4 pb-4 flex flex-col gap-2 transition-all duration-300${freshClass}">
+        <div class="group relative overflow-hidden rounded-lg border ${cfg.border} ${cfg.bg} pl-10 pr-4 pt-4 pb-4 flex flex-col gap-2 transition-all duration-300${freshClass}"${staleStyle}>
           ${freshBar}
           ${workBar}
           <button data-pin-session="${name}" class="${pinClass} absolute top-2 left-2 min-w-[44px] min-h-[44px] flex items-center justify-center text-lg leading-none cursor-pointer transition-opacity" style="touch-action:manipulation" title="${isPinned ? 'Unpin session' : 'Pin session'}">${pinIcon}</button>
