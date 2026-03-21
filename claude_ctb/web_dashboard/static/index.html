@@ -68,7 +68,13 @@
 
     // --- Notification system ---
     const NOTIF_KEY = 'ctb_notif_enabled';
-    const notifiedSet = new Set(); // tracks "name:completed_at" to prevent duplicates
+    const NOTIF_COOLDOWN_KEY = 'ctb_notif_cooldown';
+    const NOTIF_COOLDOWN = 300; // 5 min — same as FRESH_TTL
+    // Cooldown map: { sessionName: lastNotifiedTimestamp } persisted in localStorage
+    function getNotifCooldowns() {
+      try { return JSON.parse(localStorage.getItem(NOTIF_COOLDOWN_KEY) || '{}'); } catch { return {}; }
+    }
+    function saveNotifCooldowns(m) { localStorage.setItem(NOTIF_COOLDOWN_KEY, JSON.stringify(m)); }
     let notifEnabled = localStorage.getItem(NOTIF_KEY) === 'true';
     let audioCtx = null;
 
@@ -137,15 +143,20 @@
     function checkFreshPinned(sessions) {
       if (!notifEnabled) return;
       const pinned = getPinned();
+      const cooldowns = getNotifCooldowns();
+      const now = Date.now() / 1000;
+      let changed = false;
       for (const s of sessions) {
         if (!pinned.has(s.name)) continue;
         const fresh = getFreshInfo(s);
         if (!fresh) continue;
-        const key = `${s.name}:${s.completed_at}`;
-        if (notifiedSet.has(key)) continue;
-        notifiedSet.add(key);
+        const lastNotif = cooldowns[s.name] || 0;
+        if (now - lastNotif < NOTIF_COOLDOWN) continue;
+        cooldowns[s.name] = now;
+        changed = true;
         notifyCompletion(s.name);
       }
+      if (changed) saveNotifCooldowns(cooldowns);
     }
 
     // --- State color map ---
