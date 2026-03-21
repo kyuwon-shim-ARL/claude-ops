@@ -120,8 +120,7 @@
             reg.showNotification('Claude 작업 완료', {
               body: `${display} 세션이 완료되었습니다`,
               icon: '/static/icon-192.png',
-              tag: `ctb-done-${sessionName}`,
-              renotify: true,
+              tag: `ctb-done-${sessionName}-${Date.now()}`,
               vibrate: [200, 100, 200],
             });
           });
@@ -129,7 +128,7 @@
           new Notification('Claude 작업 완료', {
             body: `${display} 세션이 완료되었습니다`,
             icon: '/static/icon-192.png',
-            tag: `ctb-done-${sessionName}`,
+            tag: `ctb-done-${sessionName}-${Date.now()}`,
           });
         }
       }
