@@ -41,6 +41,7 @@
         Connecting…
       </span>
       <span id="last-update" class="hidden">Updated <time></time></span>
+      <button id="btn-notif" class="bg-gray-800 hover:bg-gray-700 px-2 py-0.5 rounded-full transition-colors cursor-pointer" title="Toggle completion alerts">🔕</button>
     </div>
   </header>
 
@@ -63,6 +64,89 @@
       const p = getPinned();
       p.has(name) ? p.delete(name) : p.add(name);
       savePinned(p);
+    }
+
+    // --- Notification system ---
+    const NOTIF_KEY = 'ctb_notif_enabled';
+    const notifiedSet = new Set(); // tracks "name:completed_at" to prevent duplicates
+    let notifEnabled = localStorage.getItem(NOTIF_KEY) === 'true';
+    let audioCtx = null;
+
+    const btnNotif = document.getElementById('btn-notif');
+    function updateNotifBtn() {
+      btnNotif.textContent = notifEnabled ? '🔔' : '🔕';
+      btnNotif.title = notifEnabled ? 'Alerts ON (click to disable)' : 'Alerts OFF (click to enable)';
+    }
+    updateNotifBtn();
+
+    btnNotif.addEventListener('click', async () => {
+      if (!notifEnabled) {
+        // Request permission + unlock audio
+        if ('Notification' in window && Notification.permission === 'default') {
+          await Notification.requestPermission();
+        }
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        notifEnabled = true;
+      } else {
+        notifEnabled = false;
+      }
+      localStorage.setItem(NOTIF_KEY, notifEnabled);
+      updateNotifBtn();
+    });
+
+    function playBeep() {
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.frequency.value = 880;
+        gain.gain.value = 0.3;
+        osc.start();
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        osc.stop(audioCtx.currentTime + 0.3);
+      } catch (_) {}
+    }
+
+    function notifyCompletion(sessionName) {
+      const display = shortName(sessionName);
+      playBeep();
+      // Try native notification (requires HTTPS / secure context)
+      if ('Notification' in window && Notification.permission === 'granted') {
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+          navigator.serviceWorker.ready.then(reg => {
+            reg.showNotification('Claude 작업 완료', {
+              body: `${display} 세션이 완료되었습니다`,
+              icon: '/static/icon-192.png',
+              tag: `ctb-done-${sessionName}`,
+              renotify: true,
+              vibrate: [200, 100, 200],
+            });
+          });
+        } else {
+          new Notification('Claude 작업 완료', {
+            body: `${display} 세션이 완료되었습니다`,
+            icon: '/static/icon-192.png',
+            tag: `ctb-done-${sessionName}`,
+          });
+        }
+      }
+    }
+
+    function checkFreshPinned(sessions) {
+      if (!notifEnabled) return;
+      const pinned = getPinned();
+      for (const s of sessions) {
+        if (!pinned.has(s.name)) continue;
+        const fresh = getFreshInfo(s);
+        if (!fresh) continue;
+        const key = `${s.name}:${s.completed_at}`;
+        if (notifiedSet.has(key)) continue;
+        notifiedSet.add(key);
+        notifyCompletion(s.name);
+      }
     }
 
     // --- State color map ---
@@ -309,6 +393,8 @@
     render = function(data) {
       lastData = data;
       origRender(data);
+      // Check pinned sessions for fresh completions → notify
+      if (data.sessions) checkFreshPinned(data.sessions);
     };
     // Re-render cached data every 10s to update fresh countdowns
     setInterval(refreshRender, 10000);
