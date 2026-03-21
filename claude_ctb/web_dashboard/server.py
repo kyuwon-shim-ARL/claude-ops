@@ -55,14 +55,15 @@ def _probe_session(name: str) -> tuple:
     # Hold timer: if state was recently WORKING, keep it WORKING through brief gaps
     if raw_state == SessionState.WORKING:
         _working_hold[name] = now
-    elif raw_state == SessionState.IDLE and name in _working_hold:
+        # Clear previous completion so next completion can be detected
+        _completion_times.pop(name, None)
+    elif raw_state in (SessionState.IDLE, SessionState.WAITING) and name in _working_hold:
         elapsed = now - _working_hold[name]
-        # Raw state is IDLE but was recently WORKING → work just completed
-        # Record completion time immediately (before hold timer hides the transition)
+        # Was recently WORKING → work just completed (IDLE or WAITING)
         if name not in _completion_times:
             _completion_times[name] = now
             logger.info(f"✅ Fresh completion: {name}")
-        if elapsed < _WORKING_HOLD_SECONDS:
+        if raw_state == SessionState.IDLE and elapsed < _WORKING_HOLD_SECONDS:
             logger.debug(f"⏳ Hold WORKING for {name} ({elapsed:.1f}s < {_WORKING_HOLD_SECONDS}s)")
             state = SessionState.WORKING
         else:
