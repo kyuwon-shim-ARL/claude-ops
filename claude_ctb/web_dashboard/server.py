@@ -57,7 +57,7 @@ def _probe_session(name: str) -> tuple:
         _working_hold[name] = now
         # Clear previous completion so next completion can be detected
         _completion_times.pop(name, None)
-    elif raw_state in (SessionState.IDLE, SessionState.WAITING) and name in _working_hold:
+    elif raw_state in (SessionState.IDLE, SessionState.WAITING_INPUT) and name in _working_hold:
         elapsed = now - _working_hold[name]
         # Was recently WORKING → work just completed (IDLE or WAITING)
         if name not in _completion_times:
