@@ -12,9 +12,6 @@ import hashlib
 import json
 import logging
 import os
-import re
-import subprocess
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -47,120 +44,6 @@ _state_analyzer = SessionStateAnalyzer()
 _working_hold: Dict[str, float] = {}  # session_name → last_seen_working_time
 _WORKING_HOLD_SECONDS = 8  # hold WORKING for 8s after last working indicator
 _FRESH_TTL = 300  # seconds to keep completed_at visible (5 minutes)
-
-_work_cache: Dict[str, Any] = {}  # repo_slug → {total, completed, repo, cached_at}
-_work_cache_lock = threading.Lock()
-_WORK_POLL_INTERVAL = 60  # seconds
-
-
-def _get_repo_for_path(path: str) -> "str | None":
-    """Map session path to GitHub repo slug via .omc-config.sh (grep, NOT source)."""
-    if not path:
-        return None
-    # Find git root first
-    try:
-        result = subprocess.run(
-            ["git", "-C", path, "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5
-        )
-        git_root = result.stdout.strip() if result.returncode == 0 else path
-    except Exception:
-        git_root = path
-
-    config_path = os.path.join(git_root, ".omc-config.sh")
-    if not os.path.isfile(config_path):
-        return None
-    try:
-        with open(config_path, 'r') as f:
-            content = f.read()
-        match = re.search(r'OMC_GH_REPO="([^"]+)"', content)
-        return match.group(1) if match else None
-    except Exception:
-        return None
-
-
-def _query_work_info(repo_slug: str) -> "Dict[str, Any] | None":
-    """Query GitHub issues for task completion data. Runs in executor thread."""
-    try:
-        result = subprocess.run(
-            ["gh", "issue", "list", "--repo", repo_slug, "--state", "open",
-             "--json", "number,title,body", "--limit", "100"],
-            capture_output=True, text=True, timeout=30
-        )
-        if result.returncode != 0:
-            return None
-
-        import json as _json
-        issues = _json.loads(result.stdout)
-        total = 0
-        completed = 0
-        for issue in issues:
-            body = issue.get("body", "") or ""
-            # Count task checkboxes
-            checks = re.findall(r'- \[([ xX])\]', body)
-            total += len(checks)
-            completed += sum(1 for c in checks if c in ('x', 'X'))
-
-        if total == 0:
-            return None
-
-        return {
-            "total": total,
-            "completed": completed,
-            "repo": repo_slug,
-            "open_issues": len(issues),
-            "cached_at": time.time(),
-        }
-    except Exception as e:
-        logger.warning(f"Work info query failed for {repo_slug}: {e}")
-        return None
-
-
-async def _background_work_poller():
-    """Background task that polls GitHub for work info every 60 seconds.
-    Uses run_in_executor to avoid blocking the event loop (H2 fix)."""
-    global _work_cache
-    logger.info("Work info poller started")
-    # Initial delay to stagger with session poller (M2 fix: cold start)
-    await asyncio.sleep(10)
-    while True:
-        try:
-            loop = asyncio.get_running_loop()
-            # Collect unique repos from current sessions
-            sessions = _cached_state.get("sessions", [])
-            path_repo_map: Dict[str, str] = {}
-            for s in sessions:
-                path = s.get("path")
-                if path and path not in path_repo_map:
-                    repo = await loop.run_in_executor(None, _get_repo_for_path, path)
-                    if repo:
-                        path_repo_map[path] = repo
-
-            # Query each unique repo (deduplicated)
-            unique_repos = set(path_repo_map.values())
-            new_cache: Dict[str, Any] = {}
-            for repo in unique_repos:
-                info = await loop.run_in_executor(None, _query_work_info, repo)
-                if info:
-                    new_cache[repo] = info
-                else:
-                    # Keep previous cache on failure (M2/S3 fix)
-                    with _work_cache_lock:
-                        prev = _work_cache.get(repo)
-                    if prev:
-                        new_cache[repo] = prev
-
-            with _work_cache_lock:
-                _work_cache = new_cache
-
-            # Store path→repo mapping for session enrichment
-            _work_cache["__path_map__"] = path_repo_map
-
-            logger.debug(f"Work info: {len(unique_repos)} repos, {sum(1 for v in new_cache.values() if isinstance(v, dict) and 'total' in v)} with data")
-        except Exception as e:
-            logger.warning(f"Work poller error: {e}", exc_info=True)
-        await asyncio.sleep(_WORK_POLL_INTERVAL)
-
 
 def _probe_session(name: str) -> tuple:
     """Probe a single session's state and path (called in thread pool)."""
@@ -217,27 +100,16 @@ def _poll_sessions() -> Dict[str, Any]:
             _prev_session_timestamps[name] = now
             prev_ts = now
 
-        # Enrich with work_info from cache
-        work_info = None
-        with _work_cache_lock:
-            path_map = _work_cache.get("__path_map__", {})
-            repo = path_map.get(path)
-            if repo:
-                info = _work_cache.get(repo)
-                if info and isinstance(info, dict) and "total" in info:
-                    work_info = {"total": info["total"], "completed": info["completed"], "repo": info["repo"]}
-
         session_list.append({
             "name": name,
             "state": state_val,
             "path": path,
             "updated_at": prev_ts,
             "completed_at": _completion_times.get(name),
-            "work_info": work_info,
         })
 
-    # Content hash for SSE change detection (includes completed_at and work_info for fresh notifications)
-    content_key = json.dumps([(s["name"], s["state"], bool(s.get("completed_at")), s.get("work_info")) for s in session_list], sort_keys=True)
+    # Content hash for SSE change detection (includes completed_at for fresh notifications)
+    content_key = json.dumps([(s["name"], s["state"], bool(s.get("completed_at"))) for s in session_list], sort_keys=True)
     content_hash = hashlib.md5(content_key.encode()).hexdigest()[:8]
 
     # Clean up timestamps for removed sessions
@@ -273,16 +145,10 @@ async def lifespan(app: FastAPI):
     """Start background poller on startup, cancel on shutdown."""
     logger.info(f"Dashboard server starting on {BIND_HOST}:{BIND_PORT}")
     task = asyncio.create_task(_background_poller())
-    work_task = asyncio.create_task(_background_work_poller())
     yield
     task.cancel()
     try:
         await task
-    except asyncio.CancelledError:
-        pass
-    work_task.cancel()
-    try:
-        await work_task
     except asyncio.CancelledError:
         pass
     logger.info("Dashboard server shutting down")
