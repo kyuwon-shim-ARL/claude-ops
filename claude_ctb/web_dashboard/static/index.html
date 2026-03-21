@@ -45,7 +45,7 @@
   </header>
 
   <!-- Session Grid -->
-  <main id="grid" class="p-4 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+  <main id="grid" class="p-4 grid gap-2 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
     <div class="col-span-full text-center text-gray-600 py-20 text-sm" id="empty-state">
       No sessions detected. Start a Claude session to see it here.
     </div>
@@ -104,12 +104,6 @@
       return name.replace(/^claude[_-]/, '');
     }
 
-    function shortPath(p) {
-      if (!p) return '';
-      const home = '/home/';
-      const idx = p.indexOf(home);
-      return idx >= 0 ? '~/' + p.slice(p.indexOf('/', idx + home.length) + 1) : p;
-    }
 
     const FRESH_TTL = 300; // 5 minutes
     const STALE_FLOOR = 0.4;    // minimum opacity for stale idle sessions
@@ -146,7 +140,6 @@
       const cfg = STATE_CONFIG[session.state] || STATE_CONFIG.unknown;
       const name = escapeHtml(session.name);
       const display = escapeHtml(shortName(session.name));
-      const pathStr = session.path ? escapeHtml(shortPath(session.path)) : '';
       const fresh = getFreshInfo(session);
       const opacity = getStaleOpacity(session, fresh);
 
@@ -162,13 +155,13 @@
         ? `<span class="text-amber-400 font-medium">${fresh.label}</span>`
         : `<span>Updated: ${formatAge(session.updated_at)}</span>`;
 
-      const pinIcon = isPinned ? '★' : '☆';
+      const pinIcon = '📌';
       const pinClass = isPinned
         ? 'text-amber-400 opacity-100'
         : 'text-gray-600 opacity-40 hover:opacity-80';
 
       return `
-        <div class="group relative overflow-hidden rounded-lg border ${cfg.border} ${cfg.bg} pl-10 pr-4 pt-4 pb-4 flex flex-col gap-2 transition-all duration-300${freshClass}"${staleStyle}>
+        <div class="group relative overflow-hidden rounded-lg border ${cfg.border} ${cfg.bg} pl-8 pr-3 pt-3 pb-3 flex flex-col gap-1 transition-all duration-300${freshClass}"${staleStyle}>
           ${freshBar}
           <button data-pin-session="${name}" class="${pinClass} absolute top-2 left-2 min-w-[44px] min-h-[44px] flex items-center justify-center text-lg leading-none cursor-pointer transition-opacity" style="touch-action:manipulation" title="${isPinned ? 'Unpin session' : 'Pin session'}">${pinIcon}</button>
           <div class="flex items-center justify-between">
@@ -179,7 +172,6 @@
               <button data-copy-cmd="/sessions ${name}" class="ml-1 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 min-w-[44px] min-h-[44px] flex items-center justify-center text-gray-600 hover:text-gray-300 transition-opacity cursor-pointer select-none" style="touch-action:manipulation" title="Copy Telegram command" aria-label="Copy /sessions command for ${display}">⎘</button>
             </span>
           </div>
-          ${pathStr ? `<div class="text-xs text-gray-600 font-mono truncate" title="${escapeHtml(session.path || '')}">${pathStr}</div>` : ''}
           <div class="text-xs text-gray-500">
             ${updatedText}
           </div>
@@ -233,7 +225,7 @@
       // Build HTML with optional section dividers
       let html = '';
       if (pinnedSessions.length > 0) {
-        html += '<div class="col-span-full flex items-center gap-2 text-xs text-amber-400 mt-1"><span>★ Pinned</span><div class="flex-1 border-t border-amber-400/20"></div></div>';
+        html += '<div class="col-span-full flex items-center gap-2 text-xs text-amber-400 mt-1"><span>📌 Pinned</span><div class="flex-1 border-t border-amber-400/20"></div></div>';
         html += pinnedSessions.map(s => renderCard(s, true)).join('');
       }
       if (hasBothGroups) {

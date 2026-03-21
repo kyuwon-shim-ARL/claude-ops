@@ -94,6 +94,11 @@ completion-monitor.log*
 .claude*
 .omc/
 
+# Generated artifacts
+.failure-log/
+.state/
+*.vsix
+
 # Debug and testing
 /tmp/claude-ops-debug/
 debug_session_*.json
