@@ -23,7 +23,19 @@
       animation: fresh-glow 2s ease-in-out infinite;
       border-color: rgba(251,191,36,0.5) !important;
     }
-    @media (prefers-reduced-motion: reduce) { .card-fresh { animation: none; } }
+    /* Work-started sparkle — emerald burst for 10s on IDLE→WORKING */
+    @keyframes work-sparkle {
+      0%   { box-shadow: 0 0 8px 2px rgba(52,211,153,0.3), inset 0 0 6px rgba(52,211,153,0.05); border-color: rgba(52,211,153,0.5); }
+      25%  { box-shadow: 0 0 24px 8px rgba(52,211,153,0.6), inset 0 0 12px rgba(52,211,153,0.1); border-color: rgba(52,211,153,0.8); }
+      50%  { box-shadow: 0 0 8px 2px rgba(52,211,153,0.2), inset 0 0 4px rgba(52,211,153,0.03); border-color: rgba(52,211,153,0.4); }
+      75%  { box-shadow: 0 0 20px 6px rgba(52,211,153,0.5), inset 0 0 10px rgba(52,211,153,0.08); border-color: rgba(52,211,153,0.7); }
+      100% { box-shadow: 0 0 8px 2px rgba(52,211,153,0.3), inset 0 0 6px rgba(52,211,153,0.05); border-color: rgba(52,211,153,0.5); }
+    }
+    .card-work-sparkle {
+      animation: work-sparkle 1.2s ease-in-out infinite;
+      border-color: rgba(52,211,153,0.6) !important;
+    }
+    @media (prefers-reduced-motion: reduce) { .card-fresh, .card-work-sparkle { animation: none; } }
   </style>
 </head>
 <body class="bg-gray-950 text-gray-100 min-h-screen">
@@ -179,6 +191,10 @@
 
     let sortedSessionNames = [];
 
+    // Track previous states for IDLE→WORKING sparkle detection
+    const _prevStates = {};        // sessionName → previous state string
+    const _sparkleUntil = {};      // sessionName → timestamp when sparkle expires
+
     function formatAge(ts) {
       if (!ts || ts === 0) return '—';
       const diff = Math.floor(Date.now() / 1000 - ts);
@@ -237,7 +253,8 @@
       const fresh = getFreshInfo(session);
       const opacity = getStaleOpacity(session, fresh);
 
-      const freshClass = fresh ? ' card-fresh' : '';
+      const sparkle = _sparkleUntil[session.name] && Date.now() < _sparkleUntil[session.name];
+      const freshClass = fresh ? ' card-fresh' : sparkle ? ' card-work-sparkle' : '';
       const staleStyle = opacity < 1 ? ` style="opacity:${opacity.toFixed(2)}"` : '';
       const freshBar = fresh
         ? `<div class="absolute top-0 left-0 h-1 bg-amber-400 rounded-t-lg transition-all duration-1000" style="width:${fresh.pct.toFixed(1)}%"></div>`
@@ -289,6 +306,16 @@
       }
 
       emptyState.classList.add('hidden');
+
+      // Detect IDLE→WORKING transitions → 10s sparkle
+      const now = Date.now();
+      for (const s of sessions) {
+        const prev = _prevStates[s.name];
+        if (prev && prev !== 'working' && s.state === 'working') {
+          _sparkleUntil[s.name] = now + 10000; // 10 seconds
+        }
+        _prevStates[s.name] = s.state;
+      }
 
       // Pin tier sort
       const pinned = getPinned();
