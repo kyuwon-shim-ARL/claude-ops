@@ -376,6 +376,16 @@ class SessionStateAnalyzer:
                 logger.debug("🎯 WORKING: OMC background task '(running)' detected")
                 return True
 
+        # PRIORITY 1c: Check for Claude Code background tasks still running
+        # "N background task(s) still running" appears on the completion summary
+        # line (e.g., "✻ Crunched for 59s · 3 background tasks still running").
+        # This is a definitive working indicator but can appear many lines above
+        # the ❯ prompt when Claude writes output text below it. Checking it here
+        # (against recent_content) prevents the narrow [-1:] window from missing it.
+        if 'background task' in recent_content and 'still running' in recent_content:
+            logger.debug("🎯 WORKING: Claude background task(s) still running detected in recent lines")
+            return True
+
         # Build FILTERED content: remove OMC status bar lines and separators.
         # Uses ALL lines (not just recent_lines) because _collapse_sub_output()
         # will compress arbitrarily long tool output blocks. The 25-line limit
@@ -435,7 +445,8 @@ class SessionStateAnalyzer:
         working_patterns = [
             "ctrl+b to run in background",  # Background execution option
             "tokens \xb7 thought for",      # Claude Code thinking status (· = U+00B7)
-            "background tasks still running",  # Main work done but background tasks active
+            "background task still running",   # Main work done but background task(s) active
+            "to manage)",                   # "(↓ to manage)" shown below background task indicator
             "Compacting context",           # Context compaction in progress
         ]
         # Note: "| thinking |" is NOT checked here because it appears in OMC status bar
@@ -453,12 +464,17 @@ class SessionStateAnalyzer:
         # 2b-guard: Past-tense completion line → NOT working
         # e.g. "✻ Cogitated for 5m 8s", "✻ Worked for 57s"
         # These indicate Claude finished; must not be confused with working.
+        # Exception: "Worked for Xs · N background task(s) still running" IS still working.
         if re.search(
             rf'^\s*[{SessionStateAnalyzer._TOOL_GLYPHS}] \w+ for \d+',
             check_content, re.MULTILINE,
         ):
-            logger.debug("⏸️ NOT WORKING: past-tense completion line detected (glyph + verb + 'for' + duration)")
-            return False
+            if 'background task' not in check_content:
+                logger.debug("⏸️ NOT WORKING: past-tense completion line detected (glyph + verb + 'for' + duration)")
+                return False
+            else:
+                logger.debug("🎯 WORKING: past-tense line has background task(s) still running")
+                return True
 
         # 2b: Structural regex patterns on narrow filtered content
         structural_patterns = [
