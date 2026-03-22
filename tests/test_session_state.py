@@ -796,15 +796,39 @@ class TestWideWindowAndOMCSignals:
         assert self.analyzer._detect_working_state(screen) is True
 
     def test_spinner_at_second_nonblank_not_detected(self):
-        """Spinner is 2nd-to-last non-blank but outside 1-line window → NOT working."""
+        """Past-tense completion at 2nd-to-last non-blank → NOT working.
+
+        When Claude finishes, the active spinner ('Working…') changes to
+        past-tense ('Worked for 5m 8s') — the ellipsis disappears. So a
+        past-tense line above response text is correctly stale/IDLE.
+        """
         screen = (
-            "✶ Working… (5m · ↓ 10k tokens)\n"
+            "✶ Worked for 5m (↓ 10k tokens)\n"
             "\n"
             "Some response text\n"
             "\n"
             "❯\n"
         )
         assert self.analyzer._detect_working_state(screen) is False
+
+    def test_active_spinner_with_ui_dialog_below_is_working(self):
+        """Active spinner with Claude Code UI dialog between it and prompt → WORKING.
+
+        P1d catches this: the ellipsis (…) in raw recent lines is a definitive
+        active-work signal regardless of inline UI elements below the spinner.
+        """
+        screen = (
+            "✢ Percolating… (4m 40s · ↑ 3.3k tokens)\n"
+            "\n"
+            "● How is Claude doing this session? (optional)\n"
+            "  1: Bad    2: Fine   3: Good   0: Dismiss\n"
+            "\n"
+            "❯\n"
+            "───────────────────────────────────────────────────\n"
+            "  [OMC#4.5.1] | session:30m | ctx:42% | 🔧9\n"
+            "  ⏵⏵ bypass permissions on\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is True
 
     def test_spinner_at_third_nonblank_excluded(self):
         """Spinner is 3rd-from-last non-blank (outside [-2:] window) → IDLE."""

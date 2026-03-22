@@ -386,6 +386,21 @@ class SessionStateAnalyzer:
             logger.debug("🎯 WORKING: Claude background task(s) still running detected in recent lines")
             return True
 
+        # PRIORITY 1d: Active spinner glyph with ellipsis in recent raw lines
+        # Claude Code shows "✻ Cogitating…" (glyph + verb + U+2026) while actively
+        # working. The ellipsis (…) distinguishes active spinners from past-tense
+        # completion lines ("✻ Cogitated for 5m 8s" — no ellipsis).
+        # Checked on raw lines so inline UI elements below the spinner (e.g.,
+        # "How is Claude doing this session?" dialog) don't cause the P2 [-1:]
+        # window to miss it.
+        _spinner_active_re = re.compile(
+            rf'^\s*[{SessionStateAnalyzer._TOOL_GLYPHS}] \S+\u2026'
+        )
+        for line in recent_lines:
+            if _spinner_active_re.search(line):
+                logger.debug(f"🎯 WORKING: active spinner glyph+ellipsis in raw recent lines: {line.strip()[:60]}")
+                return True
+
         # Build FILTERED content: remove OMC status bar lines and separators.
         # Uses ALL lines (not just recent_lines) because _collapse_sub_output()
         # will compress arbitrarily long tool output blocks. The 25-line limit
