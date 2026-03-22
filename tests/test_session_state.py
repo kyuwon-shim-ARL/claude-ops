@@ -371,6 +371,15 @@ class TestOutputGuard:
         )
         assert self.analyzer._detect_working_state(screen) is True
 
+    def test_compacting_conversation_detected(self):
+        """Compacting conversation (with spinner glyph) should be detected as WORKING."""
+        screen = (
+            "✢ Compacting conversation… (1m 12s)\n"
+            "\n"
+            "❯\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is True
+
 
 class TestLineWrap:
     """Tests for tmux line-wrap handling of interrupt indicators."""

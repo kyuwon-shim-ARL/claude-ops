@@ -111,7 +111,7 @@ class SessionStateAnalyzer:
         "Installing",
         "Processing",
         "Analyzing",
-        "Compacting context",
+        "Compacting",
     ]
 
     def __init__(self):
@@ -462,7 +462,7 @@ class SessionStateAnalyzer:
             "tokens \xb7 thought for",      # Claude Code thinking status (· = U+00B7)
             "background task still running",   # Main work done but background task(s) active
             "to manage)",                   # "(↓ to manage)" shown below background task indicator
-            "Compacting context",           # Context compaction in progress
+            "Compacting",                   # Context compaction in progress (covers "Compacting context" and "Compacting conversation")
         ]
         # Note: "| thinking |" is NOT checked here because it appears in OMC status bar
         # (e.g., "[OMC#4.5.1] | thinking | session:11m") and would false-positive on IDLE sessions.
