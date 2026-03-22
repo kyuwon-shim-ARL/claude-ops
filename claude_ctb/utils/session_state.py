@@ -112,6 +112,7 @@ class SessionStateAnalyzer:
         "Processing",
         "Analyzing",
         "Compacting",
+        "Running PreCompact hooks",
     ]
 
     def __init__(self):
@@ -463,6 +464,7 @@ class SessionStateAnalyzer:
             "background task still running",   # Main work done but background task(s) active
             "to manage)",                   # "(↓ to manage)" shown below background task indicator
             "Compacting",                   # Context compaction in progress (covers "Compacting context" and "Compacting conversation")
+            "Running PreCompact hooks",     # PreCompact hooks executing before compaction
         ]
         # Note: "| thinking |" is NOT checked here because it appears in OMC status bar
         # (e.g., "[OMC#4.5.1] | thinking | session:11m") and would false-positive on IDLE sessions.

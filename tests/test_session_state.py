@@ -380,6 +380,15 @@ class TestOutputGuard:
         )
         assert self.analyzer._detect_working_state(screen) is True
 
+    def test_precompact_hooks_detected(self):
+        """Running PreCompact hooks should be detected as WORKING."""
+        screen = (
+            "Running PreCompact hooks…\n"
+            "\n"
+            "❯\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is True
+
 
 class TestLineWrap:
     """Tests for tmux line-wrap handling of interrupt indicators."""
