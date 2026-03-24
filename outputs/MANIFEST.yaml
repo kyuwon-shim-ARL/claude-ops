@@ -1,5 +1,5 @@
 version: 1
-updated: "2026-03-20T22:50:00Z"
+updated: "2026-03-24T15:00:00Z"
 scan_paths:
   - outputs/
 experiments:
@@ -161,3 +161,51 @@ experiments:
       - "T2: 세션 핀/티어 기능 (localStorage 2-tier pinned/normal + 코너 핀 아이콘 + section divider)"
       - "T3: Work tracking 백엔드 (path→repo 매핑 via .omc-config.sh + GitHub API 60s TTL 캐시 + work_info JSON)"
       - "T4: Work progress UI (하단 3px 프로그레스 바 red/amber/emerald + task count 텍스트)"
+  e012:
+    path: outputs/e012/
+    script: ctb-dashboard/src/ctb_dashboard/static/index.html
+    params: {}
+    outputs: []
+    status: experimental
+    description: "CTB Dashboard 감성 디자인 + 아이젠하워 매트릭스 DnD"
+    issue: null
+    branch: null
+    depends_on: [e004]
+    tasks:
+      - "T1: Phase 1 — 감성 디자인 CSS 변환 (색상 #0f0d14, border-radius 20px, breathing 애니메이션, box-shadow glow, Nunito 폰트, Tailwind CDN config extend로 커스텀 색상 등록)"
+      - "T2: Phase 1 — prefers-reduced-motion 업데이트 + font-display:swap"
+      - "T3: Phase 2a — 아이젠하워 매트릭스 쿼드런트 UI (2x2 CSS Grid, 라벨, 반응형 <640px 1열)"
+      - "T4: Phase 2a — LocalStorage 마이그레이션 (ctb_pin_version 키, getPinned() Set 유지, getQuadrants() 추가, savePinned/saveQuadrants try/catch 감싸기)"
+      - "T5: Phase 2b — Pointer Events 롱프레스 드래그앤드롭 (500ms, 10px 임계값, ghost, elementFromPoint)"
+      - "T6: Phase 2b — iOS contextmenu 방지 + 드래그 10초 타임아웃 + SSE payload 캐시 재렌더"
+  e013:
+    path: outputs/e013/
+    script: ctb-dashboard/src/ctb_dashboard/static/index.html
+    params: {}
+    outputs: []
+    status: experimental
+    description: "CTB Dashboard DnD 버그 수정 + 라이트/다크 테마 토글"
+    issue: null
+    branch: null
+    depends_on: [e012]
+    tasks:
+      - "T1: DnD Bug Fix — stale event: _dragState.lastX/Y 스냅샷 저장 + activateDrag에서 stale e.clientX 대신 _dragState.lastX/Y 사용 (ghost 초기 위치 포함)"
+      - "T2: DnD Bug Fix — touch-action: none + card.setPointerCapture(e.pointerId) + releasePointerCapture on tap/cancel/drop"
+      - "T3: DnD Bug Fix — render() 가드 (isDragging || _pressTimer) + render() 본문에 lastSSEData 캐싱 이동 (wrapper 패턴 제거)"
+      - "T4: 테마 시스템 — getThemeColors() + isDark() + STATE_CONFIG/QUAD_CONFIG 테마별 분기 + body/header/card 색상 JS 분기"
+      - "T5: 테마 토글 UI — 헤더 ☀️/🌙 버튼 + localStorage ctb_theme + prefers-color-scheme 초기값 + meta theme-color 업데이트 + transition"
+      - "T6: 라이트 테마 크림 감성 팔레트 — body #fdf8f2, card #fffcf7, text #2d2318, 상태별 glow/tint 라이트 전용 값"
+  e014:
+    path: outputs/e014/
+    script: ctb-dashboard/src/ctb_dashboard/static/index.html
+    params: {}
+    outputs: []
+    status: experimental
+    description: "CTB Dashboard PC DnD 수정 + 라이트모드 강조 개선 + WORKING 최상단 재배치 복원"
+    issue: null
+    branch: null
+    depends_on: [e013]
+    tasks:
+      - "T1: DnD pointerType 분기 + 클릭-드래그 상태 머신 — pointerdown에서 e.pointerType 분기: (a) mouse/pen: 즉시 드래그 모드 — Math.hypot(dx,dy)>=5px로 드래그 확정(전방향), 이동 없이 pointerup→클릭 통과. _dragConfirmed 플래그 도입: 확정 시 true 설정, document click 핸들러에서 _dragConfirmed===true면 preventDefault+stopPropagation 후 setTimeout(0)으로 지연 리셋(동일 이벤트 사이클 내 모든 핸들러 차단 보장). pen은 pointerdown 시각 기준 50ms 최소 접촉 가드(팜 리젝션), 50ms 미만 pointerup 시 타이머 클리어+_dragState 초기화+_dragConfirmed=false 리셋. (b) touch: 기존 롱프레스(500ms+10px), |dy|>|dx|&&dy>10px→스크롤 판정→드래그 취소. setPointerCapture=touch만. mouse/pen: document 레벨 리스너(등록 전 기존 리스너 제거로 중복 방지), pointerup/window blur 시 해제+_dragState 초기화."
+      - "T2: 라이트/다크 양쪽 테마 강조 시스템 통합 — applyTheme()에서 CSS 변수 라이트용: --glow-fresh-lo:rgba(192,138,32,0.30)/hi:0.50, --glow-work-lo:rgba(34,185,138,0.25)/hi:0.45, ring/inset 동일 비율. 다크 기존값 유지. 라이트 border-color 강조: working=#16a085, waiting=#c08a20, error=#c0392b(매트릭스+Others 동일). WCAG 검증 대상: border-color vs cream배경(#fdf8f2) 대비율. DevTools Accessibility pane으로 측정. 미달 시 fallback: border-bottom 4px solid — working:#0d8c6d, waiting:#a06800, error:#a03020."
+      - "T3: 매트릭스 내 WORKING quadrant 내부 stable sort — state 우선순위: working:0→waiting:1→error:2→context_limit:3→idle:4→unknown:5 (error>idle: 에러는 주목 필요). qSessions.sort()에 원본 인덱스 타이브레이커 포함(동일 state 내 freshQuads 순서 보존 보장). isDragging||_pressTimer 시 정렬 스킵(clearTimeout 시 _pressTimer=null 할당 필수로 stale ID 방지). quadrant 귀속 불변. Others는 기존 render() line 672-679 정렬 유지(동일 order 맵 사용, 별도 로직 불필요)."

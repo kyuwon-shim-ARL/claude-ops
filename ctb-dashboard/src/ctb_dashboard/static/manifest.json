@@ -1,0 +1,21 @@
+{
+  "name": "CTB Dashboard",
+  "short_name": "CTB Dashboard",
+  "description": "Claude Code session monitoring dashboard",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#030712",
+  "theme_color": "#030712",
+  "icons": [
+    {
+      "src": "/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

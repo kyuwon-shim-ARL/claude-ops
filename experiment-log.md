@@ -44,3 +44,24 @@
 - **Depends on**: e007
 - **Status**: started
 - **배경**: e007의 고정 윈도우(6줄) 접근이 근본적 한계. task list가 길어지면 working indicator가 윈도우 밖으로 밀려남. /sciomc 비평 결과 3가지 구조적 문제 확인: (1) sub-output collapse 필요, (2) ✶✻ 글리프 누락, (3) working_indicators 중복 리스트 drift 위험. 비평 수렴 후 실행.
+
+## 2026-03-24: e012 시작
+- **목표**: CTB Dashboard 감성 디자인 변환 + 아이젠하워 매트릭스 DnD
+- **의존성**: e004 (Dashboard 프론트엔드)
+- **Status**: started
+- **배경**: /sciomc 연구로 Designer + Scientist + Critic 3단계 분석 완료. Phase 1(감성 CSS), Phase 2a(쿼드런트 UI), Phase 2b(DnD 인터랙션) 3단계 구현. Critic 비평 2회 수렴 후 실행.
+- **Tasks**: T1-T6 (6개)
+
+## 2026-03-24: e013 시작
+- **목표**: CTB Dashboard DnD 버그 수정 + 라이트/다크 테마 토글
+- **의존성**: e012 (감성 디자인 + 아이젠하워 매트릭스)
+- **Status**: started
+- **배경**: e012 구현 후 사용자 피드백: (1) DnD가 동작하지 않음 — debugger 에이전트가 5건 버그 확인 (stale event, touch-action, setPointerCapture, render guard, releasePointerCapture), (2) 다크 테마가 우중충함 — designer 에이전트가 라이트 크림 감성 팔레트 제안. Critic 비평으로 Bug4 fix 부작용(H1)과 Tailwind 전략(H2) 보완.
+- **Tasks**: T1-T6 (6개)
+
+## 2026-03-24: e014 시작
+- **목표**: CTB Dashboard PC DnD 수정 + 라이트모드 강조 개선 + WORKING 최상단 재배치 복원
+- **의존성**: e013 (DnD 버그 수정 + 테마 토글)
+- **Status**: started
+- **배경**: 사용자 피드백 3건: (1) PC에서 DnD 안됨 — 롱프레스 패턴이 마우스에 부적합, pointerType 분기 필요, (2) 라이트 모드 강조효과 미약 — CSS 변수 미설정 + glow opacity 부족, (3) 아이젠하워 매트릭스 도입 후 WORKING 최상단 재배치 풀림 — quadrant 내부 정렬 미적용. Critic 비평으로 H1-H3 식별, targeted fix 계획 수립.
+- **Tasks**: T1-T5 (5개)

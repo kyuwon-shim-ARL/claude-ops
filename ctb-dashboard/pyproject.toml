@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ctb-dashboard"
+version = "0.1.0"
+description = "Real-time Claude Code session monitoring dashboard"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "sse-starlette>=2.0.0",
+]
+
+[project.scripts]
+ctb-dashboard = "ctb_dashboard.server:run_server"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ctb_dashboard = ["static/*"]
