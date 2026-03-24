@@ -155,6 +155,15 @@ class SessionStateAnalyzer:
         self._last_working_time: Dict[str, float] = {}
         self._working_hold_seconds = 10
 
+        # Regex for OMC context percentage: ctx:67% or ctx:[████░░░░░░]67%
+        self._context_pct_re = re.compile(
+            r'ctx:\[?[█░]*\]?(\d+)%'
+        )
+        # Fallback: Claude Code native context display
+        self._context_native_re = re.compile(
+            r'Context left until auto-compact:\s*(\d+)%'
+        )
+
     def get_screen_content(self, session_name: str, use_cache: bool = True) -> Optional[str]:
         """
         Get tmux screen content with optional caching.
@@ -504,3 +513,74 @@ class SessionStateAnalyzer:
             self._state_cache[session_name] = (state, now)
 
         return state
+
+    def extract_context_percent(self, screen_content: Optional[str]) -> Optional[int]:
+        """Extract context window usage percentage from OMC statusline in screen content.
+
+        Parses OMC HUD format: ctx:67% or ctx:[████░░░░░░]67%
+        Fallback: Claude Code native 'Context left until auto-compact: XX%'
+
+        Returns:
+            Context usage percentage (0-100), or None if not found
+        """
+        if not screen_content:
+            return None
+
+        # Search bottom-up (statusline is near the bottom)
+        lines = screen_content.split('\n')
+        for line in reversed(lines[-30:]):
+            m = self._context_pct_re.search(line)
+            if m:
+                return min(100, max(0, int(m.group(1))))
+
+        # Fallback: Claude Code native context display (shows remaining, not used)
+        for line in reversed(lines[-15:]):
+            m = self._context_native_re.search(line)
+            if m:
+                remaining = int(m.group(1))
+                return min(100, max(0, 100 - remaining))
+
+        return None
+
+    def extract_last_prompt(self, screen_content: Optional[str]) -> Optional[str]:
+        """Extract the last user prompt/message from screen content.
+
+        Looks for the ❯ prompt character and extracts the user's input text.
+
+        Returns:
+            Last user prompt text (truncated to 200 chars), or None if not found
+        """
+        if not screen_content:
+            return None
+
+        lines = screen_content.split('\n')
+
+        # Find last non-empty ❯ prompt with text after it
+        for i in range(len(lines) - 1, -1, -1):
+            line = lines[i].strip()
+            # Match: ❯ user typed text  or  > user typed text
+            if line.startswith('\u276f ') and len(line) > 2:
+                text = line[2:].strip()
+                if text and not text.startswith('/') and len(text) > 1:
+                    return text[:200]
+            if line.startswith('\u276f') and len(line) > 1 and line[1] != ' ':
+                # ❯text (no space)
+                text = line[1:].strip()
+                if text and len(text) > 1:
+                    return text[:200]
+
+        # Fallback: look for lines that appear to be user input
+        # (between consecutive ❯ prompts, or after the last one)
+        for i in range(len(lines) - 1, max(len(lines) - 50, -1), -1):
+            line = lines[i].strip()
+            if line in ['\u276f', '\u276f ']:
+                # Empty prompt - look at the line above for the last assistant output
+                # or the previous prompt with text
+                continue
+            # Check if previous line was a ❯ prompt (this line is continuation)
+            if i > 0:
+                prev = lines[i - 1].strip()
+                if prev in ['\u276f', '\u276f '] and line and not line.startswith(('\u2500', '[OMC#', '\u23f5')):
+                    return line[:200]
+
+        return None

@@ -71,6 +71,52 @@
       .card-fresh, .card-work-sparkle, .breathe-dot { animation: none; }
     }
 
+    /* Context gauge */
+    .ctx-gauge {
+      height: 4px;
+      border-radius: 2px;
+      overflow: hidden;
+      position: relative;
+    }
+    .ctx-gauge-fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 1s ease, background-color 0.5s ease;
+    }
+    .ctx-gauge-safe { background: linear-gradient(90deg, #34d399, #10b981); }
+    .ctx-gauge-warn { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+    .ctx-gauge-danger { background: linear-gradient(90deg, #f97316, #ea580c); }
+    .ctx-gauge-critical { background: linear-gradient(90deg, #ef4444, #dc2626); }
+
+    /* Last prompt tooltip */
+    .last-prompt {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      cursor: default;
+      position: relative;
+    }
+    .last-prompt:hover .prompt-tooltip {
+      display: block;
+    }
+    .prompt-tooltip {
+      display: none;
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 0;
+      right: 0;
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 11px;
+      line-height: 1.4;
+      white-space: normal;
+      word-break: break-word;
+      z-index: 100;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+      max-height: 120px;
+      overflow-y: auto;
+    }
+
     .matrix-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -569,6 +615,61 @@
       return { pct, label };
     }
 
+    // Context gauge: color-coded bar matching OMC thresholds
+    function renderContextGauge(session, t) {
+      const pct = session.context_percent;
+      if (pct == null) return '';
+
+      let colorClass, label, labelColor;
+      if (pct >= 80) {
+        colorClass = 'ctx-gauge-critical';
+        label = `ctx ${pct}% CRITICAL`;
+        labelColor = '#ef4444';
+      } else if (pct >= 60) {
+        colorClass = 'ctx-gauge-danger';
+        label = `ctx ${pct}%`;
+        labelColor = '#f97316';
+      } else if (pct >= 40) {
+        colorClass = 'ctx-gauge-warn';
+        label = `ctx ${pct}%`;
+        labelColor = '#fbbf24';
+      } else {
+        colorClass = 'ctx-gauge-safe';
+        label = `ctx ${pct}%`;
+        labelColor = '#34d399';
+      }
+
+      const trackBg = isDark() ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+
+      return `
+        <div style="margin-top:6px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
+            <span class="font-mono" style="font-size:10px;color:${labelColor};font-weight:500;">${label}</span>
+          </div>
+          <div class="ctx-gauge" style="background:${trackBg};">
+            <div class="ctx-gauge-fill ${colorClass}" style="width:${pct}%;"></div>
+          </div>
+        </div>`;
+    }
+
+    // Last prompt: truncated with hover tooltip
+    function renderLastPrompt(session, t) {
+      if (!session.last_prompt) return '';
+
+      const text = escapeHtml(session.last_prompt);
+      const tooltipBg = isDark() ? '#2a2440' : '#fffcf7';
+      const tooltipBorder = isDark() ? 'rgba(255,255,255,0.1)' : 'rgba(180,150,110,0.2)';
+
+      return `
+        <div class="last-prompt" style="font-size:10px;color:${t.textMuted};margin-top:5px;max-width:100%;" title="">
+          <span style="opacity:0.6;">&#10095;</span> ${text}
+          <div class="prompt-tooltip" style="background:${tooltipBg};border:1px solid ${tooltipBorder};color:${t.textPrimary};">
+            <span style="opacity:0.5;font-size:9px;display:block;margin-bottom:3px;">Last prompt</span>
+            ${text}
+          </div>
+        </div>`;
+    }
+
     // T4: Theme-aware card rendering
     function renderCard(session, isPinned) {
       const STATE_CONFIG = getStateConfig();
@@ -616,6 +717,8 @@
               <button data-copy-cmd="/sessions ${name}" class="ml-1 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 flex items-center justify-center hover:text-gray-300 transition-opacity cursor-pointer select-none" style="min-width:44px;min-height:44px;color:${t.textMuted};touch-action:manipulation;" title="Copy Telegram command" aria-label="Copy /sessions command for ${display}">CP</button>
             </span>
           </div>
+          ${renderContextGauge(session, t)}
+          ${renderLastPrompt(session, t)}
           <div style="font-size:11px;color:${t.textMuted};margin-top:4px;">
             ${updatedText}
           </div>
@@ -713,13 +816,15 @@
         html += `<div class="matrix-grid">`;
         for (const qid of ['Q1', 'Q2', 'Q3', 'Q4']) {
           const qcfg = QUAD_CONFIG[qid];
-          // e014-T3: stable sort within quadrant by state priority (index tiebreaker)
+          // e014-T3: stable sort within quadrant by state priority, then recency (newer first)
           const _qOrd = { working: 0, waiting: 1, error: 2, context_limit: 3, idle: 4, unknown: 5 };
           const qRaw = (freshQuads[qid] || []).filter(n => sessionMap[n]);
           const qSessions = qRaw.map((n, i) => ({ s: sessionMap[n], i }));
           qSessions.sort((a, b) => {
             const sd = (_qOrd[a.s.state] ?? 5) - (_qOrd[b.s.state] ?? 5);
-            return sd !== 0 ? sd : a.i - b.i;
+            if (sd !== 0) return sd;
+            // Newer (higher updated_at) floats up, older sinks down
+            return (b.s.updated_at || 0) - (a.s.updated_at || 0);
           });
 
           html += `<div class="quadrant" data-quadrant="${qid}" style="background:${qcfg.tint};border:1px solid ${qcfg.border};">`;

@@ -72,8 +72,13 @@ def _probe_session(name: str) -> tuple:
     if completed_at and (now - completed_at) >= _FRESH_TTL:
         del _completion_times[name]
 
+    # Extract context percentage and last prompt from cached screen content
+    screen_content = _state_analyzer.get_screen_content(name, use_cache=True)
+    context_percent = _state_analyzer.extract_context_percent(screen_content)
+    last_prompt = _state_analyzer.extract_last_prompt(screen_content)
+
     path = get_session_path(name)
-    return name, state.value, path
+    return name, state.value, path, context_percent, last_prompt
 
 
 def _poll_sessions() -> Dict[str, Any]:
@@ -87,7 +92,7 @@ def _poll_sessions() -> Dict[str, Any]:
         results = list(pool.map(_probe_session, sessions))
 
     session_list = []
-    for name, state_val, path in results:
+    for name, state_val, path, context_percent, last_prompt in results:
         # Only update timestamp when state actually changes
         prev_ts = _prev_session_timestamps.get(name, 0)
         prev_state = None
@@ -99,13 +104,18 @@ def _poll_sessions() -> Dict[str, Any]:
             _prev_session_timestamps[name] = now
             prev_ts = now
 
-        session_list.append({
+        entry = {
             "name": name,
             "state": state_val,
             "path": path,
             "updated_at": prev_ts,
             "completed_at": _completion_times.get(name),
-        })
+        }
+        if context_percent is not None:
+            entry["context_percent"] = context_percent
+        if last_prompt is not None:
+            entry["last_prompt"] = last_prompt
+        session_list.append(entry)
 
     # Content hash for SSE change detection
     content_key = json.dumps([(s["name"], s["state"], bool(s.get("completed_at"))) for s in session_list], sort_keys=True)
