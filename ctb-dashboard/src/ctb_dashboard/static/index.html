@@ -652,6 +652,32 @@
         </div>`;
     }
 
+    // Work context: what the session is currently doing (from OMC state/notepad/MANIFEST)
+    function renderWorkContext(session, t) {
+      if (!session.work_context) return '';
+
+      const text = escapeHtml(session.work_context);
+      // Extract mode tag like [autopilot] or [e012] for accent coloring
+      const tagMatch = session.work_context.match(/^\[([^\]]+)\]/);
+      const tag = tagMatch ? tagMatch[1] : null;
+      const body = tag ? text.replace(`[${escapeHtml(tag)}]`, '').trim() : text;
+
+      const tagColors = {
+        autopilot: '#a78bfa', ralph: '#f472b6', team: '#60a5fa',
+        ultrawork: '#34d399', pipeline: '#fbbf24',
+      };
+      const tagColor = (tag && tagColors[tag.toLowerCase()]) || (isDark() ? '#94a3b8' : '#64748b');
+
+      const tagHtml = tag
+        ? `<span style="color:${tagColor};font-weight:600;margin-right:3px;font-size:9px;letter-spacing:0.03em;text-transform:uppercase;">${escapeHtml(tag)}</span>`
+        : '';
+
+      return `
+        <div style="font-size:10px;color:${t.textMuted};margin-top:3px;display:flex;align-items:baseline;gap:2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;" title="${text}">
+          ${tagHtml}<span style="opacity:0.8;overflow:hidden;text-overflow:ellipsis;">${body || ''}</span>
+        </div>`;
+    }
+
     // Last prompt: truncated with hover tooltip
     function renderLastPrompt(session, t) {
       if (!session.last_prompt) return '';
@@ -717,6 +743,7 @@
               <button data-copy-cmd="/sessions ${name}" class="ml-1 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 flex items-center justify-center hover:text-gray-300 transition-opacity cursor-pointer select-none" style="min-width:44px;min-height:44px;color:${t.textMuted};touch-action:manipulation;" title="Copy Telegram command" aria-label="Copy /sessions command for ${display}">CP</button>
             </span>
           </div>
+          ${renderWorkContext(session, t)}
           ${renderContextGauge(session, t)}
           ${renderLastPrompt(session, t)}
           <div style="font-size:11px;color:${t.textMuted};margin-top:4px;">

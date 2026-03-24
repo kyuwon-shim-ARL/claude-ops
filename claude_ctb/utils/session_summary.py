@@ -13,6 +13,14 @@ from typing import List, Tuple, Optional
 from datetime import datetime
 from ..utils.session_state import SessionStateAnalyzer, SessionState
 
+
+def short_session_name(name: str) -> str:
+    """Strip claude_ or claude- prefix from session name.
+
+    Matches the web dashboard's JS: name.replace(/^claude[_-]/, '')
+    """
+    return re.sub(r'^claude[_-]', '', name)
+
 logger = logging.getLogger(__name__)
 # Import improved tracker with auto-recovery
 try:
@@ -54,7 +62,7 @@ class SessionSummaryHelper:
             return {
                 'content': content,
                 'state': self.state_analyzer.analyze_from_content(content),  # DRY: reuse existing logic
-                'prompt': self._extract_prompt_from_content(content),
+                'prompt': '',  # populated by PromptRecallSystem in _get_session_status_sync
                 'context_warning': self._detect_context_from_content(content),
                 'screen_summary': self._extract_summary_from_content(content, lines=3)
             }
@@ -67,35 +75,6 @@ class SessionSummaryHelper:
                 'context_warning': None,
                 'screen_summary': '데이터 조회 실패'
             }
-
-    def _extract_prompt_from_content(self, content: str) -> str:
-        """
-        Extract last user prompt from pre-fetched content
-        """
-        if not content:
-            return ""
-
-        lines = content.split('\n')
-
-        # Simple patterns for user prompts
-        simple_patterns = [
-            r'^>\s*(.+)$',                    # > 프롬프트
-            r'^❯\s*(.+)$',                   # ❯ 프롬프트
-            r'^Human:\s*(.+)$',              # Human: 프롬프트
-            r'^사용자:\s*(.+)$',              # 한글 사용자:
-            r'^@[\w가-힣]+\s+(.+)$',         # @명령어 형태
-        ]
-
-        for line in reversed(lines):
-            stripped = line.strip()
-            for pattern in simple_patterns:
-                match = re.match(pattern, stripped)
-                if match:
-                    prompt_text = match.group(1).strip()
-                    if prompt_text and len(prompt_text) >= 5 and len(prompt_text) <= 500:
-                        return prompt_text[:100]  # Truncate to 100 chars
-
-        return ""
 
     def _detect_context_from_content(self, content: str) -> Optional[dict]:
         """
@@ -689,7 +668,7 @@ class SessionSummaryHelper:
         # Session details
         for i, (session_name, wait_time, last_prompt, status, has_record) in enumerate(all_sessions, 1):
             # Format session name
-            display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
+            display_name = short_session_name(session_name)
 
             # Add separator
             message += "━" * 25 + "\n"
@@ -746,7 +725,7 @@ class SessionSummaryHelper:
         waiting_sessions = [(s[0], s[1]) for s in all_sessions if s[3] == 'waiting']
         if waiting_sessions:
             longest_session, longest_time = max(waiting_sessions, key=lambda x: x[1])
-            longest_name = longest_session.replace('claude_', '') if longest_session.startswith('claude_') else longest_session
+            longest_name = short_session_name(longest_session)
             message += f"💡 <b>가장 오래 대기</b>: {longest_name} ({self.format_wait_time(longest_time)})"
         
         return message
@@ -784,7 +763,7 @@ class SessionSummaryHelper:
         # Session details - uses enriched 7-tuple (no additional tmux calls)
         for i, (sess_name, wait_time, last_prompt, status, has_record, context_warning, screen_summary) in enumerate(all_sessions, 1):
             # Format session name
-            display_name = sess_name.replace('claude_', '') if sess_name.startswith('claude_') else sess_name
+            display_name = short_session_name(sess_name)
 
             # Add separator
             message += "━" * 25 + "\n"
@@ -839,7 +818,7 @@ class SessionSummaryHelper:
         waiting_sessions = [(s[0], s[1]) for s in all_sessions if s[3] == 'waiting']
         if waiting_sessions:
             longest_session, longest_time = max(waiting_sessions, key=lambda x: x[1])
-            longest_name = longest_session.replace('claude_', '') if longest_session.startswith('claude_') else longest_session
+            longest_name = short_session_name(longest_session)
             message += f"💡 <b>가장 오래 대기</b>: {longest_name} ({self.format_wait_time(longest_time)})"
 
         return message

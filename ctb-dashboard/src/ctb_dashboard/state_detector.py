@@ -7,10 +7,12 @@ by analyzing tmux screen content with pattern matching.
 Extracted from claude_ctb.utils.session_state (core detection subset).
 """
 
+import json
 import subprocess
 import logging
 import re
 from enum import Enum
+from pathlib import Path
 from typing import Optional, Dict
 from datetime import datetime
 
@@ -542,10 +544,43 @@ class SessionStateAnalyzer:
 
         return None
 
+    # Prompt detection patterns — mirrored from claude_ctb/utils/prompt_recall.py.
+    # Keep in sync: any pattern change should be applied to both locations.
+    _PROMPT_PATTERNS = [
+        re.compile(r'^>\s*(.+)$'),               # > prompt
+        re.compile(r'^❯\s*(.+)$'),              # ❯ prompt
+        re.compile(r'^Human:\s*(.+)$'),          # Human: prefix
+        re.compile(r'^사용자:\s*(.+)$'),          # Korean 사용자:
+        re.compile(r'^@[\w가-힣]+\s+(.+)$'),     # @command form
+    ]
+
+    _MEANINGLESS_PROMPT_RE = [
+        re.compile(r'^[0-9]+$'),
+        re.compile(r'^[yYnN]$'),
+        re.compile(r'^(yes|no)$', re.IGNORECASE),
+        re.compile(r'^(quit|exit|q)$', re.IGNORECASE),
+        re.compile(r'^\s*$'),
+        re.compile(r'^[0-9]+\.\s*Yes', re.IGNORECASE),
+        re.compile(r'^[0-9]+\.\s*No', re.IGNORECASE),
+        re.compile(r'^❯\s*[0-9]+\.'),
+        re.compile(r'^(Continue|Stop|Cancel)\s*\?*$', re.IGNORECASE),
+    ]
+
+    @staticmethod
+    def _is_meaningful_prompt(text: str) -> bool:
+        """Filter out UI choices, single-char answers, and other noise."""
+        if len(text) < 5 or len(text) > 500:
+            return False
+        for pat in SessionStateAnalyzer._MEANINGLESS_PROMPT_RE:
+            if pat.match(text):
+                return False
+        return True
+
     def extract_last_prompt(self, screen_content: Optional[str]) -> Optional[str]:
         """Extract the last user prompt/message from screen content.
 
-        Looks for the ❯ prompt character and extracts the user's input text.
+        Uses the same 5-pattern matching and quality filter as the Telegram
+        prompt_recall system for consistency.
 
         Returns:
             Last user prompt text (truncated to 200 chars), or None if not found
@@ -554,33 +589,111 @@ class SessionStateAnalyzer:
             return None
 
         lines = screen_content.split('\n')
+        prompts = []
 
-        # Find last non-empty ❯ prompt with text after it
-        for i in range(len(lines) - 1, -1, -1):
-            line = lines[i].strip()
-            # Match: ❯ user typed text  or  > user typed text
-            if line.startswith('\u276f ') and len(line) > 2:
-                text = line[2:].strip()
-                if text and not text.startswith('/') and len(text) > 1:
-                    return text[:200]
-            if line.startswith('\u276f') and len(line) > 1 and line[1] != ' ':
-                # ❯text (no space)
-                text = line[1:].strip()
-                if text and len(text) > 1:
-                    return text[:200]
+        for line in lines:
+            stripped = line.strip()
+            for pat in self._PROMPT_PATTERNS:
+                m = pat.match(stripped)
+                if m:
+                    text = m.group(1).strip()
+                    if text and not text.startswith('/') and self._is_meaningful_prompt(text):
+                        prompts.append(text)
+                    break
 
-        # Fallback: look for lines that appear to be user input
-        # (between consecutive ❯ prompts, or after the last one)
+        if prompts:
+            # Deduplicate, return last match
+            seen = dict.fromkeys(prompts)
+            return list(seen)[-1][:200]
+
+        # Fallback: continuation line after bare ❯ prompt
         for i in range(len(lines) - 1, max(len(lines) - 50, -1), -1):
             line = lines[i].strip()
             if line in ['\u276f', '\u276f ']:
-                # Empty prompt - look at the line above for the last assistant output
-                # or the previous prompt with text
                 continue
-            # Check if previous line was a ❯ prompt (this line is continuation)
             if i > 0:
                 prev = lines[i - 1].strip()
                 if prev in ['\u276f', '\u276f '] and line and not line.startswith(('\u2500', '[OMC#', '\u23f5')):
-                    return line[:200]
+                    if self._is_meaningful_prompt(line):
+                        return line[:200]
+
+        return None
+
+    def extract_work_context(self, session_path: Optional[str]) -> Optional[str]:
+        """Extract current work context from OMC state files in the session's working directory.
+
+        Checks in priority order:
+        1. .omc/state/*-state.json — active mode goal/task
+        2. .omc/notepad.md — priority section first line
+        3. MANIFEST.yaml — current experiment ID + title
+
+        Returns:
+            Short work context string (truncated to 120 chars), or None
+        """
+        if not session_path:
+            return None
+
+        root = Path(session_path)
+
+        # 1. OMC active mode state
+        state_dir = root / ".omc" / "state"
+        if state_dir.is_dir():
+            try:
+                for state_file in sorted(state_dir.glob("*-state.json")):
+                    try:
+                        data = json.loads(state_file.read_text(encoding="utf-8"))
+                        status = data.get("status", "")
+                        if status in ("active", "running", "in_progress"):
+                            goal = data.get("goal") or data.get("task") or data.get("description", "")
+                            mode = state_file.stem.replace("-state", "")
+                            if goal:
+                                ctx = f"[{mode}] {goal}"
+                                return ctx[:120]
+                            elif mode:
+                                return f"[{mode}] active"
+                    except (json.JSONDecodeError, OSError):
+                        continue
+            except OSError:
+                pass
+
+        # 2. OMC notepad priority section
+        notepad = root / ".omc" / "notepad.md"
+        if notepad.is_file():
+            try:
+                content = notepad.read_text(encoding="utf-8")
+                in_priority = False
+                for line in content.split("\n"):
+                    if re.match(r"^##\s+.*[Pp]riority", line):
+                        in_priority = True
+                        continue
+                    if in_priority:
+                        stripped = line.strip()
+                        if stripped.startswith("##"):
+                            break
+                        if stripped and stripped != "---" and not stripped.startswith("<!--"):
+                            text = re.sub(r"^[-*]\s+", "", stripped)
+                            if text:
+                                return text[:120]
+            except OSError:
+                pass
+
+        # 3. MANIFEST.yaml — current experiment
+        manifest = root / "MANIFEST.yaml"
+        if manifest.is_file():
+            try:
+                content = manifest.read_text(encoding="utf-8")
+                current_exp = None
+                for line in content.split("\n"):
+                    m = re.match(r"^\s*-?\s*(e\d{3,4})\s*:", line)
+                    if m:
+                        current_exp = m.group(1)
+                    if current_exp:
+                        tm = re.match(r"^\s+(?:title|name):\s*(.+)", line)
+                        if tm:
+                            return f"[{current_exp}] {tm.group(1).strip()}"[:120]
+                if current_exp:
+                    return f"[{current_exp}] active"
+            except OSError:
+                pass
 
         return None
