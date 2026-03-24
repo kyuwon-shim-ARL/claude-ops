@@ -71,22 +71,7 @@
       .card-fresh, .card-work-sparkle, .breathe-dot { animation: none; }
     }
 
-    /* Context gauge */
-    .ctx-gauge {
-      height: 4px;
-      border-radius: 2px;
-      overflow: hidden;
-      position: relative;
-    }
-    .ctx-gauge-fill {
-      height: 100%;
-      border-radius: 2px;
-      transition: width 1s ease, background-color 0.5s ease;
-    }
-    .ctx-gauge-safe { background: linear-gradient(90deg, #34d399, #10b981); }
-    .ctx-gauge-warn { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
-    .ctx-gauge-danger { background: linear-gradient(90deg, #f97316, #ea580c); }
-    .ctx-gauge-critical { background: linear-gradient(90deg, #ef4444, #dc2626); }
+    /* Context indicator (dot + number) */
 
     /* Last prompt tooltip */
     .last-prompt {
@@ -615,41 +600,30 @@
       return { pct, label };
     }
 
-    // Context gauge: color-coded bar matching OMC thresholds
+    // Context indicator: small dot + number (no progress bar)
     function renderContextGauge(session, t) {
       const pct = session.context_percent;
       if (pct == null) return '';
 
-      let colorClass, label, labelColor;
+      let color;
       if (pct >= 80) {
-        colorClass = 'ctx-gauge-critical';
-        label = `ctx ${pct}% CRITICAL`;
-        labelColor = '#ef4444';
+        color = '#ef4444';
       } else if (pct >= 60) {
-        colorClass = 'ctx-gauge-danger';
-        label = `ctx ${pct}%`;
-        labelColor = '#f97316';
+        color = '#f97316';
       } else if (pct >= 40) {
-        colorClass = 'ctx-gauge-warn';
-        label = `ctx ${pct}%`;
-        labelColor = '#fbbf24';
+        color = '#fbbf24';
       } else {
-        colorClass = 'ctx-gauge-safe';
-        label = `ctx ${pct}%`;
-        labelColor = '#34d399';
+        color = '#34d399';
       }
 
-      const trackBg = isDark() ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+      const critical = pct >= 80
+        ? `<span style="font-size:9px;color:${color};margin-left:2px;">!</span>`
+        : '';
 
-      return `
-        <div style="margin-top:6px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
-            <span class="font-mono" style="font-size:10px;color:${labelColor};font-weight:500;">${label}</span>
-          </div>
-          <div class="ctx-gauge" style="background:${trackBg};">
-            <div class="ctx-gauge-fill ${colorClass}" style="width:${pct}%;"></div>
-          </div>
-        </div>`;
+      return `<span style="display:inline-flex;align-items:center;gap:4px;margin-top:5px;">
+        <span style="width:6px;height:6px;border-radius:50%;background:${color};flex-shrink:0;display:inline-block;"></span>
+        <span class="font-mono" style="font-size:10px;color:${color};font-weight:500;">ctx ${pct}%</span>${critical}
+      </span>`;
     }
 
     // Work context: what the session is currently doing (from OMC state/notepad/MANIFEST)

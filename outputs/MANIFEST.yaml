@@ -209,3 +209,16 @@ experiments:
       - "T1: DnD pointerType 분기 + 클릭-드래그 상태 머신 — pointerdown에서 e.pointerType 분기: (a) mouse/pen: 즉시 드래그 모드 — Math.hypot(dx,dy)>=5px로 드래그 확정(전방향), 이동 없이 pointerup→클릭 통과. _dragConfirmed 플래그 도입: 확정 시 true 설정, document click 핸들러에서 _dragConfirmed===true면 preventDefault+stopPropagation 후 setTimeout(0)으로 지연 리셋(동일 이벤트 사이클 내 모든 핸들러 차단 보장). pen은 pointerdown 시각 기준 50ms 최소 접촉 가드(팜 리젝션), 50ms 미만 pointerup 시 타이머 클리어+_dragState 초기화+_dragConfirmed=false 리셋. (b) touch: 기존 롱프레스(500ms+10px), |dy|>|dx|&&dy>10px→스크롤 판정→드래그 취소. setPointerCapture=touch만. mouse/pen: document 레벨 리스너(등록 전 기존 리스너 제거로 중복 방지), pointerup/window blur 시 해제+_dragState 초기화."
       - "T2: 라이트/다크 양쪽 테마 강조 시스템 통합 — applyTheme()에서 CSS 변수 라이트용: --glow-fresh-lo:rgba(192,138,32,0.30)/hi:0.50, --glow-work-lo:rgba(34,185,138,0.25)/hi:0.45, ring/inset 동일 비율. 다크 기존값 유지. 라이트 border-color 강조: working=#16a085, waiting=#c08a20, error=#c0392b(매트릭스+Others 동일). WCAG 검증 대상: border-color vs cream배경(#fdf8f2) 대비율. DevTools Accessibility pane으로 측정. 미달 시 fallback: border-bottom 4px solid — working:#0d8c6d, waiting:#a06800, error:#a03020."
       - "T3: 매트릭스 내 WORKING quadrant 내부 stable sort — state 우선순위: working:0→waiting:1→error:2→context_limit:3→idle:4→unknown:5 (error>idle: 에러는 주목 필요). qSessions.sort()에 원본 인덱스 타이브레이커 포함(동일 state 내 freshQuads 순서 보존 보장). isDragging||_pressTimer 시 정렬 스킵(clearTimeout 시 _pressTimer=null 할당 필수로 stale ID 방지). quadrant 귀속 불변. Others는 기존 render() line 672-679 정렬 유지(동일 order 맵 사용, 별도 로직 불필요)."
+  e016:
+    path: outputs/e016/
+    script: ctb-dashboard/src/ctb_dashboard/static/index.html
+    params: {}
+    outputs: []
+    status: experimental
+    description: "CTB Dashboard 컨텍스트 게이지 리디자인 — 프로그레스바를 dot+숫자 인디케이터로 교체"
+    issue: null
+    branch: null
+    depends_on: [e012]
+    tasks:
+      - "T1: renderContextGauge() 프로그레스바(ctx-gauge div) → 6px 컬러 dot + ctx XX% 텍스트로 교체. 4단계 색상 유지(safe/warn/danger/critical). critical(80%+)에 ! 접미사"
+      - "T2: CSS .ctx-gauge* 클래스 6개 제거 (ctx-gauge, ctx-gauge-fill, ctx-gauge-safe/warn/danger/critical)"
