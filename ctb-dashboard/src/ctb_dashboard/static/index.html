@@ -628,7 +628,7 @@
 
     // Work context: what the session is currently doing (from OMC state/notepad/MANIFEST)
     function renderWorkContext(session, t) {
-      if (!session.work_context) return '';
+      if (!session.work_context) return `<div style="font-size:10px;color:${t.textMuted};margin-top:3px;font-style:italic;opacity:0.5;">목표 미설정</div>`;
 
       const text = escapeHtml(session.work_context);
       // Extract mode tag like [autopilot] or [e012] for accent coloring
@@ -654,7 +654,7 @@
 
     // Last prompt: truncated with hover tooltip
     function renderLastPrompt(session, t) {
-      if (!session.last_prompt) return '';
+      if (!session.last_prompt) return `<div style="font-size:10px;color:${t.textMuted};margin-top:5px;font-style:italic;opacity:0.5;"><span style="opacity:0.6;">&#10095;</span> 프롬프트 대기 중</div>`;
 
       const text = escapeHtml(session.last_prompt);
       const tooltipBg = isDark() ? '#2a2440' : '#fffcf7';

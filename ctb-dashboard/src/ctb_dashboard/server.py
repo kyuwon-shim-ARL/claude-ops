@@ -43,6 +43,11 @@ _working_hold: Dict[str, float] = {}  # session_name -> last_seen_working_time
 _WORKING_HOLD_SECONDS = 8  # hold WORKING for 8s after last working indicator
 _FRESH_TTL = 300  # seconds to keep completed_at visible (5 minutes)
 
+# T2: Persist last known prompt per session to avoid flickering
+# Structure: {session_name: {"text": str, "timestamp": float}}
+_last_known_prompt: Dict[str, Dict] = {}
+_PROMPT_TTL = 60  # seconds to keep stale prompt visible
+
 
 def _probe_session(name: str) -> tuple:
     """Probe a single session's state and path (called in thread pool)."""
@@ -75,7 +80,18 @@ def _probe_session(name: str) -> tuple:
     # Extract context percentage and last prompt from cached screen content
     screen_content = _state_analyzer.get_screen_content(name, use_cache=True)
     context_percent = _state_analyzer.extract_context_percent(screen_content)
-    last_prompt = _state_analyzer.extract_last_prompt(screen_content)
+    raw_prompt = _state_analyzer.extract_last_prompt(screen_content)
+
+    # T2: Persist last known prompt — update on new detection, keep stale on miss
+    now_ts = time.time()
+    if raw_prompt:
+        _last_known_prompt[name] = {"text": raw_prompt, "timestamp": now_ts}
+        last_prompt = raw_prompt
+    elif name in _last_known_prompt:
+        # TTL 60s — after expiry, still show stale value (avoid flickering)
+        last_prompt = _last_known_prompt[name]["text"]
+    else:
+        last_prompt = None
 
     path = get_session_path(name)
     work_context = _state_analyzer.extract_work_context(path)
@@ -111,13 +127,10 @@ def _poll_sessions() -> Dict[str, Any]:
             "path": path,
             "updated_at": prev_ts,
             "completed_at": _completion_times.get(name),
+            "context_percent": context_percent,  # null when unavailable (frontend hides gauge)
+            "last_prompt": last_prompt or "",     # always string (frontend shows placeholder)
+            "work_context": work_context or "",   # always string (frontend shows placeholder)
         }
-        if context_percent is not None:
-            entry["context_percent"] = context_percent
-        if last_prompt is not None:
-            entry["last_prompt"] = last_prompt
-        if work_context is not None:
-            entry["work_context"] = work_context
         session_list.append(entry)
 
     # Content hash for SSE change detection (includes dynamic fields for real-time updates)
@@ -128,9 +141,11 @@ def _poll_sessions() -> Dict[str, Any]:
     ], sort_keys=True)
     content_hash = hashlib.md5(content_key.encode()).hexdigest()[:8]
 
-    # Clean up timestamps for removed sessions
+    # Clean up timestamps and prompt cache for removed sessions
     active_names = {s["name"] for s in session_list}
     _prev_session_timestamps = {k: v for k, v in _prev_session_timestamps.items() if k in active_names}
+    for gone in set(_last_known_prompt) - active_names:
+        del _last_known_prompt[gone]
 
     return {
         "version": 1,

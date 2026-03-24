@@ -65,3 +65,11 @@
 - **Status**: started
 - **배경**: 사용자 피드백 3건: (1) PC에서 DnD 안됨 — 롱프레스 패턴이 마우스에 부적합, pointerType 분기 필요, (2) 라이트 모드 강조효과 미약 — CSS 변수 미설정 + glow opacity 부족, (3) 아이젠하워 매트릭스 도입 후 WORKING 최상단 재배치 풀림 — quadrant 내부 정렬 미적용. Critic 비평으로 H1-H3 식별, targeted fix 계획 수립.
 - **Tasks**: T1-T5 (5개)
+
+## 2026-03-24: e017 시작
+- **목표**: 세션목표+프롬프트 표시 안정화 — work_context 범용 fallback + last_prompt persist
+- **Issue**: #13
+- **의존성**: e012 (감성 디자인 대시보드)
+- **Status**: started
+- **배경**: 사용자 피드백: (1) 세션목표(work_context)가 아예 안 보임 — 3단계 fallback 모두 OMC 전용 파일 의존, 일반 세션 None, (2) 마지막 프롬프트가 보이다 말다 함 — 캐시 TTL 1초 vs 폴링 3초 타이밍 불일치 + 과도한 필터링. Critic 비평 H1-H4, M1-M4 식별.
+- **Tasks**: T1-T5 (5개)

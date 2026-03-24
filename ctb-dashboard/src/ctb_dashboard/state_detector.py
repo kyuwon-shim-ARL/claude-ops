@@ -554,6 +554,19 @@ class SessionStateAnalyzer:
         re.compile(r'^@[\w가-힣]+\s+(.+)$'),     # @command form
     ]
 
+    # Slash commands to filter out (system/navigation commands, not user work)
+    _SLASH_BLOCKLIST = frozenset({
+        '/help', '/clear', '/exit', '/quit', '/reset', '/model', '/compact',
+    })
+
+    @staticmethod
+    def _is_allowed_prompt(text: str) -> bool:
+        """Check if prompt text should be displayed (slash command blocklist filter)."""
+        if text.startswith('/'):
+            cmd = text.split()[0].lower()
+            return cmd not in SessionStateAnalyzer._SLASH_BLOCKLIST
+        return True
+
     _MEANINGLESS_PROMPT_RE = [
         re.compile(r'^[0-9]+$'),
         re.compile(r'^[yYnN]$'),
@@ -597,7 +610,7 @@ class SessionStateAnalyzer:
                 m = pat.match(stripped)
                 if m:
                     text = m.group(1).strip()
-                    if text and not text.startswith('/') and self._is_meaningful_prompt(text):
+                    if text and self._is_allowed_prompt(text) and self._is_meaningful_prompt(text):
                         prompts.append(text)
                     break
 
@@ -695,5 +708,26 @@ class SessionStateAnalyzer:
                     return f"[{current_exp}] active"
             except OSError:
                 pass
+
+        # 4. Generic fallback: git branch + directory name (works for any session)
+        dir_name = root.name
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=str(root),
+                capture_output=True, text=True, timeout=1,
+            )
+            if result.returncode == 0:
+                branch = result.stdout.strip()
+                if branch:
+                    return f"[{branch}] {dir_name}"[:120]
+        except (subprocess.TimeoutExpired, OSError):
+            logger.debug(f"Git branch lookup failed for {session_path}")
+        except Exception:
+            pass
+
+        # Non-git directory: show directory name only
+        if dir_name:
+            return f"[dir] {dir_name}"[:120]
 
         return None

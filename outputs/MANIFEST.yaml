@@ -222,3 +222,19 @@ experiments:
     tasks:
       - "T1: renderContextGauge() 프로그레스바(ctx-gauge div) → 6px 컬러 dot + ctx XX% 텍스트로 교체. 4단계 색상 유지(safe/warn/danger/critical). critical(80%+)에 ! 접미사"
       - "T2: CSS .ctx-gauge* 클래스 6개 제거 (ctx-gauge, ctx-gauge-fill, ctx-gauge-safe/warn/danger/critical)"
+  e017:
+    path: outputs/e017/
+    script: null
+    params: {}
+    outputs: []
+    status: experimental
+    description: "세션목표+프롬프트 표시 안정화 — work_context 범용 fallback + last_prompt persist"
+    issue: 13
+    branch: null
+    depends_on: [e012]
+    tasks:
+      - "T1: extract_work_context() 4번째 fallback — tmux 세션 CWD의 git branch + 디렉토리명. non-git 디렉토리는 디렉토리명만 반환. subprocess 1초 타임아웃 + try/except로 실패 시 None"
+      - "T2: last_prompt persist — _last_known_prompt[session_name]={text,timestamp} dict. TTL 60초, 폴링 시점에 만료 판정. 만료 후에도 stale 값 유지(깜빡임 방지). 새 프롬프트 감지 시 갱신"
+      - "T3: server.py 필드 항상 포함 — last_prompt/work_context는 항상 entry에 포함, None이면 빈 문자열. context_percent는 None이면 null(프론트에서 게이지 숨김)"
+      - "T4: slash 커맨드 필터 완화 — /로 시작해도 표시. blocklist: /help /clear /exit /quit /reset /model /compact"
+      - "T5: 프론트엔드 빈 상태 placeholder — work_context 없으면 muted '목표 미설정', last_prompt 없으면 muted '프롬프트 대기 중'"
