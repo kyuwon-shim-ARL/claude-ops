@@ -67,6 +67,16 @@
       border-color: rgba(52,211,153,0.6) !important;
     }
 
+    @keyframes copy-toast-fade {
+      0%   { opacity: 1; transform: translateY(0); }
+      70%  { opacity: 1; transform: translateY(0); }
+      100% { opacity: 0; transform: translateY(-4px); }
+    }
+    .copy-toast {
+      animation: copy-toast-fade 1.5s ease-out forwards;
+      pointer-events: none;
+    }
+
     @media (prefers-reduced-motion: reduce) {
       .card-fresh, .card-work-sparkle, .breathe-dot { animation: none; }
     }
@@ -105,14 +115,14 @@
     .matrix-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 12px;
+      gap: 10px;
     }
     @media (max-width: 640px) {
       .matrix-grid { grid-template-columns: 1fr; }
     }
     .quadrant {
       border-radius: 16px;
-      padding: 10px;
+      padding: 8px;
       min-height: 80px;
       transition: background-color 0.3s, box-shadow 0.2s, border-color 0.3s;
     }
@@ -121,7 +131,7 @@
     }
     .quadrant-cards {
       display: grid;
-      gap: 8px;
+      gap: 6px;
       grid-template-columns: 1fr;
     }
     @media (min-width: 1024px) {
@@ -142,6 +152,7 @@
       -webkit-user-select: none;
       user-select: none;
       touch-action: none;
+      cursor: copy;
     }
     .long-press-ring {
       position: absolute; top: 0; left: 0; right: 0; bottom: 0;
@@ -603,7 +614,7 @@
     // Context indicator: small dot + number (no progress bar)
     function renderContextGauge(session, t) {
       const pct = session.context_percent;
-      if (pct == null) return '';
+      if (pct == null) return `<span style="display:inline-flex;align-items:center;gap:3px;margin-left:4px;visibility:hidden;" aria-hidden="true"><span style="opacity:0.35;font-size:10px;">|</span><span style="width:5px;height:5px;display:inline-block;"></span><span class="font-mono" style="font-size:10px;">ctx 00%</span></span>`;
 
       let color;
       if (pct >= 80) {
@@ -620,15 +631,16 @@
         ? `<span style="font-size:9px;color:${color};margin-left:2px;">!</span>`
         : '';
 
-      return `<span style="display:inline-flex;align-items:center;gap:4px;margin-top:5px;">
-        <span style="width:6px;height:6px;border-radius:50%;background:${color};flex-shrink:0;display:inline-block;"></span>
+      return `<span style="display:inline-flex;align-items:center;gap:3px;margin-left:4px;">
+        <span style="opacity:0.35;font-size:10px;">|</span>
+        <span style="width:5px;height:5px;border-radius:50%;background:${color};flex-shrink:0;display:inline-block;"></span>
         <span class="font-mono" style="font-size:10px;color:${color};font-weight:500;">ctx ${pct}%</span>${critical}
       </span>`;
     }
 
     // Work context: what the session is currently doing (from OMC state/notepad/MANIFEST)
     function renderWorkContext(session, t) {
-      if (!session.work_context) return `<div style="font-size:10px;color:${t.textMuted};margin-top:3px;font-style:italic;opacity:0.5;">목표 미설정</div>`;
+      if (!session.work_context) return `<div style="font-size:13px;color:${t.textMuted};margin-top:3px;font-style:italic;opacity:0.5;">목표 미설정</div>`;
 
       const text = escapeHtml(session.work_context);
       // Extract mode tag like [autopilot] or [e012] for accent coloring
@@ -643,25 +655,25 @@
       const tagColor = (tag && tagColors[tag.toLowerCase()]) || (isDark() ? '#94a3b8' : '#64748b');
 
       const tagHtml = tag
-        ? `<span style="color:${tagColor};font-weight:600;margin-right:3px;font-size:9px;letter-spacing:0.03em;text-transform:uppercase;">${escapeHtml(tag)}</span>`
+        ? `<span style="color:${tagColor};font-weight:700;margin-right:3px;font-size:11px;letter-spacing:0.03em;text-transform:uppercase;">${escapeHtml(tag)}</span>`
         : '';
 
       return `
-        <div style="font-size:10px;color:${t.textMuted};margin-top:3px;display:flex;align-items:baseline;gap:2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;" title="${text}">
+        <div style="font-size:13px;color:${t.textMuted};margin-top:3px;display:flex;align-items:baseline;gap:2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;" title="${text}">
           ${tagHtml}<span style="opacity:0.8;overflow:hidden;text-overflow:ellipsis;">${body || ''}</span>
         </div>`;
     }
 
     // Last prompt: truncated with hover tooltip
     function renderLastPrompt(session, t) {
-      if (!session.last_prompt) return `<div style="font-size:10px;color:${t.textMuted};margin-top:5px;font-style:italic;opacity:0.5;"><span style="opacity:0.6;">&#10095;</span> 프롬프트 대기 중</div>`;
+      if (!session.last_prompt) return `<div style="font-size:12px;color:${t.textMuted};margin-top:3px;font-style:italic;opacity:0.5;"><span style="opacity:0.6;">&#10095;</span> 프롬프트 대기 중</div>`;
 
       const text = escapeHtml(session.last_prompt);
       const tooltipBg = isDark() ? '#2a2440' : '#fffcf7';
       const tooltipBorder = isDark() ? 'rgba(255,255,255,0.1)' : 'rgba(180,150,110,0.2)';
 
       return `
-        <div class="last-prompt" style="font-size:10px;color:${t.textMuted};margin-top:5px;max-width:100%;" title="">
+        <div class="last-prompt" style="font-size:12px;color:${t.textMuted};margin-top:3px;max-width:100%;" title="">
           <span style="opacity:0.6;">&#10095;</span> ${text}
           <div class="prompt-tooltip" style="background:${tooltipBg};border:1px solid ${tooltipBorder};color:${t.textPrimary};">
             <span style="opacity:0.5;font-size:9px;display:block;margin-bottom:3px;">Last prompt</span>
@@ -705,20 +717,18 @@
       return `
         <div class="group relative overflow-hidden ${cfg.border} draggable-card${freshClass}"
              data-session-name="${name}"
-             style="border-radius:20px 20px 16px 20px;background:${t.cardBg};border:1px solid;padding:14px 14px 12px 44px;box-shadow:${cfg.glow},${t.cardShadowBase};${borderStyle}${staleOpacity}transition:all 0.3s ease;">
+             style="border-radius:20px 20px 16px 20px;background:${t.cardBg};border:1px solid;padding:12px 12px 10px 38px;box-shadow:${cfg.glow},${t.cardShadowBase};${borderStyle}${staleOpacity}transition:all 0.3s ease;">
           ${freshBar}
           <div class="long-press-ring"></div>
-          <button data-pin-session="${name}" style="position:absolute;top:10px;left:8px;width:28px;height:28px;border-radius:10px;background:${t.pinBtnBg};display:flex;align-items:center;justify-content:center;font-size:13px;opacity:${pinOpacity};border:1px solid ${t.pinBtnBorder};cursor:pointer;transition:opacity 0.2s;touch-action:manipulation;" title="${isPinned ? 'Unpin session' : 'Pin session'}" aria-label="${isPinned ? 'Unpin session' : 'Pin session'}">${pinIcon}</button>
+          <button data-pin-session="${name}" style="position:absolute;top:8px;left:6px;width:26px;height:26px;border-radius:9px;background:${t.pinBtnBg};display:flex;align-items:center;justify-content:center;font-size:12px;opacity:${pinOpacity};border:1px solid ${t.pinBtnBorder};cursor:pointer;transition:opacity 0.2s;touch-action:manipulation;" title="${isPinned ? 'Unpin session' : 'Pin session'}" aria-label="${isPinned ? 'Unpin session' : 'Pin session'}">${pinIcon}</button>
           <div class="flex items-center justify-between">
-            <span class="font-mono text-sm font-medium truncate" style="color:${t.textPrimary};letter-spacing:-0.01em;" title="${name}">${display}</span>
-            <span class="flex items-center gap-1.5 text-xs" style="color:${t.textSecondary};">
+            <span class="font-mono text-sm font-medium truncate" style="color:${t.textPrimary};letter-spacing:-0.01em;flex:1;min-width:0;" title="${name}">${display}</span>
+            <span class="flex items-center gap-1.5 text-xs" style="color:${t.textSecondary};flex-shrink:0;margin-left:auto;min-width:9rem;justify-content:flex-end;">
               <span class="inline-block w-2 h-2 rounded-full ${cfg.dot}" style="box-shadow:${t.dotGlowColor};flex-shrink:0;"></span>
-              ${cfg.label}${freshBadge}
-              <button data-copy-cmd="/sessions ${name}" class="ml-1 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 flex items-center justify-center hover:text-gray-300 transition-opacity cursor-pointer select-none" style="min-width:44px;min-height:44px;color:${t.textMuted};touch-action:manipulation;" title="Copy Telegram command" aria-label="Copy /sessions command for ${display}">CP</button>
+              ${cfg.label}${renderContextGauge(session, t)}${freshBadge}
             </span>
           </div>
           ${renderWorkContext(session, t)}
-          ${renderContextGauge(session, t)}
           ${renderLastPrompt(session, t)}
           <div style="font-size:11px;color:${t.textMuted};margin-top:4px;">
             ${updatedText}
@@ -901,7 +911,7 @@
     function initDrag(e) {
       const card = e.target.closest('[data-session-name]');
       if (!card) return;
-      if (e.target.closest('[data-pin-session]') || e.target.closest('[data-copy-cmd]')) return;
+      if (e.target.closest('[data-pin-session]')) return;
 
       const sessionName = card.dataset.sessionName;
       if (!getPinned().has(sessionName)) return;
@@ -1209,20 +1219,28 @@
       });
     });
 
-    // --- Copy command event delegation ---
+    // --- Card tap-to-copy (replaces CP button) ---
     grid.addEventListener('click', (e) => {
-      const btn = e.target.closest('[data-copy-cmd]');
-      if (!btn) return;
-      e.stopPropagation();
-      const cmd = btn.dataset.copyCmd;
+      if (_dragConfirmed) return;
+      if (e.target.closest('[data-pin-session]')) return;
+      const card = e.target.closest('[data-session-name]');
+      if (!card) return;
+      const cmd = `/sessions ${card.dataset.sessionName}`;
       copyToClipboard(cmd, () => {
-        const orig = btn.textContent;
-        btn.textContent = 'OK';
-        btn.classList.add('text-emerald-400');
-        setTimeout(() => {
-          btn.textContent = orig;
-          btn.classList.remove('text-emerald-400');
-        }, 1500);
+        // Border flash
+        card.style.transition = 'box-shadow 0.15s ease';
+        card.style.boxShadow = '0 0 0 2px rgba(52,211,153,0.6), 0 0 12px rgba(52,211,153,0.3)';
+        setTimeout(() => { card.style.boxShadow = ''; card.style.transition = ''; }, 600);
+        // Toast
+        const old = card.querySelector('.copy-toast');
+        if (old) old.remove();
+        const toast = document.createElement('div');
+        toast.className = 'copy-toast';
+        const dark = isDark();
+        toast.style.cssText = `position:absolute;bottom:4px;left:12px;right:12px;text-align:center;font-size:11px;font-weight:600;color:#34d399;background:${dark ? 'rgba(52,211,153,0.15)' : 'rgba(52,211,153,0.1)'};border-radius:8px;padding:3px 8px;z-index:10;`;
+        toast.textContent = `Copied ${cmd}`;
+        card.appendChild(toast);
+        setTimeout(() => toast.remove(), 1600);
       });
     });
 
