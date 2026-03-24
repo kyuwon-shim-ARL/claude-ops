@@ -109,6 +109,11 @@ class SessionItem extends vscode.TreeItem {
 
     const age = formatAge(session.updated_at);
     this.tooltip = `${session.name}\nState: ${session.state}\nPath: ${session.path || 'unknown'}\nUpdated: ${age}`;
+    this.command = {
+      command: 'claudeCtb.focusSession',
+      title: 'Focus Terminal',
+      arguments: [this],
+    };
   }
 }
 
@@ -196,6 +201,44 @@ function getWebviewContent(context: vscode.ExtensionContext): string {
 <body><iframe src="${DASHBOARD_URL}"></iframe></body></html>`;
 }
 
+// --- Terminal Focus ---
+
+function focusTerminalForSession(sessionName: string): boolean {
+  const terminals = vscode.window.terminals;
+  // Match terminal whose name contains the session name (tmux sessions show in terminal title)
+  const match = terminals.find(t =>
+    t.name.includes(sessionName) ||
+    t.name.includes(sessionName.replace(/^claude[_-]/, ''))
+  );
+  if (match) {
+    match.show(false); // false = don't take focus from editor, just reveal terminal
+    return true;
+  }
+  // Fallback: try partial match on the project part (e.g., "claude-ops" in "claude_claude-ops")
+  const projectPart = sessionName.replace(/^claude[_-]/, '');
+  const partial = terminals.find(t => t.name.toLowerCase().includes(projectPart.toLowerCase()));
+  if (partial) {
+    partial.show(false);
+    return true;
+  }
+  return false;
+}
+
+// --- URI Handler (vscode://claude-ctb.claude-ctb-dashboard/focus?session=name) ---
+
+class CTBUriHandler implements vscode.UriHandler {
+  handleUri(uri: vscode.Uri): vscode.ProviderResult<void> {
+    const params = new URLSearchParams(uri.query);
+    const session = params.get('session');
+    if (uri.path === '/focus' && session) {
+      const found = focusTerminalForSession(session);
+      if (!found) {
+        vscode.window.showWarningMessage(`Terminal not found for session: ${session}`);
+      }
+    }
+  }
+}
+
 // --- Helpers ---
 
 function formatAge(ts: number): string {
@@ -222,6 +265,13 @@ export function activate(context: vscode.ExtensionContext): void {
       statusBar.refresh();
       treeProvider.refresh();
     }),
+    vscode.commands.registerCommand('claudeCtb.focusSession', (item: SessionItem) => {
+      const found = focusTerminalForSession(item.session.name);
+      if (!found) {
+        vscode.window.showWarningMessage(`Terminal not found for: ${item.session.name}`);
+      }
+    }),
+    vscode.window.registerUriHandler(new CTBUriHandler()),
     { dispose: () => { statusBar.dispose(); treeProvider.dispose(); } },
   );
 }

@@ -1260,28 +1260,12 @@
       });
     }
 
-    // --- Focus session (desktop) ---
+    // --- Focus session (desktop) via VSCode URI handler ---
     function focusSession(card, name) {
-      const cmd = `/sessions ${name}`;
-      fetch('/api/focus-session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session: name }),
-      })
-        .then(res => res.json().then(data => ({ ok: res.ok, data })))
-        .then(({ ok, data }) => {
-          if (ok && data.status === 'focused') {
-            flashCard(card, 'green');
-            showCardToast(card, `Focused ${name}`, 'green');
-          } else if (data.error === 'no_attached_client') {
-            copyFallback(card, cmd, '\uD130\uBBF8\uB110 \uBBF8\uC5F0\uACB0 \u2014 copied');
-          } else {
-            copyFallback(card, cmd, 'Focus failed \u2014 copied');
-          }
-        })
-        .catch(() => {
-          copyFallback(card, cmd, 'Network error \u2014 copied');
-        });
+      const uri = `vscode://claude-ctb.claude-ctb-dashboard/focus?session=${encodeURIComponent(name)}`;
+      window.open(uri, '_self');
+      flashCard(card, 'green');
+      showCardToast(card, `Focus ${name.replace(/^claude[_-]/, '')}`, 'green');
     }
 
     // --- Card tap handler: mobile=copy, desktop=focus ---
