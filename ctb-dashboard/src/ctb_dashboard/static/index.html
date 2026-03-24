@@ -1219,29 +1219,87 @@
       });
     });
 
-    // --- Card tap-to-copy (replaces CP button) ---
+    // --- Device detection: mobile = touch-only + narrow screen ---
+    function isMobile() {
+      return window.matchMedia('(pointer: coarse)').matches && window.innerWidth < 768;
+    }
+
+    // --- Card toast helper ---
+    function showCardToast(card, text, color) {
+      const old = card.querySelector('.copy-toast');
+      if (old) old.remove();
+      const toast = document.createElement('div');
+      toast.className = 'copy-toast';
+      const dark = isDark();
+      const isGreen = color === 'green';
+      const fg = isGreen ? '#34d399' : '#fb923c';
+      const bg = isGreen
+        ? (dark ? 'rgba(52,211,153,0.15)' : 'rgba(52,211,153,0.1)')
+        : (dark ? 'rgba(251,146,60,0.15)' : 'rgba(251,146,60,0.1)');
+      toast.style.cssText = `position:absolute;bottom:4px;left:12px;right:12px;text-align:center;font-size:11px;font-weight:600;color:${fg};background:${bg};border-radius:8px;padding:3px 8px;z-index:10;`;
+      toast.textContent = text;
+      card.appendChild(toast);
+      setTimeout(() => toast.remove(), 1600);
+    }
+
+    // --- Card border flash helper ---
+    function flashCard(card, color) {
+      const isGreen = color === 'green';
+      const rgba1 = isGreen ? 'rgba(52,211,153,0.6)' : 'rgba(251,146,60,0.6)';
+      const rgba2 = isGreen ? 'rgba(52,211,153,0.3)' : 'rgba(251,146,60,0.3)';
+      card.style.transition = 'box-shadow 0.15s ease';
+      card.style.boxShadow = `0 0 0 2px ${rgba1}, 0 0 12px ${rgba2}`;
+      setTimeout(() => { card.style.boxShadow = ''; card.style.transition = ''; }, 600);
+    }
+
+    // --- Copy fallback with toast ---
+    function copyFallback(card, cmd, message) {
+      copyToClipboard(cmd, () => {
+        flashCard(card, 'orange');
+        showCardToast(card, message, 'orange');
+      });
+    }
+
+    // --- Focus session (desktop) ---
+    function focusSession(card, name) {
+      const cmd = `/sessions ${name}`;
+      fetch('/api/focus-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: name }),
+      })
+        .then(res => res.json().then(data => ({ ok: res.ok, data })))
+        .then(({ ok, data }) => {
+          if (ok && data.status === 'focused') {
+            flashCard(card, 'green');
+            showCardToast(card, `Focused ${name}`, 'green');
+          } else if (data.error === 'no_attached_client') {
+            copyFallback(card, cmd, '\uD130\uBBF8\uB110 \uBBF8\uC5F0\uACB0 \u2014 copied');
+          } else {
+            copyFallback(card, cmd, 'Focus failed \u2014 copied');
+          }
+        })
+        .catch(() => {
+          copyFallback(card, cmd, 'Network error \u2014 copied');
+        });
+    }
+
+    // --- Card tap handler: mobile=copy, desktop=focus ---
     grid.addEventListener('click', (e) => {
       if (_dragConfirmed) return;
       if (e.target.closest('[data-pin-session]')) return;
       const card = e.target.closest('[data-session-name]');
       if (!card) return;
-      const cmd = `/sessions ${card.dataset.sessionName}`;
-      copyToClipboard(cmd, () => {
-        // Border flash
-        card.style.transition = 'box-shadow 0.15s ease';
-        card.style.boxShadow = '0 0 0 2px rgba(52,211,153,0.6), 0 0 12px rgba(52,211,153,0.3)';
-        setTimeout(() => { card.style.boxShadow = ''; card.style.transition = ''; }, 600);
-        // Toast
-        const old = card.querySelector('.copy-toast');
-        if (old) old.remove();
-        const toast = document.createElement('div');
-        toast.className = 'copy-toast';
-        const dark = isDark();
-        toast.style.cssText = `position:absolute;bottom:4px;left:12px;right:12px;text-align:center;font-size:11px;font-weight:600;color:#34d399;background:${dark ? 'rgba(52,211,153,0.15)' : 'rgba(52,211,153,0.1)'};border-radius:8px;padding:3px 8px;z-index:10;`;
-        toast.textContent = `Copied ${cmd}`;
-        card.appendChild(toast);
-        setTimeout(() => toast.remove(), 1600);
-      });
+      const name = card.dataset.sessionName;
+      if (isMobile()) {
+        const cmd = `/sessions ${name}`;
+        copyToClipboard(cmd, () => {
+          flashCard(card, 'green');
+          showCardToast(card, `Copied ${cmd}`, 'green');
+        });
+      } else {
+        focusSession(card, name);
+      }
     });
 
     // Start — apply theme first, then connect

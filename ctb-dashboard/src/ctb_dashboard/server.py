@@ -10,16 +10,19 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
+import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Dict, Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from .state_detector import SessionStateAnalyzer, SessionState
@@ -30,6 +33,12 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL = 3  # seconds between state refreshes
 BIND_HOST = "0.0.0.0"  # accessible via Tailscale network
 BIND_PORT = 8420
+_FOCUS_SECRET = os.environ.get("CTB_FOCUS_SECRET", "")
+_SESSION_NAME_RE = re.compile(r'^[a-zA-Z0-9_\-:.]{1,64}$')
+
+
+class FocusRequest(BaseModel):
+    session: str
 
 # --- Session Poller (reuses SessionStateAnalyzer for accurate detection) ---
 
@@ -175,6 +184,8 @@ async def _background_poller():
 async def lifespan(app: FastAPI):
     """Start background poller on startup, cancel on shutdown."""
     logger.info(f"Dashboard server starting on {BIND_HOST}:{BIND_PORT}")
+    if not _FOCUS_SECRET:
+        logger.warning("CTB_FOCUS_SECRET not set, focus endpoint is unauthenticated")
     task = asyncio.create_task(_background_poller())
     yield
     task.cancel()
@@ -194,7 +205,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -245,6 +256,52 @@ async def health():
         "sessions_count": len(_cached_state.get("sessions", [])),
         "last_updated": _cached_state.get("updated_at", 0),
     }
+
+
+@app.post("/api/focus-session")
+async def focus_session(
+    req: FocusRequest,
+    x_ctb_secret: str | None = Header(None),
+):
+    """Switch the host's tmux client to the requested session."""
+    # Auth check (optional — only when CTB_FOCUS_SECRET is set)
+    if _FOCUS_SECRET and x_ctb_secret != _FOCUS_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid or missing X-CTB-Secret")
+
+    # Validate session name
+    if not _SESSION_NAME_RE.match(req.session):
+        raise HTTPException(status_code=422, detail="Invalid session name")
+
+    # Check attached clients
+    try:
+        clients_result = subprocess.run(
+            ["tmux", "list-clients", "-F", "#{client_tty}"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="tmux list-clients timed out")
+
+    client_ttys = [line for line in clients_result.stdout.strip().split("\n") if line]
+    if not client_ttys:
+        return {"error": "no_attached_client", "detail": "터미널이 연결되어 있지 않습니다"}
+
+    selected_tty = client_ttys[0]
+    if len(client_ttys) > 1:
+        logger.info(f"Multiple tmux clients found, using {selected_tty}")
+
+    # Switch client
+    try:
+        result = subprocess.run(
+            ["tmux", "switch-client", "-c", selected_tty, "-t", req.session],
+            capture_output=True, text=True, timeout=5, shell=False,
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="tmux switch-client timed out")
+
+    if result.returncode != 0:
+        return {"error": "switch_failed", "detail": result.stderr.strip()}
+
+    return {"status": "focused", "session": req.session}
 
 
 def _kill_previous_on_port(port: int):
