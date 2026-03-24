@@ -636,9 +636,14 @@ class SessionStateAnalyzer:
         """Extract current work context from OMC state files in the session's working directory.
 
         Checks in priority order:
-        1. .omc/state/*-state.json — active mode goal/task
-        2. .omc/notepad.md — priority section first line
-        3. MANIFEST.yaml — current experiment ID + title
+        1a. .omc/state/*-state.json — active mode goal/task
+        1b. .omc/state/critique-lock.json — converged/executing ticket
+        1c. .omc/state/skill-sessions.json — active skill
+        2.  .omc/notepad.md — priority section first line
+        3.  MANIFEST.yaml — current experiment ID + title
+        4.  CLAUDE.md — project name from heading
+        5.  git branch + directory name
+        6.  directory name only
 
         Returns:
             Short work context string (truncated to 120 chars), or None
@@ -669,6 +674,32 @@ class SessionStateAnalyzer:
             except OSError:
                 pass
 
+        # 1b. OMC critique-lock.json — converged/executing ticket summary
+        lock_file = root / ".omc" / "state" / "critique-lock.json"
+        if lock_file.is_file():
+            try:
+                lock = json.loads(lock_file.read_text(encoding="utf-8"))
+                verdict = lock.get("final_verdict", "")
+                summary = lock.get("ticket_summary", "")
+                if verdict in ("CONVERGED", "EXECUTING") and summary:
+                    tag = "exec" if verdict == "EXECUTING" else "plan"
+                    return f"[{tag}] {summary}"[:120]
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        # 1c. OMC skill-sessions.json — active skill
+        skill_file = root / ".omc" / "state" / "skill-sessions.json"
+        if skill_file.is_file():
+            try:
+                skills = json.loads(skill_file.read_text(encoding="utf-8"))
+                if isinstance(skills, dict):
+                    for sid, info in skills.items():
+                        if isinstance(info, dict) and info.get("status") in ("active", "running"):
+                            skill_name = info.get("skill", sid)
+                            return f"[{skill_name}] active"[:120]
+            except (json.JSONDecodeError, OSError):
+                pass
+
         # 2. OMC notepad priority section
         notepad = root / ".omc" / "notepad.md"
         if notepad.is_file():
@@ -690,26 +721,64 @@ class SessionStateAnalyzer:
             except OSError:
                 pass
 
-        # 3. MANIFEST.yaml — current experiment
+        # 3. MANIFEST.yaml — current experiment (check root and outputs/)
         manifest = root / "MANIFEST.yaml"
+        if not manifest.is_file():
+            manifest = root / "outputs" / "MANIFEST.yaml"
         if manifest.is_file():
             try:
                 content = manifest.read_text(encoding="utf-8")
                 current_exp = None
+                current_desc = None
+                last_active_exp = None
+                last_active_desc = None
+                in_experimental = False
                 for line in content.split("\n"):
                     m = re.match(r"^\s*-?\s*(e\d{3,4})\s*:", line)
                     if m:
                         current_exp = m.group(1)
+                        current_desc = None
+                        in_experimental = False
                     if current_exp:
-                        tm = re.match(r"^\s+(?:title|name):\s*(.+)", line)
+                        tm = re.match(r"""^\s+(?:title|name|description):\s*["']?(.+?)["']?\s*$""", line)
                         if tm:
-                            return f"[{current_exp}] {tm.group(1).strip()}"[:120]
-                if current_exp:
-                    return f"[{current_exp}] active"
+                            current_desc = tm.group(1).strip()
+                        sm = re.match(r"^\s+status:\s*(\w+)", line)
+                        if sm and sm.group(1) == "experimental":
+                            in_experimental = True
+                            last_active_exp = current_exp
+                            last_active_desc = current_desc
+                # Prefer last experimental experiment; fall back to last experiment
+                exp = last_active_exp or current_exp
+                desc = last_active_desc or current_desc
+                if exp and desc:
+                    return f"[{exp}] {desc}"[:120]
+                elif exp:
+                    return f"[{exp}] active"
             except OSError:
                 pass
 
-        # 4. Generic fallback: git branch + directory name (works for any session)
+        # 4. CLAUDE.md — project description from heading or first line
+        claude_md = root / "CLAUDE.md"
+        if claude_md.is_file():
+            try:
+                content = claude_md.read_text(encoding="utf-8")
+                for line in content.split("\n")[:30]:
+                    stripped = line.strip()
+                    # Match "# ProjectName" or "> **Project Name**: ..."
+                    hm = re.match(r"^#\s+(.+)", stripped)
+                    if hm:
+                        title = hm.group(1).strip()
+                        # Skip generic headings like "CLAUDE.md", "README", "# Configuration"
+                        if title and len(title) > 3 and not re.match(r"(?i)^(claude\.?md|readme|config)", title):
+                            return f"[project] {title}"[:120]
+                    pm = re.match(r"^>\s+\*\*Project\s+Name\*\*:\s*(.+)", stripped, re.IGNORECASE)
+                    if pm:
+                        return f"[project] {pm.group(1).strip()}"[:120]
+            except OSError:
+                pass
+
+        # 5. Generic fallback: git branch + directory name (works for any session)
         dir_name = root.name
         try:
             result = subprocess.run(
@@ -726,7 +795,7 @@ class SessionStateAnalyzer:
         except Exception:
             pass
 
-        # Non-git directory: show directory name only
+        # 6. Non-git directory: show directory name only
         if dir_name:
             return f"[dir] {dir_name}"[:120]
 
