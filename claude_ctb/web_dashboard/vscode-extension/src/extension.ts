@@ -172,6 +172,17 @@ class DashboardPanel {
     );
 
     DashboardPanel.panel.webview.html = getWebviewContent(context);
+
+    // Handle messages from webview (card click → terminal focus)
+    DashboardPanel.panel.webview.onDidReceiveMessage((message: { type: string; session?: string }) => {
+      if (message.type === 'focusSession' && message.session) {
+        const found = focusTerminalForSession(message.session);
+        if (!found) {
+          vscode.window.showWarningMessage(`Terminal not found for: ${message.session}`);
+        }
+      }
+    });
+
     DashboardPanel.panel.onDidDispose(() => { DashboardPanel.panel = undefined; });
   }
 }
@@ -211,17 +222,32 @@ function focusTerminalForSession(sessionName: string): boolean {
     t.name.includes(sessionName.replace(/^claude[_-]/, ''))
   );
   if (match) {
-    match.show(false); // false = don't take focus from editor, just reveal terminal
+    activateTerminal(match);
     return true;
   }
   // Fallback: try partial match on the project part (e.g., "claude-ops" in "claude_claude-ops")
   const projectPart = sessionName.replace(/^claude[_-]/, '');
   const partial = terminals.find(t => t.name.toLowerCase().includes(projectPart.toLowerCase()));
   if (partial) {
-    partial.show(false);
+    activateTerminal(partial);
     return true;
   }
   return false;
+}
+
+/**
+ * Reveal a terminal and ensure it receives keyboard focus.
+ * terminal.show(false) reveals the panel but may not always route keyboard
+ * input (especially when called from file-watcher or URI handler contexts).
+ * We follow up with workbench.action.terminal.focus to guarantee input routing.
+ */
+function activateTerminal(terminal: vscode.Terminal): void {
+  terminal.show(false); // preserveFocus=false → request focus
+  // Ensure keyboard focus lands on the terminal input (xterm-helper-textarea)
+  // by explicitly executing the focus command after a microtask yield.
+  setTimeout(() => {
+    vscode.commands.executeCommand('workbench.action.terminal.focus');
+  }, 100);
 }
 
 // --- URI Handler (vscode://claude-ctb.claude-ctb-dashboard/focus?session=name) ---
@@ -251,11 +277,61 @@ function formatAge(ts: number): string {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
+// --- Focus Signal Watcher (IPC: dashboard server → extension) ---
+
+const FOCUS_SIGNAL_PATH = '/tmp/ctb-focus-signal.json';
+
+class FocusSignalWatcher {
+  private watcher: fs.FSWatcher | undefined;
+  private disposed = false;
+
+  start(): void {
+    // Ensure signal file exists so fs.watch has something to watch
+    try {
+      if (!fs.existsSync(FOCUS_SIGNAL_PATH)) {
+        fs.writeFileSync(FOCUS_SIGNAL_PATH, '', { mode: 0o666 });
+      }
+    } catch { /* ignore */ }
+
+    try {
+      this.watcher = fs.watch(FOCUS_SIGNAL_PATH, () => this.onSignal());
+    } catch {
+      // Fallback: poll every 500ms
+      const interval = setInterval(() => this.onSignal(), 500);
+      this.watcher = { close: () => clearInterval(interval) } as unknown as fs.FSWatcher;
+    }
+  }
+
+  private onSignal(): void {
+    if (this.disposed) { return; }
+    try {
+      const raw = fs.readFileSync(FOCUS_SIGNAL_PATH, 'utf-8').trim();
+      if (!raw) { return; }
+      const signal = JSON.parse(raw);
+      if (signal.session && signal.ts) {
+        // Clear signal immediately to prevent re-triggering
+        fs.writeFileSync(FOCUS_SIGNAL_PATH, '', { mode: 0o666 });
+        const found = focusTerminalForSession(signal.session);
+        if (!found) {
+          vscode.window.showWarningMessage(`Terminal not found for: ${signal.session}`);
+        }
+      }
+    } catch { /* ignore parse errors, empty file, etc. */ }
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    if (this.watcher) { this.watcher.close(); }
+  }
+}
+
 // --- Activation ---
 
 export function activate(context: vscode.ExtensionContext): void {
   const statusBar = new StatusBarManager();
   const treeProvider = new SessionTreeProvider();
+  const focusWatcher = new FocusSignalWatcher();
+  focusWatcher.start();
 
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider('claudeCtbSessions', treeProvider),
@@ -272,7 +348,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.window.registerUriHandler(new CTBUriHandler()),
-    { dispose: () => { statusBar.dispose(); treeProvider.dispose(); } },
+    { dispose: () => { statusBar.dispose(); treeProvider.dispose(); focusWatcher.dispose(); } },
   );
 }
 

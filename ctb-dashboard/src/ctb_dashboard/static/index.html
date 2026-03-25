@@ -1260,12 +1260,42 @@
       });
     }
 
-    // --- Focus session (desktop) via VSCode URI handler ---
+    // --- Focus session (desktop) ---
+    // Detect VSCode webview: acquireVsCodeApi is available only inside webview
+    const _vscodeApi = (typeof acquireVsCodeApi === 'function') ? acquireVsCodeApi() : null;
+
     function focusSession(card, name) {
-      const uri = `vscode://claude-ctb.claude-ctb-dashboard/focus?session=${encodeURIComponent(name)}`;
-      window.open(uri, '_self');
-      flashCard(card, 'green');
-      showCardToast(card, `Focus ${name.replace(/^claude[_-]/, '')}`, 'green');
+      const cmd = `/sessions ${name}`;
+
+      if (_vscodeApi) {
+        // Inside VSCode webview: postMessage directly to extension
+        // VSCode already has window focus → terminal switch + keyboard focus works instantly
+        _vscodeApi.postMessage({ type: 'focusSession', session: name });
+        flashCard(card, 'green');
+        showCardToast(card, `Focused ${name.replace(/^claude[_-]/, '')}`, 'green');
+        return;
+      }
+
+      // Browser: REST API for tmux switch-client + signal file for VSCode extension
+      fetch('/api/focus-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: name }),
+      })
+        .then(res => res.json().then(data => ({ ok: res.ok, data })))
+        .then(({ ok, data }) => {
+          if (ok && data.status === 'focused') {
+            flashCard(card, 'green');
+            showCardToast(card, `Focused ${name.replace(/^claude[_-]/, '')}`, 'green');
+          } else if (data.error === 'no_attached_client') {
+            copyFallback(card, cmd, '터미널 미연결 — copied');
+          } else {
+            copyFallback(card, cmd, 'Focus failed — copied');
+          }
+        })
+        .catch(() => {
+          copyFallback(card, cmd, 'Network error — copied');
+        });
     }
 
     // --- Card tap handler: mobile=copy, desktop=focus ---

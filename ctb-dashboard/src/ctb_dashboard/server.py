@@ -272,36 +272,45 @@ async def focus_session(
     if not _SESSION_NAME_RE.match(req.session):
         raise HTTPException(status_code=422, detail="Invalid session name")
 
-    # Check attached clients
-    try:
-        clients_result = subprocess.run(
-            ["tmux", "list-clients", "-F", "#{client_tty}"],
-            capture_output=True, text=True, timeout=5,
-        )
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=500, detail="tmux list-clients timed out")
-
-    client_ttys = [line for line in clients_result.stdout.strip().split("\n") if line]
-    if not client_ttys:
-        return {"error": "no_attached_client", "detail": "터미널이 연결되어 있지 않습니다"}
-
-    selected_tty = client_ttys[0]
-    if len(client_ttys) > 1:
-        logger.info(f"Multiple tmux clients found, using {selected_tty}")
-
-    # Switch client
+    # 1. Activate VSCode window via xdotool (brings VSCode to foreground)
+    window_ok = False
     try:
         result = subprocess.run(
-            ["tmux", "switch-client", "-c", selected_tty, "-t", req.session],
-            capture_output=True, text=True, timeout=5, shell=False,
+            ["xdotool", "search", "--name", "Visual Studio Code"],
+            capture_output=True, text=True, timeout=3,
         )
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=500, detail="tmux switch-client timed out")
+        wids = result.stdout.strip().split('\n')
+        if wids and wids[0]:
+            subprocess.run(
+                ["xdotool", "windowactivate", wids[0]],
+                capture_output=True, timeout=3,
+            )
+            window_ok = True
+    except Exception:
+        pass  # xdotool not available or no X11 display — non-fatal
 
-    if result.returncode != 0:
-        return {"error": "switch_failed", "detail": result.stderr.strip()}
+    # 2. Try tmux switch-client for direct terminal focus (works for pure tmux users)
+    tmux_ok = False
+    try:
+        result = subprocess.run(
+            ["tmux", "switch-client", "-t", req.session],
+            capture_output=True, timeout=3,
+        )
+        tmux_ok = result.returncode == 0
+    except Exception:
+        pass  # No attached client or tmux not available — expected in VSCode-only setups
 
-    return {"status": "focused", "session": req.session}
+    # 3. Write focus signal for VSCode extension (file-based IPC)
+    # The extension watches this file and calls terminal.show() + focus to switch tabs
+    _FOCUS_SIGNAL_PATH = "/tmp/ctb-focus-signal.json"
+    try:
+        import json as _json, time as _time
+        with open(_FOCUS_SIGNAL_PATH, "w") as f:
+            _json.dump({"session": req.session, "ts": _time.time()}, f)
+    except Exception as e:
+        logger.warning(f"Failed to write focus signal: {e}")
+
+    return {"status": "focused", "session": req.session, "tmux_switched": tmux_ok, "window_activated": window_ok}
 
 
 def _kill_previous_on_port(port: int):
