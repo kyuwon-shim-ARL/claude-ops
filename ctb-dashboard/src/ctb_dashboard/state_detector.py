@@ -8,6 +8,7 @@ Extracted from claude_ctb.utils.session_state (core detection subset).
 """
 
 import json
+import os
 import subprocess
 import logging
 import re
@@ -21,12 +22,13 @@ logger = logging.getLogger(__name__)
 
 class SessionState(Enum):
     """Session state definitions with clear priorities"""
-    CONTEXT_LIMIT = "context_limit"  # Highest priority - context window exhausted
-    ERROR = "error"               # System errors
-    WAITING_INPUT = "waiting"     # User response required
-    WORKING = "working"           # Active work in progress
-    IDLE = "idle"                 # No activity, ready for commands
-    UNKNOWN = "unknown"           # Cannot determine state
+    CONTEXT_LIMIT = "context_limit"      # Highest priority - context window exhausted
+    ERROR = "error"                      # System errors
+    WAITING_INPUT = "waiting"            # User response required
+    WORKING = "working"                  # Active work in progress
+    STUCK_AFTER_AGENT = "stuck_after_agent"  # Agent returned result, no follow-up
+    IDLE = "idle"                        # No activity, ready for commands
+    UNKNOWN = "unknown"                  # Cannot determine state
 
 
 class StateTransition:
@@ -58,8 +60,9 @@ class SessionStateAnalyzer:
         SessionState.ERROR: 1,
         SessionState.WAITING_INPUT: 2,
         SessionState.WORKING: 3,
-        SessionState.IDLE: 4,
-        SessionState.UNKNOWN: 5
+        SessionState.STUCK_AFTER_AGENT: 35,  # Between WORKING(3) and IDLE(4), stored as int*10
+        SessionState.IDLE: 40,
+        SessionState.UNKNOWN: 50,
     }
 
     # Claude Code spinner/bullet glyphs used for tool execution and thinking.
@@ -289,9 +292,10 @@ class SessionStateAnalyzer:
                 logger.debug("WORKING: OMC background task '(running)' detected")
                 return True
 
-        # PRIORITY 1c: Claude Code background tasks still running
-        if 'background task' in recent_content and 'still running' in recent_content:
-            logger.debug("WORKING: Claude background task(s) still running detected")
+        # PRIORITY 1c: Claude Code background tasks / local agents still running
+        # Matches both old "background tasks still running" and new "local agents still running"
+        if ('background task' in recent_content or 'local agents' in recent_content) and 'still running' in recent_content:
+            logger.debug("WORKING: Claude background task(s)/local agents still running detected")
             return True
 
         # PRIORITY 1d: Active spinner glyph with ellipsis
@@ -337,6 +341,7 @@ class SessionStateAnalyzer:
             "ctrl+b to run in background",
             "tokens \xb7 thought for",
             "background task still running",
+            "local agents still running",      # Newer Claude Code phrasing (post-update)
             "to manage)",
             "Compacting",
             "Running PreCompact hooks",
@@ -355,11 +360,11 @@ class SessionStateAnalyzer:
             rf'^\s*[{SessionStateAnalyzer._TOOL_GLYPHS}] \w+ for \d+',
             check_content, re.MULTILINE,
         ):
-            if 'background task' not in check_content:
+            if 'background task' not in check_content and 'local agents' not in check_content:
                 logger.debug("NOT WORKING: past-tense completion line detected")
                 return False
             else:
-                logger.debug("WORKING: past-tense line has background task(s) still running")
+                logger.debug("WORKING: past-tense line has background task(s)/local agents still running")
                 return True
 
         # 2b: Structural regex patterns
@@ -465,7 +470,110 @@ class SessionStateAnalyzer:
         recent_content = '\n'.join(lines[-10:])
         return any(pattern in recent_content for pattern in error_patterns)
 
-    def get_state(self, session_name: str, use_cache: bool = True) -> SessionState:
+    # How long (seconds) after last tool_result before flagging stuck
+    _STUCK_DETECTION_DELAY = 10
+    # Don't flag sessions whose JSONL hasn't changed in this many seconds
+    _STUCK_MAX_AGE = 600
+
+    def _detect_stuck_after_agent(self, session_path: str) -> bool:
+        """Detect if session is stuck: agent returned tool_result but no assistant follow-up.
+
+        Reads the session's most recent JSONL file from ~/.claude/projects/.
+        Returns True if the last meaningful exchange ends with an unanswered tool_result
+        that has been sitting for at least _STUCK_DETECTION_DELAY seconds.
+        """
+        if not session_path:
+            return False
+
+        import glob as _glob
+        import time as _time
+
+        # Encode session path to Claude storage format: /home/foo/bar -> -home-foo-bar
+        encoded = session_path.replace('/', '-')
+        if encoded.startswith('-'):
+            pass  # already has leading dash from leading /
+        claude_base = os.path.expanduser("~/.claude/projects")
+        project_dir = os.path.join(claude_base, encoded)
+
+        if not os.path.isdir(project_dir):
+            return False
+
+        try:
+            jsonl_files = [
+                f for f in _glob.glob(os.path.join(project_dir, "*.jsonl"))
+                if os.path.isfile(f)
+            ]
+            if not jsonl_files:
+                return False
+
+            # Most recently modified JSONL (active session)
+            jsonl_files.sort(key=os.path.getmtime, reverse=True)
+            latest = jsonl_files[0]
+
+            mtime = os.path.getmtime(latest)
+            age = _time.time() - mtime
+
+            # Don't flag: too fresh (agent might still be processing) or too old
+            if age < self._STUCK_DETECTION_DELAY or age > self._STUCK_MAX_AGE:
+                return False
+
+            # Read last 150 lines
+            with open(latest, 'r', encoding='utf-8', errors='ignore') as fh:
+                tail = fh.readlines()[-150:]
+
+            messages = []
+            for line in tail:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    messages.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+
+            # Find positions of last assistant and last user-with-tool_result
+            last_assistant_idx = -1
+            last_tool_result_idx = -1
+
+            for i, entry in enumerate(messages):
+                msg = entry.get('message', {})
+                role = msg.get('role', '')
+                content = msg.get('content', [])
+
+                if role == 'assistant':
+                    last_assistant_idx = i
+                elif role == 'user' and isinstance(content, list):
+                    for c in content:
+                        if isinstance(c, dict) and c.get('type') == 'tool_result':
+                            last_tool_result_idx = i
+                            break
+
+            # Stuck: tool_result arrived AFTER last assistant turn
+            if last_tool_result_idx <= last_assistant_idx:
+                return False
+            if last_assistant_idx < 0:
+                return False
+
+            # Verify the assistant turn before the tool_result used Agent tool
+            for i in range(last_assistant_idx, -1, -1):
+                msg = messages[i].get('message', {})
+                if msg.get('role') != 'assistant':
+                    continue
+                content = msg.get('content', [])
+                if isinstance(content, list):
+                    for c in content:
+                        if isinstance(c, dict) and c.get('type') == 'tool_use':
+                            # Agent tool is the primary culprit, but also flag other tools
+                            return True
+                break
+
+            return False
+
+        except Exception as e:
+            logger.debug(f"_detect_stuck_after_agent error for {session_path}: {e}")
+            return False
+
+    def get_state(self, session_name: str, session_path: str = None, use_cache: bool = True) -> SessionState:
         """
         Get the current state of a session with priority-based resolution.
 
@@ -506,7 +614,11 @@ class SessionStateAnalyzer:
                 detected_states.append(SessionState.WORKING)
 
             if not detected_states:
-                detected_states.append(SessionState.IDLE)
+                # Session is IDLE — check if it's actually stuck after an agent result
+                if session_path and self._detect_stuck_after_agent(session_path):
+                    detected_states.append(SessionState.STUCK_AFTER_AGENT)
+                else:
+                    detected_states.append(SessionState.IDLE)
 
             state = min(detected_states, key=lambda s: self.STATE_PRIORITY[s])
 

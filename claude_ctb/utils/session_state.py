@@ -50,6 +50,7 @@ class SessionState(Enum):
     """Session state definitions with clear priorities"""
     CONTEXT_LIMIT = "context_limit"  # Highest priority - context window exhausted
     ERROR = "error"               # System errors
+    OVERLOADED = "overloaded"     # API 529 overloaded — retry with backoff
     WAITING_INPUT = "waiting"     # User response required
     WORKING = "working"           # Active work in progress
     IDLE = "idle"                 # No activity, ready for commands
@@ -83,10 +84,11 @@ class SessionStateAnalyzer:
     STATE_PRIORITY = {
         SessionState.CONTEXT_LIMIT: 0,
         SessionState.ERROR: 1,
-        SessionState.WAITING_INPUT: 2,
-        SessionState.WORKING: 3,
-        SessionState.IDLE: 4,
-        SessionState.UNKNOWN: 5
+        SessionState.OVERLOADED: 2,
+        SessionState.WAITING_INPUT: 3,
+        SessionState.WORKING: 4,
+        SessionState.IDLE: 5,
+        SessionState.UNKNOWN: 6,
     }
     
     # Claude Code spinner/bullet glyphs used for tool execution and thinking.
@@ -380,11 +382,12 @@ class SessionStateAnalyzer:
         # PRIORITY 1c: Check for Claude Code background tasks still running
         # "N background task(s) still running" appears on the completion summary
         # line (e.g., "✻ Crunched for 59s · 3 background tasks still running").
+        # Also matches newer "local agents" phrasing (Claude Code update).
         # This is a definitive working indicator but can appear many lines above
         # the ❯ prompt when Claude writes output text below it. Checking it here
         # (against recent_content) prevents the narrow [-1:] window from missing it.
-        if 'background task' in recent_content and 'still running' in recent_content:
-            logger.debug("🎯 WORKING: Claude background task(s) still running detected in recent lines")
+        if ('background task' in recent_content or 'local agents' in recent_content) and 'still running' in recent_content:
+            logger.debug("🎯 WORKING: Claude background task(s)/local agents still running detected in recent lines")
             return True
 
         # PRIORITY 1d: Active spinner glyph with ellipsis in recent raw lines
@@ -462,6 +465,7 @@ class SessionStateAnalyzer:
             "ctrl+b to run in background",  # Background execution option
             "tokens \xb7 thought for",      # Claude Code thinking status (· = U+00B7)
             "background task still running",   # Main work done but background task(s) active
+            "local agents still running",      # Newer Claude Code phrasing (post-update)
             "to manage)",                   # "(↓ to manage)" shown below background task indicator
             "Compacting",                   # Context compaction in progress (covers "Compacting context" and "Compacting conversation")
             "Running PreCompact hooks",     # PreCompact hooks executing before compaction
@@ -486,11 +490,11 @@ class SessionStateAnalyzer:
             rf'^\s*[{SessionStateAnalyzer._TOOL_GLYPHS}] \w+ for \d+',
             check_content, re.MULTILINE,
         ):
-            if 'background task' not in check_content:
+            if 'background task' not in check_content and 'local agents' not in check_content:
                 logger.debug("⏸️ NOT WORKING: past-tense completion line detected (glyph + verb + 'for' + duration)")
                 return False
             else:
-                logger.debug("🎯 WORKING: past-tense line has background task(s) still running")
+                logger.debug("🎯 WORKING: past-tense line has background task(s)/local agents still running")
                 return True
 
         # 2b: Structural regex patterns on narrow filtered content
@@ -590,6 +594,15 @@ class SessionStateAnalyzer:
 
         return False
     
+    def _detect_overloaded(self, screen_content: str) -> bool:
+        """Detect API 529 overloaded error in recent screen content."""
+        if not screen_content:
+            return False
+        if any(guard in screen_content[-2000:] for guard in self._WORKING_GUARD_PATTERNS):
+            return False
+        recent = '\n'.join(screen_content.split('\n')[-20:])
+        return 'overloaded_error' in recent or 'API Error: 529' in recent
+
     def _detect_context_limit(self, screen_content: str) -> bool:
         """
         Detect if session has hit the context window limit.
@@ -688,6 +701,9 @@ class SessionStateAnalyzer:
 
             if self._detect_error_state(screen_content):
                 detected_states.append(SessionState.ERROR)
+
+            if self._detect_overloaded(screen_content):
+                detected_states.append(SessionState.OVERLOADED)
 
             if self._detect_input_waiting(screen_content):
                 detected_states.append(SessionState.WAITING_INPUT)
