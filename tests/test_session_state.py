@@ -40,7 +40,8 @@ class TestSessionState:
         assert analyzer.STATE_PRIORITY[SessionState.WAITING_INPUT] == 3
         assert analyzer.STATE_PRIORITY[SessionState.WORKING] == 4
         assert analyzer.STATE_PRIORITY[SessionState.IDLE] == 5
-        assert analyzer.STATE_PRIORITY[SessionState.UNKNOWN] == 6
+        assert analyzer.STATE_PRIORITY[SessionState.SCHEDULED] == 6
+        assert analyzer.STATE_PRIORITY[SessionState.UNKNOWN] == 7
 
 
 class TestStateTransition:
@@ -1043,6 +1044,75 @@ class TestExtractLastPrompt:
         )
         result = self.analyzer.extract_last_prompt(screen)
         assert result == "왜 이렇게 나 많이 필요한거야? 주요 선택기준에 따라 MECE하면서도"
+
+
+class TestDetectStuckAfterAgent:
+    """Tests for detect_stuck_after_agent — fires nudge when JSONL ends with
+    unanswered tool_result (Claude got results but hasn't responded yet)."""
+
+    def setup_method(self):
+        self.analyzer = SessionStateAnalyzer()
+
+    def _write_jsonl(self, path, entries):
+        """Write JSONL entries to a file."""
+        import json
+        path.write_text('\n'.join(json.dumps(e) for e in entries))
+
+    def _assistant_tool_use(self):
+        return {"message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "bash"}]}}
+
+    def _tool_result(self):
+        return {"message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}}
+
+    def _assistant_text(self):
+        return {"message": {"role": "assistant", "content": [{"type": "text", "text": "Done."}]}}
+
+    def _make_proj(self, tmp_path, monkeypatch, entries, age_seconds):
+        """Create project dir + JSONL and patch expanduser/time."""
+        import time as _time
+        # encoded("/fake/path") == "-fake-path"; expanduser returns tmp_path
+        # so project_dir = tmp_path / "-fake-path"
+        proj = tmp_path / "-fake-path"
+        proj.mkdir(parents=True)
+        jsonl = proj / "session.jsonl"
+        self._write_jsonl(jsonl, entries)
+        mtime = jsonl.stat().st_mtime
+        monkeypatch.setattr("os.path.expanduser", lambda p: str(tmp_path) if "~" in p else p)
+        monkeypatch.setattr("time.time", lambda: mtime + age_seconds)
+        return jsonl
+
+    def test_stuck_returns_true(self, tmp_path, monkeypatch):
+        """JSONL ends with tool_result > last_assistant — genuinely stuck."""
+        self._make_proj(tmp_path, monkeypatch,
+                        [self._assistant_tool_use(), self._tool_result()], age_seconds=60)
+        assert self.analyzer.detect_stuck_after_agent("/fake/path") is True
+
+    def test_too_fresh_returns_false(self, tmp_path, monkeypatch):
+        """JSONL age < 45s — Claude is still processing, not stuck."""
+        self._make_proj(tmp_path, monkeypatch,
+                        [self._assistant_tool_use(), self._tool_result()], age_seconds=10)
+        assert self.analyzer.detect_stuck_after_agent("/fake/path") is False
+
+    def test_assistant_responded_returns_false(self, tmp_path, monkeypatch):
+        """Assistant replied after tool_result — not stuck."""
+        self._make_proj(tmp_path, monkeypatch,
+                        [self._assistant_tool_use(), self._tool_result(), self._assistant_text()],
+                        age_seconds=60)
+        assert self.analyzer.detect_stuck_after_agent("/fake/path") is False
+
+    def test_no_tool_use_in_assistant_returns_false(self, tmp_path, monkeypatch):
+        """Tool result present but prior assistant had no tool_use — not stuck."""
+        self._make_proj(tmp_path, monkeypatch,
+                        [self._assistant_text(), self._tool_result()], age_seconds=60)
+        assert self.analyzer.detect_stuck_after_agent("/fake/path") is False
+
+    def test_empty_session_path_returns_false(self):
+        assert self.analyzer.detect_stuck_after_agent("") is False
+        assert self.analyzer.detect_stuck_after_agent(None) is False
+
+    def test_nonexistent_project_dir_returns_false(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("os.path.expanduser", lambda p: str(tmp_path) if "~" in p else p)
+        assert self.analyzer.detect_stuck_after_agent("/no/such/path") is False
 
 
 if __name__ == "__main__":

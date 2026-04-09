@@ -883,19 +883,24 @@ class MultiSessionMonitor:
                     # --- end overload retry ---
 
                     # --- stuck-after-agent auto-nudge ---
-                    # Only check when IDLE and not currently in overload retry
+                    # Only check when IDLE (not WORKING) and not currently in overload retry
+                    _current_state = self.last_state.get(session_name)
                     if (session_name not in self.overload_retry_states
-                            and not is_overloaded):
+                            and not is_overloaded
+                            and _current_state not in (
+                                SessionState.WORKING,
+                                SessionState.WAITING_INPUT,
+                            )):
                         now = time.time()
                         if now - self._stuck_check_at.get(session_name, 0) >= self._stuck_check_interval:
                             self._stuck_check_at[session_name] = now
                             path = session_manager.get_session_path(session_name)
                         else:
                             path = None
-                        if path and self.state_analyzer.detect_stuck_after_agent(path):
+                        if path and self.state_analyzer.detect_stuck_after_agent(path, delay_seconds=45):
                             last_nudge = self._stuck_nudge_sent_at.get(session_name, 0)
-                            # 60s cooldown between nudges for same session
-                            if time.time() - last_nudge > 60:
+                            # 300s cooldown between nudges for same session
+                            if time.time() - last_nudge > 300:
                                 logger.info(
                                     f"🔔 {session_name}: stuck after agent result — "
                                     f"sending nudge '마저해줘'"

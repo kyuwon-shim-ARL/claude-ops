@@ -54,6 +54,7 @@ class SessionState(Enum):
     WAITING_INPUT = "waiting"     # User response required
     WORKING = "working"           # Active work in progress
     IDLE = "idle"                 # No activity, ready for commands
+    SCHEDULED = "scheduled"       # Idle but cron job is scheduled
     UNKNOWN = "unknown"           # Cannot determine state
 
 
@@ -88,7 +89,8 @@ class SessionStateAnalyzer:
         SessionState.WAITING_INPUT: 3,
         SessionState.WORKING: 4,
         SessionState.IDLE: 5,
-        SessionState.UNKNOWN: 6,
+        SessionState.SCHEDULED: 6,
+        SessionState.UNKNOWN: 7,
     }
     
     # Claude Code spinner/bullet glyphs used for tool execution and thinking.
@@ -595,7 +597,7 @@ class SessionStateAnalyzer:
         return False
 
     def detect_stuck_after_agent(self, session_path: str,
-                                 delay_seconds: int = 12,
+                                 delay_seconds: int = 45,
                                  max_age_seconds: int = 600) -> bool:
         """Return True if the most recent session JSONL ends with unanswered tool_result.
 
@@ -740,12 +742,96 @@ class SessionStateAnalyzer:
             "Timeout:",
             "Connection refused",
             "Permission denied",
+            # Python-specific
+            "Traceback (most recent call last):",
+            "returned non-zero exit status",
+            # Shell errors
+            "command not found",
+            "No such file or directory",
         ]
 
+        import re as _re
         recent_content = '\n'.join(lines[-10:])
 
-        return any(pattern in recent_content for pattern in error_patterns)
+        if any(pattern in recent_content for pattern in error_patterns):
+            return True
+
+        # Non-zero exit code (e.g. "exit 1", "exited with code 2")
+        if _re.search(r'\bexit(?:ed)?(?: with| code)? [1-9]\d*\b', recent_content):
+            return True
+
+        return False
     
+    def _detect_background_process(self, session_name: str) -> bool:
+        """Detect background processes running inside a tmux pane via PID check.
+
+        Gets the shell PID of the pane and checks for child processes that aren't
+        trivial (the shell itself, ps). Handles the case where the screen looks idle
+        but a background job is still running.
+
+        Returns:
+            True if a non-trivial child process exists under the pane's shell PID.
+        """
+        try:
+            pid_result = subprocess.run(
+                f"tmux display-message -t {session_name} -p '#{{pane_pid}}'",
+                shell=True, capture_output=True, text=True, timeout=3,
+            )
+            if pid_result.returncode != 0:
+                return False
+            pane_pid = pid_result.stdout.strip()
+            if not pane_pid.isdigit():
+                return False
+
+            ps_result = subprocess.run(
+                f"ps --ppid {pane_pid} -o pid=,comm=,stat=",
+                shell=True, capture_output=True, text=True, timeout=3,
+            )
+            if ps_result.returncode != 0:
+                return False
+
+            # Shells and transient helpers that don't count as "real" background work
+            trivial = {'sh', 'bash', 'zsh', 'fish', 'dash', 'ps', 'tmux'}
+            for line in ps_result.stdout.strip().splitlines():
+                parts = line.split(None, 2)
+                if len(parts) >= 2:
+                    comm = parts[1].strip()
+                    # Zombie processes (Z stat) are already dead, skip them
+                    stat = parts[2].strip() if len(parts) > 2 else ''
+                    if comm not in trivial and 'Z' not in stat:
+                        logger.debug(f"🎯 BACKGROUND PROCESS: {comm} (pid={parts[0].strip()}) in {session_name}")
+                        return True
+            return False
+        except Exception as e:
+            logger.debug(f"_detect_background_process error ({session_name}): {e}")
+            return False
+
+    def _detect_scheduled(self, session_name: str) -> bool:
+        """Detect if a cron job is scheduled that references this session.
+
+        Scans the current user's crontab for non-comment lines that contain
+        the session name. Returns True when the session is idle but has a
+        scheduled job that will start it again.
+
+        Returns:
+            True if a crontab entry referencing session_name is found.
+        """
+        try:
+            result = subprocess.run(
+                "crontab -l", shell=True, capture_output=True, text=True, timeout=3,
+            )
+            if result.returncode != 0:
+                return False
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if line and not line.startswith('#') and session_name in line:
+                    logger.debug(f"📅 SCHEDULED: crontab entry found for {session_name}")
+                    return True
+            return False
+        except Exception as e:
+            logger.debug(f"_detect_scheduled error ({session_name}): {e}")
+            return False
+
     def get_state(self, session_name: str, use_cache: bool = True) -> SessionState:
         """
         Get the current state of a session with priority-based resolution
@@ -794,9 +880,14 @@ class SessionStateAnalyzer:
             if self._detect_working_state(screen_content):
                 detected_states.append(SessionState.WORKING)
 
-            # If no specific state detected, assume idle
+            # If no specific state detected, check process/cron before defaulting to IDLE
             if not detected_states:
-                detected_states.append(SessionState.IDLE)
+                if self._detect_background_process(session_name):
+                    detected_states.append(SessionState.WORKING)
+                elif self._detect_scheduled(session_name):
+                    detected_states.append(SessionState.SCHEDULED)
+                else:
+                    detected_states.append(SessionState.IDLE)
 
             # Return highest priority state
             state = min(detected_states, key=lambda s: self.STATE_PRIORITY[s])
@@ -854,7 +945,7 @@ class SessionStateAnalyzer:
                 # Update hold timer
                 self._last_working_time[session_name] = _time.time()
 
-            # If no specific state detected, check hold timer before assuming idle
+            # If no specific state detected, check hold timer, then process/cron
             if not detected_states:
                 last_working = self._last_working_time.get(session_name, 0)
                 hold_remaining = self._working_hold_seconds - (_time.time() - last_working)
@@ -865,6 +956,10 @@ class SessionStateAnalyzer:
                         f"{hold_remaining:.1f}s remaining"
                     )
                     detected_states.append(SessionState.WORKING)
+                elif self._detect_background_process(session_name):
+                    detected_states.append(SessionState.WORKING)
+                elif self._detect_scheduled(session_name):
+                    detected_states.append(SessionState.SCHEDULED)
                 else:
                     detected_states.append(SessionState.IDLE)
 
