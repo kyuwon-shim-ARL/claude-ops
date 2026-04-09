@@ -663,6 +663,20 @@ class SessionStateAnalyzer:
             logger.debug(f'detect_stuck_after_agent error ({session_path}): {e}')
             return False
 
+    def extract_last_prompt(self, screen_content: str) -> Optional[str]:
+        """Extract the last user prompt from screen content (text after '❯ ')."""
+        if not screen_content:
+            return None
+        lines = screen_content.split('\n')
+        # Search in reverse for a line containing '❯ ' with actual text after it
+        for line in reversed(lines):
+            stripped = line.strip()
+            if stripped.startswith('❯ '):
+                prompt = stripped[2:].strip()
+                if prompt:
+                    return prompt
+        return None
+
     def _detect_overloaded(self, screen_content: str) -> bool:
         """Detect API 529 overloaded error in recent screen content."""
         if not screen_content:
