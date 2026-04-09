@@ -36,10 +36,11 @@ class TestSessionState:
         # CONTEXT_LIMIT should have highest priority (lowest number)
         assert analyzer.STATE_PRIORITY[SessionState.CONTEXT_LIMIT] == 0
         assert analyzer.STATE_PRIORITY[SessionState.ERROR] == 1
-        assert analyzer.STATE_PRIORITY[SessionState.WAITING_INPUT] == 2
-        assert analyzer.STATE_PRIORITY[SessionState.WORKING] == 3
-        assert analyzer.STATE_PRIORITY[SessionState.IDLE] == 4
-        assert analyzer.STATE_PRIORITY[SessionState.UNKNOWN] == 5
+        assert analyzer.STATE_PRIORITY[SessionState.OVERLOADED] == 2
+        assert analyzer.STATE_PRIORITY[SessionState.WAITING_INPUT] == 3
+        assert analyzer.STATE_PRIORITY[SessionState.WORKING] == 4
+        assert analyzer.STATE_PRIORITY[SessionState.IDLE] == 5
+        assert analyzer.STATE_PRIORITY[SessionState.UNKNOWN] == 6
 
 
 class TestStateTransition:
@@ -997,6 +998,51 @@ class TestErrorHandling:
                               return_value=malformed_input):
                 state = analyzer.get_state("test_session")
                 assert isinstance(state, SessionState)
+
+
+class TestExtractLastPrompt:
+    """
+    Regression: extract_last_prompt was missing from SessionStateAnalyzer.
+    Called by multi_monitor.py 529 overload retry but caused AttributeError,
+    silently disabling auto-retry for all sessions.
+    Found by /qa on 2026-04-09
+    Report: fix(session-state): add extract_last_prompt to SessionStateAnalyzer
+    """
+
+    def setup_method(self):
+        self.analyzer = SessionStateAnalyzer()
+
+    def test_extracts_prompt_after_chevron(self):
+        screen = "some output\n❯ 재시도해줘\n  ⎿  API Error: 529 overloaded_error"
+        assert self.analyzer.extract_last_prompt(screen) == "재시도해줘"
+
+    def test_extracts_last_prompt_when_multiple_chevrons(self):
+        screen = "❯ 이전 프롬프트\nsome output\n❯ 마지막 프롬프트"
+        assert self.analyzer.extract_last_prompt(screen) == "마지막 프롬프트"
+
+    def test_returns_none_on_empty_content(self):
+        assert self.analyzer.extract_last_prompt("") is None
+        assert self.analyzer.extract_last_prompt(None) is None
+
+    def test_returns_none_when_no_chevron(self):
+        screen = "just some output\nno prompt here"
+        assert self.analyzer.extract_last_prompt(screen) is None
+
+    def test_ignores_bare_chevron_with_no_text(self):
+        screen = "❯ \n❯ actual prompt"
+        assert self.analyzer.extract_last_prompt(screen) == "actual prompt"
+
+    def test_multiline_screen_with_529_error(self):
+        # Reproduces the exact claude_misc scenario
+        screen = (
+            "❯ 왜 이렇게 나 많이 필요한거야? 주요 선택기준에 따라 MECE하면서도\n"
+            " 구조의 위계가 한눈에 보이게 정리해줘.\n"
+            '  ⎿  API Error: 529 {"type":"error","error":{"type":"overloaded_error"}}\n'
+            "❯ \n"
+            "──────────────────────────────\n"
+        )
+        result = self.analyzer.extract_last_prompt(screen)
+        assert result == "왜 이렇게 나 많이 필요한거야? 주요 선택기준에 따라 MECE하면서도"
 
 
 if __name__ == "__main__":
