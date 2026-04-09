@@ -593,7 +593,76 @@ class SessionStateAnalyzer:
                     return True
 
         return False
-    
+
+    def detect_stuck_after_agent(self, session_path: str,
+                                 delay_seconds: int = 12,
+                                 max_age_seconds: int = 600) -> bool:
+        """Return True if the most recent session JSONL ends with unanswered tool_result.
+
+        Only fires when the JSONL has been idle >= delay_seconds (gives Claude time
+        to respond naturally before we consider it stuck).
+        """
+        import glob as _glob
+        import time as _time
+        import os as _os
+        import json as _json
+
+        if not session_path:
+            return False
+
+        encoded = session_path.replace('/', '-')
+        project_dir = _os.path.join(_os.path.expanduser('~/.claude/projects'), encoded)
+        if not _os.path.isdir(project_dir):
+            return False
+
+        try:
+            files = sorted(
+                [f for f in _glob.glob(_os.path.join(project_dir, '*.jsonl'))
+                 if _os.path.isfile(f)],
+                key=_os.path.getmtime, reverse=True,
+            )
+            if not files:
+                return False
+
+            latest = files[0]
+            age = _time.time() - _os.path.getmtime(latest)
+            if age < delay_seconds or age > max_age_seconds:
+                return False
+
+            with open(latest, 'r', encoding='utf-8', errors='ignore') as fh:
+                tail = fh.readlines()[-150:]
+
+            last_assistant = -1
+            last_assistant_had_tool_use = False
+            last_tool_result = -1
+            for i, line in enumerate(tail):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = _json.loads(line)
+                except _json.JSONDecodeError:
+                    continue
+                msg = entry.get('message', {})
+                role = msg.get('role', '')
+                content = msg.get('content', [])
+                if role == 'assistant':
+                    last_assistant = i
+                    last_assistant_had_tool_use = isinstance(content, list) and any(
+                        isinstance(c, dict) and c.get('type') == 'tool_use'
+                        for c in content
+                    )
+                elif role == 'user' and isinstance(content, list):
+                    if any(isinstance(c, dict) and c.get('type') == 'tool_result'
+                           for c in content):
+                        last_tool_result = i
+
+            return last_tool_result > last_assistant >= 0 and last_assistant_had_tool_use
+
+        except Exception as e:
+            logger.debug(f'detect_stuck_after_agent error ({session_path}): {e}')
+            return False
+
     def _detect_overloaded(self, screen_content: str) -> bool:
         """Detect API 529 overloaded error in recent screen content."""
         if not screen_content:

@@ -60,7 +60,7 @@ class SessionStateAnalyzer:
         SessionState.ERROR: 1,
         SessionState.WAITING_INPUT: 2,
         SessionState.WORKING: 3,
-        SessionState.STUCK_AFTER_AGENT: 35,  # Between WORKING(3) and IDLE(4), stored as int*10
+        SessionState.STUCK_AFTER_AGENT: 35,  # Between WORKING(30) and IDLE(40) on ×10 scale
         SessionState.IDLE: 40,
         SessionState.UNKNOWN: 50,
     }

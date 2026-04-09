@@ -60,7 +60,8 @@ _PROMPT_TTL = 60  # seconds to keep stale prompt visible
 
 def _probe_session(name: str) -> tuple:
     """Probe a single session's state and path (called in thread pool)."""
-    raw_state = _state_analyzer.get_state(name)
+    path = get_session_path(name)
+    raw_state = _state_analyzer.get_state(name, session_path=path)
     state = raw_state
     now = time.time()
 
@@ -102,7 +103,6 @@ def _probe_session(name: str) -> tuple:
     else:
         last_prompt = None
 
-    path = get_session_path(name)
     work_context = _state_analyzer.extract_work_context(path)
     return name, state.value, path, context_percent, last_prompt, work_context
 
@@ -289,7 +289,7 @@ async def focus_session(
     except Exception:
         pass  # xdotool not available or no X11 display — non-fatal
 
-    # 2. Try tmux switch-client for direct terminal focus (works for pure tmux users)
+    # 2. Try tmux switch-client for direct terminal focus
     tmux_ok = False
     try:
         result = subprocess.run(
@@ -298,7 +298,7 @@ async def focus_session(
         )
         tmux_ok = result.returncode == 0
     except Exception:
-        pass  # No attached client or tmux not available — expected in VSCode-only setups
+        pass  # No attached client or tmux not available
 
     # 3. Write focus signal for VSCode extension (file-based IPC)
     # The extension watches this file and calls terminal.show() + focus to switch tabs

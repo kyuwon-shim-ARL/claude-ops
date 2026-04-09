@@ -18,6 +18,7 @@ from ..utils.session_state import SessionStateAnalyzer, SessionState
 from ..utils.notification_debugger import get_debugger, NotificationEvent
 from ..utils.task_completion_detector import task_detector, TaskCompletion, AlertPriority
 from ..utils.session_reconnect import SessionReconnectionState  # T027: Reconnection tracking
+from ..utils.overload_retry import OverloadRetryState, _FALLBACK_PROMPT  # 529 overloaded auto-retry
 from ..utils.state_persistence import PersistedSessionState  # T028: Restart state persistence
 from ..telegram.notifier import SmartNotifier
 from .completion_event_system import (
@@ -77,6 +78,17 @@ class MultiSessionMonitor:
 
         # T027: Session reconnection tracking
         self.reconnection_states: Dict[str, SessionReconnectionState] = {}  # session -> reconnection_state
+        # 529 overloaded auto-retry
+        self.overload_retry_states: Dict[str, OverloadRetryState] = {}     # session -> retry_state
+        # stuck-after-agent auto-nudge: tracks last send time per session
+        self._stuck_nudge_sent_at: Dict[str, float] = {}  # session -> timestamp
+        # stuck-after-agent detection cooldown: avoid JSONL disk I/O every loop
+        self._stuck_check_at: Dict[str, float] = {}       # session -> last check timestamp
+        self._stuck_check_interval = 10.0                 # recheck at most every 10s
+
+        # error auto-resume: auto-send "이어서 진행해줘" after Error Detected
+        self._error_detected_at: Dict[str, float] = {}    # session -> when error was detected
+        self._error_auto_resume_count: Dict[str, int] = {} # session -> resume attempt count
 
         # T028: State persistence directory
         import tempfile
@@ -829,6 +841,123 @@ class MultiSessionMonitor:
                         self.notification_sent[session_name] = False
                         self.last_state[session_name] = SessionState.UNKNOWN
                     
+                    # --- 529 Overloaded auto-retry ---
+                    current_screen = self.state_analyzer.get_screen_content(session_name)
+                    is_overloaded = self.state_analyzer._detect_overloaded(current_screen or "")
+
+                    if is_overloaded:
+                        if session_name not in self.overload_retry_states:
+                            # First detection: save last prompt and schedule first retry
+                            saved = self.state_analyzer.extract_last_prompt(current_screen) or _FALLBACK_PROMPT
+                            retry_state = OverloadRetryState(
+                                session_name=session_name,
+                                saved_prompt=saved,
+                            )
+                            retry_state.schedule_next()
+                            self.overload_retry_states[session_name] = retry_state
+                            logger.warning(
+                                f"⚠️ {session_name}: API 529 overloaded detected. "
+                                f"Retry in {retry_state.current_backoff}s (prompt: {saved[:60]!r})"
+                            )
+                        else:
+                            retry_state = self.overload_retry_states[session_name]
+                            if retry_state.is_ready():
+                                retry_state.mark_retrying()
+                                logger.info(
+                                    f"🔁 {session_name}: Retry #{retry_state.retry_count} — "
+                                    f"sending {retry_state.saved_prompt!r}"
+                                )
+                                try:
+                                    subprocess.run(
+                                        ["tmux", "send-keys", "-t", session_name,
+                                         retry_state.saved_prompt, "Enter"],
+                                        timeout=5, check=False
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"tmux send-keys failed for {session_name}: {e}")
+                                retry_state.schedule_next()
+                    elif session_name in self.overload_retry_states:
+                        # Session recovered — clear retry state
+                        self.overload_retry_states[session_name].mark_recovered()
+                        del self.overload_retry_states[session_name]
+                    # --- end overload retry ---
+
+                    # --- stuck-after-agent auto-nudge ---
+                    # Only check when IDLE and not currently in overload retry
+                    if (session_name not in self.overload_retry_states
+                            and not is_overloaded):
+                        now = time.time()
+                        if now - self._stuck_check_at.get(session_name, 0) >= self._stuck_check_interval:
+                            self._stuck_check_at[session_name] = now
+                            path = session_manager.get_session_path(session_name)
+                        else:
+                            path = None
+                        if path and self.state_analyzer.detect_stuck_after_agent(path):
+                            last_nudge = self._stuck_nudge_sent_at.get(session_name, 0)
+                            # 60s cooldown between nudges for same session
+                            if time.time() - last_nudge > 60:
+                                logger.info(
+                                    f"🔔 {session_name}: stuck after agent result — "
+                                    f"sending nudge '마저해줘'"
+                                )
+                                try:
+                                    subprocess.run(
+                                        ["tmux", "send-keys", "-t", session_name,
+                                         "마저해줘", "Enter"],
+                                        timeout=5, check=False,
+                                    )
+                                    self._stuck_nudge_sent_at[session_name] = time.time()
+                                except Exception as e:
+                                    logger.warning(
+                                        f"tmux send-keys (stuck nudge) failed "
+                                        f"for {session_name}: {e}"
+                                    )
+                    # --- end stuck-after-agent nudge ---
+
+                    # --- error auto-resume ---
+                    # When Error Detected fires and session stays idle for 90s,
+                    # automatically send "이어서 진행해줘" (mirrors what user does manually).
+                    # Caps at 3 attempts to prevent infinite error loops.
+                    # Skipped if overload retry is active (different handler).
+                    _ERROR_RESUME_DELAY = 90    # seconds to wait before auto-resume
+                    _ERROR_RESUME_MAX = 3       # max auto-resume attempts per error episode
+                    if (session_name in self._error_detected_at
+                            and session_name not in self.overload_retry_states):
+                        elapsed = time.time() - self._error_detected_at[session_name]
+                        count = self._error_auto_resume_count.get(session_name, 0)
+                        curr_state = self.last_state.get(session_name)
+                        if (elapsed >= _ERROR_RESUME_DELAY
+                                and curr_state != SessionState.WORKING
+                                and count < _ERROR_RESUME_MAX
+                                and self.session_exists(session_name)):
+                            logger.info(
+                                f"⚡ {session_name}: auto-resuming after error "
+                                f"(elapsed {elapsed:.0f}s, attempt #{count + 1}/{_ERROR_RESUME_MAX})"
+                            )
+                            try:
+                                subprocess.run(
+                                    ["tmux", "send-keys", "-t", session_name,
+                                     "이어서 진행해줘", "Enter"],
+                                    timeout=5, check=False
+                                )
+                                self._error_auto_resume_count[session_name] = count + 1
+                                # Reset timer so next check waits another 90s
+                                self._error_detected_at[session_name] = time.time()
+                            except Exception as e:
+                                logger.warning(
+                                    f"tmux send-keys (error auto-resume) failed "
+                                    f"for {session_name}: {e}"
+                                )
+                        elif count >= _ERROR_RESUME_MAX:
+                            # Exhausted retries — stop trying, leave for user
+                            logger.warning(
+                                f"🛑 {session_name}: error auto-resume exhausted "
+                                f"({_ERROR_RESUME_MAX} attempts) — manual intervention needed"
+                            )
+                            del self._error_detected_at[session_name]
+                            del self._error_auto_resume_count[session_name]
+                    # --- end error auto-resume ---
+
                     # Check for screen changes (updates activity time)
                     screen_changed = self.has_screen_changed(session_name)
                     
@@ -847,6 +976,17 @@ class MultiSessionMonitor:
                         self.send_completion_notification(session_name, task_completion)
                         # Reset activity tracking on real completion
                         self.last_activity_time[session_name] = time.time()
+
+                        # error auto-resume: record when Error Detected fires
+                        if (task_completion and
+                                "Error Detected" in str(task_completion.message)):
+                            self._error_detected_at[session_name] = time.time()
+                            self._error_auto_resume_count.setdefault(session_name, 0)
+                            logger.info(
+                                f"⚠️ {session_name}: Error Detected — "
+                                f"will auto-resume in 90s if still idle "
+                                f"(attempt #{self._error_auto_resume_count[session_name] + 1})"
+                            )
 
                         # T028: Persist state after notification to prevent duplicates on restart
                         current_hash = self.last_screen_hash.get(session_name, "")
@@ -875,6 +1015,11 @@ class MultiSessionMonitor:
                         if hasattr(self.tracker, 'mark_state_transition'):
                             state_name = 'working' if curr_state_now == SessionState.WORKING else 'waiting'
                             self.tracker.mark_state_transition(session_name, state_name)
+
+                        # Clear error auto-resume state when session resumes working
+                        if curr_state_now == SessionState.WORKING:
+                            self._error_detected_at.pop(session_name, None)
+                            self._error_auto_resume_count.pop(session_name, None)
                     
                     # e006: Update shared session state for web dashboard
                     current_state_val = self.last_state.get(session_name, SessionState.UNKNOWN)

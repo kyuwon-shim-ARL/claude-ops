@@ -77,8 +77,23 @@
       pointer-events: none;
     }
 
+    @keyframes stuck-pulse {
+      0%, 100% {
+        box-shadow: 0 0 14px 3px rgba(251,146,60,0.18),
+                    0 0 0 1px rgba(251,146,60,0.25);
+      }
+      50% {
+        box-shadow: 0 0 28px 8px rgba(251,146,60,0.38),
+                    0 0 0 1px rgba(251,146,60,0.55);
+      }
+    }
+    .card-stuck {
+      animation: stuck-pulse 2.0s ease-in-out infinite;
+      border-color: rgba(251,146,60,0.55) !important;
+    }
+
     @media (prefers-reduced-motion: reduce) {
-      .card-fresh, .card-work-sparkle, .breathe-dot { animation: none; }
+      .card-fresh, .card-work-sparkle, .card-stuck, .breathe-dot { animation: none; }
     }
 
     /* Context indicator (dot + number) */
@@ -246,6 +261,9 @@
           ringActive: 'rgba(255,255,255,0.4)',
           connDotOk: 'bg-emerald-400',
           connDotFail: 'bg-red-400',
+          wtStripe: 'rgba(56,189,248,0.65)',
+          wtBranch: 'rgba(125,211,252,0.80)',
+          wtBg: 'rgba(56,189,248,0.03)',
         };
       }
       return {
@@ -276,28 +294,33 @@
         ringActive: 'rgba(100,80,60,0.35)',
         connDotOk: 'bg-emerald-500',
         connDotFail: 'bg-red-500',
+        wtStripe: 'rgba(14,165,233,0.55)',
+        wtBranch: 'rgba(2,132,199,0.85)',
+        wtBg: 'rgba(14,165,233,0.03)',
       };
     }
 
     function getStateConfig() {
       if (isDark()) {
         return {
-          working:       { label: 'Working',       dot: 'bg-emerald-400 breathe-dot', border: 'border-emerald-500/30', glow: '0 0 20px rgba(52,211,153,0.15)' },
-          waiting:       { label: 'Waiting Input', dot: 'bg-amber-400 breathe-dot',   border: 'border-amber-500/30',   glow: '0 0 20px rgba(240,165,0,0.18)' },
-          idle:          { label: 'Idle',          dot: 'bg-gray-500',                border: 'border-gray-700/50',    glow: '0 0 12px rgba(139,133,160,0.08)' },
-          error:         { label: 'Error',         dot: 'bg-red-400 breathe-dot',     border: 'border-red-500/30',     glow: '0 0 20px rgba(251,113,133,0.15)' },
-          context_limit: { label: 'Context Limit', dot: 'bg-rose-400 breathe-dot',    border: 'border-rose-500/30',    glow: '0 0 20px rgba(251,113,133,0.15)' },
-          unknown:       { label: 'Unknown',       dot: 'bg-slate-500',               border: 'border-slate-700/50',   glow: '0 0 12px rgba(139,133,160,0.05)' },
+          working:           { label: 'Working',       dot: 'bg-emerald-400 breathe-dot', border: 'border-emerald-500/30', glow: '0 0 20px rgba(52,211,153,0.15)' },
+          waiting:           { label: 'Waiting Input', dot: 'bg-amber-400 breathe-dot',   border: 'border-amber-500/30',   glow: '0 0 20px rgba(240,165,0,0.18)' },
+          stuck_after_agent: { label: '응답 없음',      dot: 'bg-orange-400 breathe-dot',  border: 'border-orange-500/40',  glow: '0 0 22px rgba(251,146,60,0.25)' },
+          idle:              { label: 'Idle',          dot: 'bg-gray-500',                border: 'border-gray-700/50',    glow: '0 0 12px rgba(139,133,160,0.08)' },
+          error:             { label: 'Error',         dot: 'bg-red-400 breathe-dot',     border: 'border-red-500/30',     glow: '0 0 20px rgba(251,113,133,0.15)' },
+          context_limit:     { label: 'Context Limit', dot: 'bg-rose-400 breathe-dot',    border: 'border-rose-500/30',    glow: '0 0 20px rgba(251,113,133,0.15)' },
+          unknown:           { label: 'Unknown',       dot: 'bg-slate-500',               border: 'border-slate-700/50',   glow: '0 0 12px rgba(139,133,160,0.05)' },
         };
       }
       // e014-T2: stronger light mode glow + borderColor emphasis (WCAG 3:1 vs #fdf8f2)
       return {
-        working:       { label: 'Working',       dot: 'bg-emerald-500 breathe-dot', border: 'border-emerald-400/25', glow: '0 0 20px rgba(34,185,138,0.20)', borderColor: '#16a085' },
-        waiting:       { label: 'Waiting Input', dot: 'bg-amber-500 breathe-dot',   border: 'border-amber-400/25',   glow: '0 0 20px rgba(192,138,32,0.22)', borderColor: '#c08a20' },
-        idle:          { label: 'Idle',          dot: 'bg-stone-400',               border: 'border-stone-300/30',   glow: 'none', borderColor: null },
-        error:         { label: 'Error',         dot: 'bg-red-500 breathe-dot',     border: 'border-red-400/20',     glow: '0 0 20px rgba(192,50,43,0.18)', borderColor: '#c0392b' },
-        context_limit: { label: 'Context Limit', dot: 'bg-rose-500 breathe-dot',    border: 'border-rose-400/20',    glow: '0 0 20px rgba(192,50,43,0.18)', borderColor: '#c0392b' },
-        unknown:       { label: 'Unknown',       dot: 'bg-stone-400',               border: 'border-stone-300/20',   glow: 'none', borderColor: null },
+        working:           { label: 'Working',       dot: 'bg-emerald-500 breathe-dot', border: 'border-emerald-400/25', glow: '0 0 20px rgba(34,185,138,0.20)',  borderColor: '#16a085' },
+        waiting:           { label: 'Waiting Input', dot: 'bg-amber-500 breathe-dot',   border: 'border-amber-400/25',   glow: '0 0 20px rgba(192,138,32,0.22)',  borderColor: '#c08a20' },
+        stuck_after_agent: { label: '응답 없음',      dot: 'bg-orange-500 breathe-dot',  border: 'border-orange-400/30',  glow: '0 0 22px rgba(220,110,20,0.28)',  borderColor: '#d06010' },
+        idle:              { label: 'Idle',          dot: 'bg-stone-400',               border: 'border-stone-300/30',   glow: 'none',                            borderColor: null },
+        error:             { label: 'Error',         dot: 'bg-red-500 breathe-dot',     border: 'border-red-400/20',     glow: '0 0 20px rgba(192,50,43,0.18)',   borderColor: '#c0392b' },
+        context_limit:     { label: 'Context Limit', dot: 'bg-rose-500 breathe-dot',    border: 'border-rose-400/20',    glow: '0 0 20px rgba(192,50,43,0.18)',   borderColor: '#c0392b' },
+        unknown:           { label: 'Unknown',       dot: 'bg-stone-400',               border: 'border-stone-300/20',   glow: 'none',                            borderColor: null },
       };
     }
 
@@ -583,6 +606,18 @@
       return name.replace(/^claude[_-]/, '');
     }
 
+    function parseSessionName(name) {
+      const stripped = name.replace(/^claude[_-]/, '');
+      const wtIdx = stripped.indexOf('_wt_');
+      if (wtIdx === -1) return { display: stripped, isWorktree: false, parent: null, branch: null };
+      return {
+        display: stripped.slice(0, wtIdx),
+        isWorktree: true,
+        parent: stripped.slice(0, wtIdx),
+        branch: stripped.slice(wtIdx + 4),
+      };
+    }
+
     const FRESH_TTL = 300;
     const STALE_FLOOR = 0.4;
     const STALE_DURATION = 3600;
@@ -688,12 +723,14 @@
       const t = getThemeColors();
       const cfg = STATE_CONFIG[session.state] || STATE_CONFIG.unknown;
       const name = escapeHtml(session.name);
-      const display = escapeHtml(shortName(session.name));
+      const parsed = parseSessionName(session.name);
+      const display = escapeHtml(parsed.display);
       const fresh = getFreshInfo(session);
       const opacity = getStaleOpacity(session, fresh);
 
       const sparkle = _sparkleUntil[session.name] && Date.now() < _sparkleUntil[session.name];
-      const freshClass = fresh ? ' card-fresh' : sparkle ? ' card-work-sparkle' : '';
+      const isStuck = session.state === 'stuck_after_agent';
+      const freshClass = fresh ? ' card-fresh' : isStuck ? ' card-stuck' : sparkle ? ' card-work-sparkle' : '';
       const staleOpacity = opacity < 1 ? `opacity:${opacity.toFixed(2)};` : '';
 
       const freshBar = fresh
@@ -714,15 +751,30 @@
         ? `border-color:${cfg.borderColor};border-bottom:4px solid ${cfg.borderColor};`
         : '';
 
+      // Worktree visual treatment
+      const wtCardBg = parsed.isWorktree
+        ? `linear-gradient(to right,${t.wtBg} 0%,transparent 55%),${t.cardBg}`
+        : t.cardBg;
+      const wtStripe = parsed.isWorktree
+        ? `border-left:3px solid ${t.wtStripe};padding-left:41px;`
+        : '';
+      const wtBranchDisplay = parsed.isWorktree ? escapeHtml(parsed.branch.replace(/_/g, '/')) : '';
+      const wtBranchLabel = parsed.isWorktree
+        ? `<div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:${t.wtBranch};margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;letter-spacing:-0.02em;" title="worktree: ${escapeHtml(parsed.branch)}">⎇ ${wtBranchDisplay}</div>`
+        : '';
+
       return `
         <div class="group relative overflow-hidden ${cfg.border} draggable-card${freshClass}"
              data-session-name="${name}"
-             style="border-radius:20px 20px 16px 20px;background:${t.cardBg};border:1px solid;padding:12px 12px 10px 38px;box-shadow:${cfg.glow},${t.cardShadowBase};${borderStyle}${staleOpacity}transition:all 0.3s ease;">
+             style="border-radius:20px 20px 16px 20px;background:${wtCardBg};border:1px solid;padding:12px 12px 10px 38px;box-shadow:${cfg.glow},${t.cardShadowBase};${borderStyle}${wtStripe}${staleOpacity}transition:all 0.3s ease;">
           ${freshBar}
           <div class="long-press-ring"></div>
           <button data-pin-session="${name}" style="position:absolute;top:8px;left:6px;width:26px;height:26px;border-radius:9px;background:${t.pinBtnBg};display:flex;align-items:center;justify-content:center;font-size:12px;opacity:${pinOpacity};border:1px solid ${t.pinBtnBorder};cursor:pointer;transition:opacity 0.2s;touch-action:manipulation;" title="${isPinned ? 'Unpin session' : 'Pin session'}" aria-label="${isPinned ? 'Unpin session' : 'Pin session'}">${pinIcon}</button>
           <div class="flex items-center justify-between">
-            <span class="font-mono text-sm font-medium truncate" style="color:${t.textPrimary};letter-spacing:-0.01em;flex:1;min-width:0;" title="${name}">${display}</span>
+            <div style="flex:1;min-width:0;">
+              <span class="font-mono text-sm font-medium truncate" style="color:${t.textPrimary};letter-spacing:-0.01em;display:block;" title="${name}">${display}</span>
+              ${wtBranchLabel}
+            </div>
             <span class="flex items-center gap-1.5 text-xs" style="color:${t.textSecondary};flex-shrink:0;margin-left:auto;min-width:9rem;justify-content:flex-end;">
               <span class="inline-block w-2 h-2 rounded-full ${cfg.dot}" style="box-shadow:${t.dotGlowColor};flex-shrink:0;"></span>
               ${cfg.label}${renderContextGauge(session, t)}${freshBadge}
@@ -791,7 +843,7 @@
       }
       if (pruned) saveQuadrants(quads);
 
-      const order = { working: 0, waiting: 1, context_limit: 2, error: 3, idle: 4, unknown: 5 };
+      const order = { working: 0, waiting: 1, context_limit: 2, error: 3, stuck_after_agent: 4, idle: 5, unknown: 6 };
       sessions.sort((a, b) => {
         const tierDiff = (pinned.has(a.name) ? 0 : 1) - (pinned.has(b.name) ? 0 : 1);
         if (tierDiff !== 0) return tierDiff;
@@ -1089,6 +1141,7 @@
 
       document.querySelectorAll('.quadrant').forEach(q => q.classList.remove('drag-over'));
       isDragging = false;
+      _dragConfirmed = false;
       _dragState = null;
       clearDragTimeout();
       _removeClickGuard();
@@ -1173,6 +1226,11 @@
       evtSource.onerror = () => {
         setConnected(false);
         evtSource.close();
+        // Clear any existing reconnect timer before scheduling a new one.
+        // Without this, rapid onerror events (e.g. WebView panel hidden/shown)
+        // accumulate stale timers that each call connect(), creating multiple
+        // overlapping EventSource instances and exhausting HTTP connections.
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
         reconnectTimer = setTimeout(connect, 3000);
       };
     }
