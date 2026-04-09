@@ -8,6 +8,7 @@ Uses the same notification format as primary scraping.
 import sys
 import json
 import os
+import fcntl
 from datetime import datetime
 
 # Add parent directory to path for imports
@@ -50,24 +51,31 @@ def log_event(project: str, event_type: str, skipped: bool = False, reason: str 
         f.write(json.dumps(entry) + "\n")
 
 
-def get_notification_state_file(session_name: str) -> str:
-    """Get path to notification state file for a session"""
-    state_dir = os.path.join(
+def _state_dir() -> str:
+    """Get the notifications state directory (cached)."""
+    d = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
         ".state", "notifications"
     )
-    os.makedirs(state_dir, exist_ok=True)
-    return os.path.join(state_dir, f"{session_name}.json")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def get_notification_state_file(session_name: str) -> str:
+    """Get path to notification state file for a session"""
+    return os.path.join(_state_dir(), f"{session_name}.json")
+
+
+def get_session_cooldown_file(session_name: str) -> str:
+    """Per-session cooldown file. NOT cleared by UserPromptSubmit.
+    Prevents autonomous sessions (ralph/autopilot) from re-notifying
+    every time they cycle between working and idle states."""
+    return os.path.join(_state_dir(), f"{session_name}.cooldown.json")
 
 
 def get_global_cooldown_file() -> str:
     """Get path to global cooldown file (shared across all sessions)"""
-    state_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        ".state", "notifications"
-    )
-    os.makedirs(state_dir, exist_ok=True)
-    return os.path.join(state_dir, "_global_cooldown.json")
+    return os.path.join(_state_dir(), "_global_cooldown.json")
 
 
 def was_notification_already_sent(session_name: str) -> bool:
@@ -82,6 +90,22 @@ def was_notification_already_sent(session_name: str) -> bool:
         return os.path.exists(state_file)
     except Exception as e:
         logger.debug(f"Error checking notification state: {e}")
+    return False
+
+
+def is_session_cooldown_active(session_name: str, cooldown_seconds: int = 600) -> bool:
+    """Per-session time-based cooldown. NOT cleared by UserPromptSubmit.
+    Prevents autonomous sessions from re-notifying on every work cycle."""
+    cooldown_file = get_session_cooldown_file(session_name)
+    try:
+        if os.path.exists(cooldown_file):
+            with open(cooldown_file, 'r') as f:
+                state = json.load(f)
+            last_sent = datetime.fromisoformat(state.get('last_sent', ''))
+            elapsed = (datetime.now() - last_sent).total_seconds()
+            return elapsed < cooldown_seconds
+    except Exception as e:
+        logger.debug(f"Error reading session cooldown: {e}")
     return False
 
 
@@ -101,11 +125,16 @@ def is_global_cooldown_active(cooldown_seconds: int = 30) -> bool:
 
 
 def mark_notification_sent(session_name: str) -> None:
-    """Mark notification as sent for a session"""
+    """Mark notification as sent for a session (state file + cooldown file)"""
+    now = datetime.now().isoformat()
+    # State file (cleared by UserPromptSubmit)
     state_file = get_notification_state_file(session_name)
-    state = {'last_sent': datetime.now().isoformat(), 'session': session_name}
     with open(state_file, 'w') as f:
-        json.dump(state, f)
+        json.dump({'last_sent': now, 'session': session_name}, f)
+    # Cooldown file (NOT cleared by UserPromptSubmit — time-based expiry only)
+    cooldown_file = get_session_cooldown_file(session_name)
+    with open(cooldown_file, 'w') as f:
+        json.dump({'last_sent': now, 'session': session_name}, f)
 
 
 def mark_global_cooldown(session_name: str) -> None:
@@ -174,20 +203,58 @@ def main() -> None:
             logger.error(f"Session not found: {session_name}")
             sys.exit(1)
 
-    # Check global cooldown first (prevent notification flood from multiple sessions)
-    if is_global_cooldown_active(cooldown_seconds=30):
-        logger.info(f"⏭️ Skipping notification for {session_name} (global cooldown active)")
-        log_event(project_name, f"hook_{notification_type}", skipped=True, reason="global_cooldown")
-        sys.exit(0)
-
-    # Check if notification was already sent (wait for user input to clear)
-    if was_notification_already_sent(session_name):
-        logger.info(f"⏭️ Skipping notification for {session_name} (already notified, waiting for user input)")
-        log_event(project_name, f"hook_{notification_type}", skipped=True, reason="already_notified")
-        sys.exit(0)
-
-    # Switch to the session and send notification using SmartNotifier
+    # Acquire exclusive lock to prevent race conditions from concurrent async hooks.
+    # All cooldown/dedup checks and state writes happen atomically under this lock.
+    lock_file_path = os.path.join(
+        os.path.dirname(get_global_cooldown_file()), "_notify.lock"
+    )
+    lock_fd = open(lock_file_path, 'w')
     try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        # Another hook instance holds the lock - skip to avoid pile-up
+        logger.info(f"⏭️ Skipping notification for {session_name} (another hook running)")
+        log_event(project_name, f"hook_{notification_type}", skipped=True, reason="lock_contention")
+        lock_fd.close()
+        sys.exit(0)
+
+    try:
+        # Check global cooldown first (prevent notification flood from multiple sessions)
+        # 600s = 10 minutes — with 20+ idle sessions, shorter values cause round-robin spam
+        if is_global_cooldown_active(cooldown_seconds=600):
+            logger.info(f"⏭️ Skipping notification for {session_name} (global cooldown active)")
+            log_event(project_name, f"hook_{notification_type}", skipped=True, reason="global_cooldown")
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            lock_fd.close()
+            sys.exit(0)
+
+        # Per-session time-based cooldown (survives UserPromptSubmit clearing)
+        # Prevents autonomous sessions (ralph/autopilot) from re-notifying on every work cycle
+        if is_session_cooldown_active(session_name, cooldown_seconds=600):
+            logger.info(f"⏭️ Skipping notification for {session_name} (session cooldown active)")
+            log_event(project_name, f"hook_{notification_type}", skipped=True, reason="session_cooldown")
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            lock_fd.close()
+            sys.exit(0)
+
+        # Check if notification was already sent (wait for user input to clear)
+        if was_notification_already_sent(session_name):
+            logger.info(f"⏭️ Skipping notification for {session_name} (already notified, waiting for user input)")
+            log_event(project_name, f"hook_{notification_type}", skipped=True, reason="already_notified")
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            lock_fd.close()
+            sys.exit(0)
+
+        # Write state files BEFORE sending (lock ensures no race)
+        mark_notification_sent(session_name)
+        mark_global_cooldown(session_name)
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        lock_fd.close()
+
+    # Switch to the session and send notification using SmartNotifier (outside lock to avoid holding it during I/O)
+    try:
+
         original_session = session_manager.get_active_session()
         session_manager.switch_session(session_name)
 
@@ -201,10 +268,9 @@ def main() -> None:
         # Send notification using the same format as primary scraping
         success = notifier.send_work_completion_notification()
 
-        # Mark notification as sent
-        if success:
-            mark_notification_sent(session_name)
-            mark_global_cooldown(session_name)
+        # If send failed, remove state file so next invocation can retry
+        if not success:
+            clear_notification_state(session_name)
 
         # Switch back
         session_manager.switch_session(original_session)

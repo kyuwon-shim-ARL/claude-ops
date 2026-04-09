@@ -214,24 +214,41 @@ function getWebviewContent(context: vscode.ExtensionContext): string {
 
 // --- Terminal Focus ---
 
+// Debounce timer for activateTerminal — prevents rapid-click focus thrash
+let _focusTimer: NodeJS.Timeout | undefined;
+
 function focusTerminalForSession(sessionName: string): boolean {
   const terminals = vscode.window.terminals;
-  // Match terminal whose name contains the session name (tmux sessions show in terminal title)
-  const match = terminals.find(t =>
-    t.name.includes(sessionName) ||
-    t.name.includes(sessionName.replace(/^claude[_-]/, ''))
+  const stripped = sessionName.replace(/^claude[_-]/, '');
+
+  // 1. Exact match (terminal name === session name or stripped name)
+  const exact = terminals.find(t =>
+    t.name === sessionName || t.name === stripped
   );
-  if (match) {
-    activateTerminal(match);
+  if (exact) {
+    activateTerminal(exact);
     return true;
   }
-  // Fallback: try partial match on the project part (e.g., "claude-ops" in "claude_claude-ops")
-  const projectPart = sessionName.replace(/^claude[_-]/, '');
-  const partial = terminals.find(t => t.name.toLowerCase().includes(projectPart.toLowerCase()));
+
+  // 2. Contains match: terminal name includes session name or stripped name
+  const containsFull = terminals.find(t =>
+    t.name.includes(sessionName) || t.name.includes(stripped)
+  );
+  if (containsFull) {
+    activateTerminal(containsFull);
+    return true;
+  }
+
+  // 3. Case-insensitive partial match
+  const lowerStripped = stripped.toLowerCase();
+  const partial = terminals.find(t =>
+    t.name.toLowerCase().includes(lowerStripped)
+  );
   if (partial) {
     activateTerminal(partial);
     return true;
   }
+
   return false;
 }
 
@@ -243,11 +260,14 @@ function focusTerminalForSession(sessionName: string): boolean {
  */
 function activateTerminal(terminal: vscode.Terminal): void {
   terminal.show(false); // preserveFocus=false → request focus
-  // Ensure keyboard focus lands on the terminal input (xterm-helper-textarea)
-  // by explicitly executing the focus command after a microtask yield.
-  setTimeout(() => {
+  // Debounce: cancel any pending focus command before scheduling a new one.
+  // Rapid card clicks would otherwise queue N focus commands, causing VSCode
+  // UI focus-thrash and WebView unresponsiveness.
+  if (_focusTimer) { clearTimeout(_focusTimer); }
+  _focusTimer = setTimeout(() => {
+    _focusTimer = undefined;
     vscode.commands.executeCommand('workbench.action.terminal.focus');
-  }, 100);
+  }, 150);
 }
 
 // --- URI Handler (vscode://claude-ctb.claude-ctb-dashboard/focus?session=name) ---
@@ -283,6 +303,7 @@ const FOCUS_SIGNAL_PATH = '/tmp/ctb-focus-signal.json';
 
 class FocusSignalWatcher {
   private watcher: fs.FSWatcher | undefined;
+  private pollTimer: NodeJS.Timeout | undefined;
   private disposed = false;
 
   start(): void {
@@ -295,11 +316,10 @@ class FocusSignalWatcher {
 
     try {
       this.watcher = fs.watch(FOCUS_SIGNAL_PATH, () => this.onSignal());
-    } catch {
-      // Fallback: poll every 500ms
-      const interval = setInterval(() => this.onSignal(), 500);
-      this.watcher = { close: () => clearInterval(interval) } as unknown as fs.FSWatcher;
-    }
+    } catch { /* ignore — polling backup below covers this */ }
+
+    // Always poll as backup: fs.watch on Linux can silently stop firing events
+    this.pollTimer = setInterval(() => this.onSignal(), 800);
   }
 
   private onSignal(): void {
@@ -322,6 +342,7 @@ class FocusSignalWatcher {
   dispose(): void {
     this.disposed = true;
     if (this.watcher) { this.watcher.close(); }
+    if (this.pollTimer) { clearInterval(this.pollTimer); }
   }
 }
 
