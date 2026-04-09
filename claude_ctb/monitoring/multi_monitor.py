@@ -85,6 +85,9 @@ class MultiSessionMonitor:
         # stuck-after-agent detection cooldown: avoid JSONL disk I/O every loop
         self._stuck_check_at: Dict[str, float] = {}       # session -> last check timestamp
         self._stuck_check_interval = 10.0                 # recheck at most every 10s
+        # stuck-ca auto-nudge: detects /ca stalled in EXECUTING state
+        self._ca_nudge_sent_at: Dict[str, float] = {}     # session -> timestamp
+        self._ca_check_at: Dict[str, float] = {}          # session -> last check timestamp
 
         # error auto-resume: auto-send "이어서 진행해줘" after Error Detected
         self._error_detected_at: Dict[str, float] = {}    # session -> when error was detected
@@ -918,6 +921,42 @@ class MultiSessionMonitor:
                                         f"for {session_name}: {e}"
                                     )
                     # --- end stuck-after-agent nudge ---
+
+                    # --- stuck-ca auto-nudge ---
+                    # If /ca left critique-lock.json in EXECUTING state but session is idle,
+                    # send "/ca" so Claude resumes from where it stopped.
+                    if (session_name not in self.overload_retry_states
+                            and not is_overloaded
+                            and _current_state not in (
+                                SessionState.WORKING,
+                                SessionState.WAITING_INPUT,
+                            )):
+                        now = time.time()
+                        if now - self._ca_check_at.get(session_name, 0) >= self._stuck_check_interval:
+                            self._ca_check_at[session_name] = now
+                            ca_path = session_manager.get_session_path(session_name)
+                        else:
+                            ca_path = None
+                        if ca_path and self.state_analyzer.detect_stuck_ca(ca_path, delay_seconds=60):
+                            last_ca_nudge = self._ca_nudge_sent_at.get(session_name, 0)
+                            if time.time() - last_ca_nudge > 300:
+                                logger.info(
+                                    f"🔔 {session_name}: /ca stuck in EXECUTING — "
+                                    f"sending resume nudge '/ca'"
+                                )
+                                try:
+                                    subprocess.run(
+                                        ["tmux", "send-keys", "-t", session_name,
+                                         "/ca", "Enter"],
+                                        timeout=5, check=False,
+                                    )
+                                    self._ca_nudge_sent_at[session_name] = time.time()
+                                except Exception as e:
+                                    logger.warning(
+                                        f"tmux send-keys (ca nudge) failed "
+                                        f"for {session_name}: {e}"
+                                    )
+                    # --- end stuck-ca nudge ---
 
                     # --- error auto-resume ---
                     # When Error Detected fires and session stays idle for 90s,

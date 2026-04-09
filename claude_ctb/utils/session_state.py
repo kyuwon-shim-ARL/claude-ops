@@ -665,6 +665,38 @@ class SessionStateAnalyzer:
             logger.debug(f'detect_stuck_after_agent error ({session_path}): {e}')
             return False
 
+    def detect_stuck_ca(self, working_dir: str, delay_seconds: int = 60) -> bool:
+        """Return True if a /ca execution is stalled mid-run.
+
+        Reads {working_dir}/.omc/state/critique-lock.json and returns True
+        when final_verdict is EXECUTING and the file has not been modified
+        for at least delay_seconds (session died or stalled during execution).
+        """
+        import os as _os
+        import json as _json
+        import time as _time
+
+        if not working_dir:
+            return False
+
+        lock_path = _os.path.join(working_dir, '.omc', 'state', 'critique-lock.json')
+        if not _os.path.isfile(lock_path):
+            return False
+
+        try:
+            age = _time.time() - _os.path.getmtime(lock_path)
+            if age < delay_seconds:
+                return False
+
+            with open(lock_path, 'r', encoding='utf-8') as fh:
+                data = _json.load(fh)
+
+            return data.get('final_verdict') == 'EXECUTING'
+
+        except Exception as e:
+            logger.debug(f'detect_stuck_ca error ({working_dir}): {e}')
+            return False
+
     def extract_last_prompt(self, screen_content: str) -> Optional[str]:
         """Extract the last user prompt from screen content (text after '❯ ')."""
         if not screen_content:
