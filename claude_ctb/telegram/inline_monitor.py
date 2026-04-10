@@ -88,13 +88,13 @@ class InlineMonitoringSystem:
                     current_state = self.state_analyzer.get_state(session_name)
                     
                     # SessionState enum을 문자열로 변환
-                    if current_state == SessionState.WORKING:
+                    if current_state in (SessionState.WORKING, SessionState.SCHEDULED):
                         state_str = "working"
                     elif current_state == SessionState.WAITING_INPUT:
                         state_str = "waiting"
                     elif current_state == SessionState.IDLE:
                         state_str = "idle"
-                    elif current_state == SessionState.ERROR:
+                    elif current_state in (SessionState.ERROR, SessionState.OVERLOADED, SessionState.CONTEXT_LIMIT):
                         state_str = "error"
                     else:
                         state_str = "unknown"

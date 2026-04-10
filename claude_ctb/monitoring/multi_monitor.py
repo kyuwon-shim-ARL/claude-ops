@@ -328,9 +328,10 @@ class MultiSessionMonitor:
                 if current_time - last_notification_time < 60:
                     return False, None
         # 2. Original triggers: WORKING->completed or any->WAITING_INPUT
-        elif previous_state == SessionState.WORKING and current_state != SessionState.WORKING:
+        elif previous_state == SessionState.WORKING and current_state not in (SessionState.WORKING, SessionState.SCHEDULED):
             # RACE CONDITION FIX: During tool transitions, Claude briefly shows no
             # working indicators. Require screen stability to confirm real completion.
+            # SCHEDULED is treated as still-working (e.g. PIU-v2 running cron tasks)
             if screen_stable_duration >= min_stability:
                 should_notify = True
                 notification_reason = f"Work completed (WORKING → {current_state})"
@@ -360,7 +361,7 @@ class MultiSessionMonitor:
         # 1. Screen stability may suppress notification for 1-2 poll cycles
         # 2. But completion_time must be recorded immediately for wait time tracking
         # 3. previous_state is consumed (updated to current) after this method returns
-        if previous_state == SessionState.WORKING and current_state != SessionState.WORKING:
+        if previous_state == SessionState.WORKING and current_state not in (SessionState.WORKING, SessionState.SCHEDULED):
             logger.info(f"🎯 Emitting completion event for {session_name} (WORKING → {current_state})")
             self.event_bus.emit(CompletionEvent(
                 session_name=session_name,
@@ -1057,11 +1058,11 @@ class MultiSessionMonitor:
 
                         # Update state in tracker for auto-completion detection
                         if hasattr(self.tracker, 'mark_state_transition'):
-                            state_name = 'working' if curr_state_now == SessionState.WORKING else 'waiting'
+                            state_name = 'working' if curr_state_now in (SessionState.WORKING, SessionState.SCHEDULED) else 'waiting'
                             self.tracker.mark_state_transition(session_name, state_name)
 
                         # Clear error auto-resume state when session resumes working
-                        if curr_state_now == SessionState.WORKING:
+                        if curr_state_now in (SessionState.WORKING, SessionState.SCHEDULED):
                             self._error_detected_at.pop(session_name, None)
                             self._error_auto_resume_count.pop(session_name, None)
                     

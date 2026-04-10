@@ -186,13 +186,13 @@ class KeyboardHandler:
                     else:
                         wait_str = ""
                     
-                    if state.name == "WORKING":
+                    if state.name in ("WORKING", "SCHEDULED"):
                         working_sessions.append(display_name)
                     elif state.name == "WAITING_INPUT":
                         waiting_sessions.append(f"{display_name}{wait_str}")
                     elif state.name == "IDLE":
                         idle_sessions.append(f"{display_name}{wait_str}")
-                    elif state.name == "ERROR":
+                    elif state.name in ("ERROR", "OVERLOADED", "CONTEXT_LIMIT"):
                         error_sessions.append(display_name)
                     else:
                         unknown_sessions.append(display_name)

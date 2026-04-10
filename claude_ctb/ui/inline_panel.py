@@ -392,13 +392,13 @@ class InlineSessionPanel:
                     state = self.state_analyzer.get_state(session)
                     display_name = session.replace('claude_', '') if session.startswith('claude_') else session
                     
-                    if state == SessionState.WORKING:
+                    if state in (SessionState.WORKING, SessionState.SCHEDULED):
                         working_sessions.append(display_name)
                     elif state == SessionState.WAITING_INPUT:
                         waiting_sessions.append(display_name)
                     elif state == SessionState.IDLE:
                         idle_sessions.append(display_name)
-                    elif state == SessionState.ERROR:
+                    elif state in (SessionState.ERROR, SessionState.OVERLOADED, SessionState.CONTEXT_LIMIT):
                         error_sessions.append(display_name)
                     else:
                         unknown_sessions.append(display_name)
