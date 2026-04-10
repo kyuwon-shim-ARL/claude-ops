@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch, AsyncMock
 from claude_ctb.monitoring.multi_monitor import MultiSessionMonitor
 
 
+@pytest.mark.requires_tmux
 class TestSessionDisconnectionFlow:
     """Integration test for session disconnection and reconnection retry."""
 

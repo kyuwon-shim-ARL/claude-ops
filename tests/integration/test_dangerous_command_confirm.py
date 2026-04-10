@@ -8,6 +8,8 @@ from unittest.mock import MagicMock, AsyncMock, patch
 from claude_ctb.telegram.dangerous_commands import is_dangerous_command, create_confirmation
 
 
+@pytest.mark.requires_tmux
+@pytest.mark.requires_telegram
 class TestDangerousCommandConfirmation:
     """Integration test for dangerous command confirmation."""
 

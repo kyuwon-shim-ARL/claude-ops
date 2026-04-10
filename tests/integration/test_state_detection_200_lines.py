@@ -8,6 +8,7 @@ import time
 from claude_ctb.utils.session_state import get_screen_content, detect_state
 
 
+@pytest.mark.requires_tmux
 class TestStateDetection200Lines:
     """Integration test for 200-line screen history state detection."""
 

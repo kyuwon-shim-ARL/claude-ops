@@ -8,6 +8,7 @@ from claude_ctb.telegram.message_queue import ExponentialBackoffQueue
 from claude_ctb.telegram.notifier import SmartNotifier
 
 
+@pytest.mark.requires_telegram
 class TestRateLimitHandling:
     """Integration test for Telegram rate limit handling."""
 
