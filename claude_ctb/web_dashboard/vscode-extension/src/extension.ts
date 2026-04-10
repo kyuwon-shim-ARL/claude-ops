@@ -160,6 +160,8 @@ class DashboardPanel {
 
   static show(context: vscode.ExtensionContext): void {
     if (DashboardPanel.panel) {
+      // Always refresh HTML so file changes take effect without closing the panel
+      DashboardPanel.panel.webview.html = getWebviewContent(context);
       DashboardPanel.panel.reveal();
       return;
     }
