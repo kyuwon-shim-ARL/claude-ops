@@ -292,14 +292,33 @@ async def focus_session(
     except Exception:
         pass  # xdotool not available or no X11 display — non-fatal
 
-    # 2. Try tmux switch-client for direct terminal focus
+    # 2. Try tmux switch-client for direct terminal focus.
+    # Enumerate all currently attached clients so that a freshly reconnected
+    # VSCode SSH terminal (which gets a new client name like /dev/pts/7) is
+    # also switched correctly.  Without -c the command targets the "most recent
+    # client" which may no longer match after a reconnect.
     tmux_ok = False
     try:
-        result = subprocess.run(
-            ["tmux", "switch-client", "-t", req.session],
-            capture_output=True, timeout=3,
+        clients_result = subprocess.run(
+            ["tmux", "list-clients", "-F", "#{client_name}"],
+            capture_output=True, text=True, timeout=3,
         )
-        tmux_ok = result.returncode == 0
+        clients = [c.strip() for c in clients_result.stdout.split('\n') if c.strip()]
+        if clients:
+            for client in clients:
+                r = subprocess.run(
+                    ["tmux", "switch-client", "-c", client, "-t", req.session],
+                    capture_output=True, timeout=3,
+                )
+                if r.returncode == 0:
+                    tmux_ok = True
+        else:
+            # Fallback: no explicit client list (e.g. running headless), try default
+            result = subprocess.run(
+                ["tmux", "switch-client", "-t", req.session],
+                capture_output=True, timeout=3,
+            )
+            tmux_ok = result.returncode == 0
     except Exception:
         pass  # No attached client or tmux not available
 
