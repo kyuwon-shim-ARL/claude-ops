@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v4
+      - run: uv run ruff check .
+
+  test-unit:
+    name: test-unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v4
+      - name: Read coverage threshold
+        id: coverage
+        run: |
+          if [ -f .tadd/config.yml ]; then
+            COV_MIN=$(grep 'coverage_min:' .tadd/config.yml | awk '{print $2}' | head -1)
+            if [ -z "$COV_MIN" ] || ! [[ "$COV_MIN" =~ ^[0-9]+$ ]]; then
+              echo "::warning::coverage_min not found in .tadd/config.yml, using default 60"
+              COV_MIN=60
+            fi
+          else
+            echo "::warning::.tadd/config.yml not found, using default coverage_min=60"
+            COV_MIN=60
+          fi
+          echo "cov_min=$COV_MIN" >> "$GITHUB_OUTPUT"
+      - run: uv run pytest tests/unit/ --cov=claude_ctb --cov-report=term-missing --cov-fail-under=${{ steps.coverage.outputs.cov_min }} -q
+
+  test-integration:
+    name: test-integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v4
+      - run: uv run pytest tests/integration/ -m "not requires_tmux and not requires_telegram" -q
+
+  tadd:
+    name: tadd
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v4
+      - run: uv run python scripts/detect_mock_usage.py
+
+  secret-scan:
+    name: secret-scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
