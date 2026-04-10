@@ -89,6 +89,12 @@ class MultiSessionMonitor:
         self._ca_nudge_sent_at: Dict[str, float] = {}     # session -> timestamp
         self._ca_check_at: Dict[str, float] = {}          # session -> last check timestamp
 
+        # working-stall detection: WORKING 상태가 너무 오래 지속될 때 알림
+        self._working_since: Dict[str, float] = {}        # session -> WORKING 진입 시간
+        self._stall_notified_at: Dict[str, float] = {}    # session -> 마지막 stall 알림 시간
+        self._stall_threshold: float = float(os.getenv("STALL_THRESHOLD_SECONDS", "600"))  # 기본 10분
+        self._stall_notify_cooldown: float = 300.0        # 5분 쿨다운
+
         # error auto-resume: auto-send "이어서 진행해줘" after Error Detected
         self._error_detected_at: Dict[str, float] = {}    # session -> when error was detected
         self._error_auto_resume_count: Dict[str, int] = {} # session -> resume attempt count
@@ -257,7 +263,13 @@ class MultiSessionMonitor:
                 self.notification_sent[session_name] = False
             if previous_state != SessionState.WORKING:
                 self.tracker.reset_session(session_name)
+                # working-stall: WORKING 진입 시간 기록
+                self._working_since[session_name] = current_time
             return False, None
+        else:
+            # working-stall: WORKING 이탈 시 추적 제거
+            self._working_since.pop(session_name, None)
+            self._stall_notified_at.pop(session_name, None)
 
         # 0. Context limit detected (highest priority - requires immediate action)
         # CRITICAL: Check BEFORE notification_sent guard because context limit
@@ -1002,6 +1014,32 @@ class MultiSessionMonitor:
                             del self._error_detected_at[session_name]
                             del self._error_auto_resume_count[session_name]
                     # --- end error auto-resume ---
+
+                    # --- working-stall detection ---
+                    # WORKING 상태가 _stall_threshold 초 이상 유지되면 Telegram 알림.
+                    # MCP 툴 호출 후 응답 없이 조용히 멈춘 경우를 감지.
+                    _curr_state = self.last_state.get(session_name)
+                    if (_curr_state == SessionState.WORKING
+                            and session_name in self._working_since):
+                        stall_elapsed = time.time() - self._working_since[session_name]
+                        if stall_elapsed >= self._stall_threshold:
+                            last_stall = self._stall_notified_at.get(session_name, 0)
+                            if time.time() - last_stall > self._stall_notify_cooldown:
+                                mins = stall_elapsed / 60
+                                logger.warning(
+                                    f"⚠️ {session_name}: WORKING {stall_elapsed:.0f}s 지속 — stall 의심"
+                                )
+                                self._stall_notified_at[session_name] = time.time()
+                                try:
+                                    msg = (
+                                        f"⚠️ *{session_name}* 작업이 {mins:.1f}분째 진행 중\n"
+                                        f"응답 없이 멈춘 것일 수 있습니다. 확인이 필요합니다.\n"
+                                        f"(자동 재시작은 하지 않습니다 — 수동 확인 후 명령 전송)"
+                                    )
+                                    self.notifier.send_message(msg)
+                                except Exception as e:
+                                    logger.warning(f"stall notify failed for {session_name}: {e}")
+                    # --- end working-stall detection ---
 
                     # Check for screen changes (updates activity time)
                     screen_changed = self.has_screen_changed(session_name)
