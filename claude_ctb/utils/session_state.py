@@ -1306,7 +1306,7 @@ class SessionStateAnalyzer:
                 if pattern.lower() in lower_recent:
                     return "reporting_completion"
 
-            return None
+            return "idle_wait"
 
         if state == SessionState.WORKING:
             # executing: file mutation tools (avoid matching "Write" inside "TodoWrite")

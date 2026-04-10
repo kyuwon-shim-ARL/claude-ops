@@ -726,6 +726,7 @@
         awaiting_approval:   { text: '⏳ 승인 필요', bg: 'rgba(240,165,0,0.15)',    border: 'rgba(240,165,0,0.45)',    color: '#f0a500' },
         reporting_completion:{ text: '✅ 완료 보고', bg: 'rgba(52,211,153,0.15)',   border: 'rgba(52,211,153,0.45)',   color: '#34d399' },
         error:               { text: '⚠️ 확인 필요', bg: 'rgba(251,113,133,0.15)',  border: 'rgba(251,113,133,0.45)', color: '#fb7185' },
+        idle_wait:           { text: '⏸ 대기 중',   bg: 'rgba(148,163,184,0.12)',   border: 'rgba(148,163,184,0.35)', color: '#94a3b8' },
       };
       const badge = badges[phase];
       if (!badge) return '';
