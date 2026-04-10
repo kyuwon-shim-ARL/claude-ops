@@ -104,7 +104,8 @@ def _probe_session(name: str) -> tuple:
         last_prompt = None
 
     work_context = _state_analyzer.extract_work_context(path)
-    return name, state.value, path, context_percent, last_prompt, work_context
+    workflow_phase = _state_analyzer.extract_workflow_phase(screen_content, state)
+    return name, state.value, path, context_percent, last_prompt, work_context, workflow_phase
 
 
 def _poll_sessions() -> Dict[str, Any]:
@@ -118,7 +119,7 @@ def _poll_sessions() -> Dict[str, Any]:
         results = list(pool.map(_probe_session, sessions))
 
     session_list = []
-    for name, state_val, path, context_percent, last_prompt, work_context in results:
+    for name, state_val, path, context_percent, last_prompt, work_context, workflow_phase in results:
         # Only update timestamp when state actually changes
         prev_ts = _prev_session_timestamps.get(name, 0)
         prev_state = None
@@ -139,13 +140,15 @@ def _poll_sessions() -> Dict[str, Any]:
             "context_percent": context_percent,  # null when unavailable (frontend hides gauge)
             "last_prompt": last_prompt or "",     # always string (frontend shows placeholder)
             "work_context": work_context or "",   # always string (frontend shows placeholder)
+            "workflow_phase": workflow_phase,     # null or phase string (frontend shows badge)
         }
         session_list.append(entry)
 
     # Content hash for SSE change detection (includes dynamic fields for real-time updates)
     content_key = json.dumps([
         (s["name"], s["state"], bool(s.get("completed_at")),
-         s.get("context_percent"), s.get("last_prompt", ""), s.get("work_context", ""))
+         s.get("context_percent"), s.get("last_prompt", ""), s.get("work_context", ""),
+         s.get("workflow_phase"))
         for s in session_list
     ], sort_keys=True)
     content_hash = hashlib.md5(content_key.encode()).hexdigest()[:8]

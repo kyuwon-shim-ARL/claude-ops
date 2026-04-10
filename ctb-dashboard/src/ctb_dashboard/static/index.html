@@ -717,6 +717,21 @@
         </div>`;
     }
 
+    // Workflow phase badge: always visible on waiting/error cards (no interaction needed)
+    function renderWorkflowPhase(session, t) {
+      if (session.state !== 'waiting' && session.state !== 'error') return '';
+      const phase = session.workflow_phase;
+      if (!phase) return '';
+      const badges = {
+        awaiting_approval:   { text: '⏳ 승인 필요', bg: 'rgba(240,165,0,0.15)',    border: 'rgba(240,165,0,0.45)',    color: '#f0a500' },
+        reporting_completion:{ text: '✅ 완료 보고', bg: 'rgba(52,211,153,0.15)',   border: 'rgba(52,211,153,0.45)',   color: '#34d399' },
+        error:               { text: '⚠️ 확인 필요', bg: 'rgba(251,113,133,0.15)',  border: 'rgba(251,113,133,0.45)', color: '#fb7185' },
+      };
+      const badge = badges[phase];
+      if (!badge) return '';
+      return `<div style="margin-top:5px;"><span style="font-size:11px;font-weight:600;background:${badge.bg};border:1px solid ${badge.border};color:${badge.color};padding:2px 8px;border-radius:99px;letter-spacing:0.02em;display:inline-block;">${badge.text}</span></div>`;
+    }
+
     // T4: Theme-aware card rendering
     function renderCard(session, isPinned) {
       const STATE_CONFIG = getStateConfig();
@@ -763,10 +778,14 @@
         ? `<div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:${t.wtBranch};margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;letter-spacing:-0.02em;" title="worktree: ${escapeHtml(parsed.branch)}">⎇ ${wtBranchDisplay}</div>`
         : '';
 
+      // T3: compact view for working (non-fresh) cards — name + dot + elapsed only
+      const isCompact = session.state === 'working' && !fresh;
+      const cardPadding = isCompact ? '8px 12px 8px 38px' : '12px 12px 10px 38px';
+
       return `
         <div class="group relative overflow-hidden ${cfg.border} draggable-card${freshClass}"
              data-session-name="${name}"
-             style="border-radius:20px 20px 16px 20px;background:${wtCardBg};border:1px solid;padding:12px 12px 10px 38px;box-shadow:${cfg.glow},${t.cardShadowBase};${borderStyle}${wtStripe}${staleOpacity}transition:all 0.3s ease;">
+             style="border-radius:20px 20px 16px 20px;background:${wtCardBg};border:1px solid;padding:${cardPadding};box-shadow:${cfg.glow},${t.cardShadowBase};${borderStyle}${wtStripe}${staleOpacity}transition:all 0.3s ease;">
           ${freshBar}
           <div class="long-press-ring"></div>
           <button data-pin-session="${name}" style="position:absolute;top:8px;left:6px;width:26px;height:26px;border-radius:9px;background:${t.pinBtnBg};display:flex;align-items:center;justify-content:center;font-size:12px;opacity:${pinOpacity};border:1px solid ${t.pinBtnBorder};cursor:pointer;transition:opacity 0.2s;touch-action:manipulation;" title="${isPinned ? 'Unpin session' : 'Pin session'}" aria-label="${isPinned ? 'Unpin session' : 'Pin session'}">${pinIcon}</button>
@@ -780,8 +799,9 @@
               ${cfg.label}${renderContextGauge(session, t)}${freshBadge}
             </span>
           </div>
-          ${renderWorkContext(session, t)}
-          ${renderLastPrompt(session, t)}
+          ${isCompact ? '' : renderWorkContext(session, t)}
+          ${isCompact ? '' : renderLastPrompt(session, t)}
+          ${isCompact ? '' : renderWorkflowPhase(session, t)}
           <div style="font-size:11px;color:${t.textMuted};margin-top:4px;">
             ${updatedText}
           </div>

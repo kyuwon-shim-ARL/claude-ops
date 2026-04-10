@@ -1115,5 +1115,65 @@ class TestDetectStuckAfterAgent:
         assert self.analyzer.detect_stuck_after_agent("/no/such/path") is False
 
 
+class TestExtractWorkflowPhase:
+    """Tests for extract_workflow_phase() — 8 cases per ticket CTB-GLANCEABLE T1."""
+
+    def setup_method(self):
+        self.analyzer = SessionStateAnalyzer()
+
+    def test_error_state_returns_error(self):
+        """ERROR state always returns 'error' regardless of content."""
+        content = "Some output\n❯\n"
+        result = self.analyzer.extract_workflow_phase(content, SessionState.ERROR)
+        assert result == "error"
+
+    def test_awaiting_approval_pattern(self):
+        """WAITING_INPUT + approval pattern → awaiting_approval."""
+        content = "Claude 진행할까요?\nA) 예\nB) 아니오\n❯\n"
+        result = self.analyzer.extract_workflow_phase(content, SessionState.WAITING_INPUT)
+        assert result == "awaiting_approval"
+
+    def test_awaiting_approval_wins_over_completion(self):
+        """Conflict: both approval and completion patterns present → awaiting_approval wins."""
+        content = "작업 완료. 진행할까요? A) 계속 B) 중단\n❯\n"
+        result = self.analyzer.extract_workflow_phase(content, SessionState.WAITING_INPUT)
+        assert result == "awaiting_approval"
+
+    def test_reporting_completion_pattern(self):
+        """WAITING_INPUT + completion keyword → reporting_completion."""
+        content = "All tasks finished successfully.\n❯\n"
+        result = self.analyzer.extract_workflow_phase(content, SessionState.WAITING_INPUT)
+        assert result == "reporting_completion"
+
+    def test_executing_pattern(self):
+        """WORKING + Edit/Write/Bash tool call → executing."""
+        content = "● Edit(src/app.py)\n  Running tests...\nesc to interrupt\n"
+        result = self.analyzer.extract_workflow_phase(content, SessionState.WORKING)
+        assert result == "executing"
+
+    def test_planning_pattern(self):
+        """WORKING + TodoWrite → planning."""
+        content = "● TodoWrite([{task: implement feature}])\nesc to interrupt\n"
+        result = self.analyzer.extract_workflow_phase(content, SessionState.WORKING)
+        assert result == "planning"
+
+    def test_exploring_pattern(self):
+        """WORKING + Read/Grep/Glob → exploring."""
+        content = "● Grep(pattern='def extract', path='.')\nesc to interrupt\n"
+        result = self.analyzer.extract_workflow_phase(content, SessionState.WORKING)
+        assert result == "exploring"
+
+    def test_no_matching_pattern_returns_none(self):
+        """WORKING with unrecognized content → None."""
+        content = "Thinking...\nesc to interrupt\n"
+        result = self.analyzer.extract_workflow_phase(content, SessionState.WORKING)
+        assert result is None
+
+    def test_none_screen_content_returns_none(self):
+        """None screen_content always returns None."""
+        result = self.analyzer.extract_workflow_phase(None, SessionState.WAITING_INPUT)
+        assert result is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

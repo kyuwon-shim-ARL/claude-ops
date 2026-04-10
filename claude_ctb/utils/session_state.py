@@ -36,6 +36,7 @@ Error Handling:
     - Clear fallback to UNKNOWN state for unhandleable cases
 """
 
+import re
 import subprocess
 import logging
 from enum import Enum
@@ -1270,6 +1271,58 @@ class SessionStateAnalyzer:
                 "decision_logic": f"State: {current_state.value}, Priority: {self.STATE_PRIORITY[current_state]}"
             }
         }
+
+
+    def extract_workflow_phase(self, screen_content: Optional[str], state: "SessionState") -> Optional[str]:
+        """Detect the current agent workflow phase from screen content and session state.
+
+        Priority: error > awaiting_approval > reporting_completion > executing > planning > exploring > None
+
+        Args:
+            screen_content: Raw tmux screen content (pre-fetched; avoids duplicate tmux capture)
+            state: Current session state
+
+        Returns:
+            Workflow phase string or None
+        """
+        if not screen_content:
+            return None
+
+        if state == SessionState.ERROR:
+            return "error"
+
+        lines = screen_content.split("\n")
+        recent_content = "\n".join(lines[-25:])
+
+        if state == SessionState.WAITING_INPUT:
+            approval_patterns = ["A)", "B)", "[Y/n]", "y/n", "진행할까", "승인", "proceed?", "계속할까"]
+            for pattern in approval_patterns:
+                if pattern in recent_content:
+                    return "awaiting_approval"
+
+            completion_patterns = ["완료", "done", "성공적으로", "finished", "결과", "summary"]
+            lower_recent = recent_content.lower()
+            for pattern in completion_patterns:
+                if pattern.lower() in lower_recent:
+                    return "reporting_completion"
+
+            return None
+
+        if state == SessionState.WORKING:
+            # executing: file mutation tools (avoid matching "Write" inside "TodoWrite")
+            if (any(p in recent_content for p in ["Edit", "Bash"]) or
+                    ("Write" in recent_content and "TodoWrite" not in recent_content)):
+                return "executing"
+
+            if any(p in recent_content for p in ["TodoWrite", "계획", "plan"]):
+                return "planning"
+
+            if any(p in recent_content for p in ["Read", "Grep", "Glob", "search"]):
+                return "exploring"
+
+            return None
+
+        return None
 
 
 # Global singleton instance for easy import (maintains backward compatibility)
