@@ -43,7 +43,20 @@ class FocusRequest(BaseModel):
 # --- Session Poller (reuses SessionStateAnalyzer for accurate detection) ---
 
 _cached_state: Dict[str, Any] = {"version": 1, "updated_at": 0, "sessions": [], "_hash": ""}
-_prev_session_timestamps: Dict[str, float] = {}  # track per-session state change time
+_TS_PERSIST_PATH = "/tmp/ctb-session-timestamps.json"
+
+def _load_timestamps() -> Dict[str, float]:
+    """Load persisted session timestamps from disk (survives server restart)."""
+    try:
+        with open(_TS_PERSIST_PATH) as f:
+            data = json.load(f)
+        # Discard entries older than 24h to avoid stale data
+        cutoff = time.time() - 86400
+        return {k: v for k, v in data.items() if v > cutoff}
+    except Exception:
+        return {}
+
+_prev_session_timestamps: Dict[str, float] = _load_timestamps()  # track per-session state change time
 _completion_times: Dict[str, float] = {}  # track working->idle/waiting transitions
 _state_analyzer = SessionStateAnalyzer()
 
@@ -158,6 +171,13 @@ def _poll_sessions() -> Dict[str, Any]:
     _prev_session_timestamps = {k: v for k, v in _prev_session_timestamps.items() if k in active_names}
     for gone in set(_last_known_prompt) - active_names:
         del _last_known_prompt[gone]
+
+    # Persist timestamps to disk so they survive server restarts
+    try:
+        with open(_TS_PERSIST_PATH, "w") as f:
+            json.dump(_prev_session_timestamps, f)
+    except Exception:
+        pass
 
     return {
         "version": 1,
