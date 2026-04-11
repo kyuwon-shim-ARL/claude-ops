@@ -70,6 +70,9 @@ _FRESH_TTL = 300  # seconds to keep completed_at visible (5 minutes)
 _last_known_prompt: Dict[str, Dict] = {}
 _PROMPT_TTL = 60  # seconds to keep stale prompt visible
 
+# T3: Persist last known working phase — show on idle cards after work completes
+_last_working_phase: Dict[str, str] = {}
+
 
 def _probe_session(name: str) -> tuple:
     """Probe a single session's state and path (called in thread pool)."""
@@ -118,7 +121,16 @@ def _probe_session(name: str) -> tuple:
 
     work_context = _state_analyzer.extract_work_context(path)
     workflow_phase = _state_analyzer.extract_workflow_phase(screen_content, state)
-    return name, state.value, path, context_percent, last_prompt, work_context, workflow_phase
+
+    # T3: Persist last working phase — idle cards show what they were last doing
+    if workflow_phase and state == SessionState.WORKING:
+        _last_working_phase[name] = workflow_phase
+    elif workflow_phase is None and state == SessionState.IDLE:
+        workflow_phase = _last_working_phase.get(name)
+
+    pending_count = _state_analyzer.extract_pending_task_count(screen_content)
+
+    return name, state.value, path, context_percent, last_prompt, work_context, workflow_phase, pending_count
 
 
 def _poll_sessions() -> Dict[str, Any]:
@@ -132,7 +144,7 @@ def _poll_sessions() -> Dict[str, Any]:
         results = list(pool.map(_probe_session, sessions))
 
     session_list = []
-    for name, state_val, path, context_percent, last_prompt, work_context, workflow_phase in results:
+    for name, state_val, path, context_percent, last_prompt, work_context, workflow_phase, pending_count in results:
         # Only update timestamp when state actually changes
         prev_ts = _prev_session_timestamps.get(name, 0)
         prev_state = None
@@ -154,6 +166,7 @@ def _poll_sessions() -> Dict[str, Any]:
             "last_prompt": last_prompt or "",     # always string (frontend shows placeholder)
             "work_context": work_context or "",   # always string (frontend shows placeholder)
             "workflow_phase": workflow_phase,     # null or phase string (frontend shows badge)
+            "pending_count": pending_count,       # null=no TodoWrite, 0=all done, N=pending tasks
         }
         session_list.append(entry)
 
@@ -171,6 +184,8 @@ def _poll_sessions() -> Dict[str, Any]:
     _prev_session_timestamps = {k: v for k, v in _prev_session_timestamps.items() if k in active_names}
     for gone in set(_last_known_prompt) - active_names:
         del _last_known_prompt[gone]
+    for gone in set(_last_working_phase) - active_names:
+        del _last_working_phase[gone]
 
     # Persist timestamps to disk so they survive server restarts
     try:
@@ -269,6 +284,23 @@ async def _session_event_generator() -> AsyncGenerator[dict, None]:
 async def session_stream():
     """SSE endpoint: real-time session state updates."""
     return EventSourceResponse(_session_event_generator())
+
+
+@app.get("/api/sessions/{name}/log")
+async def get_session_log(name: str, lines: int = 50):
+    """Return recent tmux pane output for a session."""
+    if not _SESSION_NAME_RE.match(name):
+        raise HTTPException(status_code=422, detail="Invalid session name")
+    try:
+        result = subprocess.run(
+            ["tmux", "capture-pane", "-t", name, "-p", f"-S-{lines}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return {"session": name, "log": result.stdout}
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="tmux timeout")
 
 
 @app.get("/api/health")

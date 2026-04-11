@@ -932,7 +932,7 @@ class SessionStateAnalyzer:
             return "error"
 
         lines = screen_content.split("\n")
-        recent_content = "\n".join(lines[-25:])
+        recent_content = "\n".join(lines[-50:])
 
         if state == SessionState.WAITING_INPUT:
             # awaiting_approval: user needs to choose / approve
@@ -951,19 +951,57 @@ class SessionStateAnalyzer:
             return "idle_wait"
 
         if state == SessionState.WORKING:
-            # executing: file mutation tools (avoid matching "Write" inside "TodoWrite")
-            if (any(p in recent_content for p in ["Edit", "Bash"]) or
-                    ("Write" in recent_content and "TodoWrite" not in recent_content)):
-                return "executing"
-
-            # planning: task planning tools
-            if any(p in recent_content for p in ["TodoWrite", "계획", "plan"]):
-                return "planning"
-
-            # exploring: read/search tools
-            if any(p in recent_content for p in ["Read", "Grep", "Glob", "search"]):
-                return "exploring"
-
+            # Last-position wins: find the most recent line matching each category,
+            # return the category whose last match appears latest in the buffer.
+            sliced = lines[-50:]
+            _PRIORITY = {
+                "committing": 0, "reporting": 1, "plan_review": 2,
+                "executing": 3, "planning": 4, "exploring": 5,
+            }
+            last_idx: dict[str, int] = {}
+            for sliced_idx, line in enumerate(sliced):
+                if any(p in line for p in ["git commit", "commit -m", "커밋", "Creating commit"]):
+                    last_idx["committing"] = sliced_idx
+                if any(p in line for p in ["작업 완료", "작업을 완료", "DONE", "task completed", "## Summary", "완료했습니다"]):
+                    last_idx["reporting"] = sliced_idx
+                if any(p in line for p in ["/autoplan", "계획을 검토", "review the plan", "/plan-"]):
+                    last_idx["plan_review"] = sliced_idx
+                if "Edit" in line or "Bash" in line or ("Write" in line and "TodoWrite" not in line):
+                    last_idx["executing"] = sliced_idx
+                if any(p in line for p in ["TodoWrite", "계획"]):
+                    last_idx["planning"] = sliced_idx
+                if any(p in line for p in ["Read", "Grep", "Glob", "search"]):
+                    last_idx["exploring"] = sliced_idx
+            if last_idx:
+                # Return category with highest (most recent) line index.
+                # Tie-break by priority table (lower number = higher priority).
+                best = max(last_idx, key=lambda c: (last_idx[c], -_PRIORITY[c]))
+                return best
             return None
 
         return None
+
+    def extract_pending_task_count(self, screen_content: str) -> int | None:
+        """Count unchecked TodoWrite tasks visible on screen.
+
+        Returns the count of '- [ ]' items near the last TodoWrite marker,
+        or None if no TodoWrite block is found (badge hidden on frontend).
+        Returns 0 if TodoWrite block exists but all tasks are done.
+        """
+        if not screen_content:
+            return None
+        lines = screen_content.split("\n")
+        sliced = lines[-50:]
+        todo_sliced_idx = -1  # sentinel: not found
+        for sliced_idx, line in enumerate(sliced):
+            if "TodoWrite" in line:
+                todo_sliced_idx = sliced_idx
+        if todo_sliced_idx == -1:
+            return None
+        start = max(0, todo_sliced_idx - 25)
+        end = min(len(sliced), todo_sliced_idx + 25)
+        count = sum(
+            1 for line in sliced[start:end]
+            if line.strip().startswith("- [ ]")
+        )
+        return count
