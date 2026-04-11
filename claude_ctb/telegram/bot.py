@@ -2074,13 +2074,27 @@ class TelegramBridge:
             try:
                 session_idx = int(callback_data.replace("sg:", ""))
                 sessions = context.user_data.get('session_grid_sessions', [])
+                if not sessions:
+                    # Bot restart or context lost — re-fetch sessions dynamically
+                    from ..utils.session_summary import summary_helper
+                    all_sessions = await summary_helper.get_all_sessions_with_status_async()
+                    sessions = [sn for sn, *_ in all_sessions]
+                    if sessions:
+                        context.user_data['session_grid_sessions'] = sessions
                 if 0 <= session_idx < len(sessions):
                     session_name = sessions[session_idx]
                     await self._session_grid_callback(query, context, session_name)
                 else:
-                    await query.answer("❌ 세션 정보를 찾을 수 없습니다. /board를 다시 실행해주세요.")
+                    await query.edit_message_text(
+                        "❌ **세션 정보를 찾을 수 없습니다**\n\n"
+                        "/board 를 다시 실행해주세요.",
+                        parse_mode='Markdown'
+                    )
             except (ValueError, IndexError):
-                await query.answer("❌ 잘못된 세션 인덱스입니다.")
+                await query.edit_message_text(
+                    "❌ **잘못된 세션 인덱스**\n\n/board 를 다시 실행해주세요.",
+                    parse_mode='Markdown'
+                )
         elif callback_data.startswith("session_log:"):
             session_name = callback_data.split(":", 1)[1]
             await self._session_log_callback(query, context, session_name)
@@ -3295,43 +3309,49 @@ class TelegramBridge:
             
             reply_markup = InlineKeyboardMarkup(keyboard)
 
-            # Escape special characters for Markdown (only for text outside inline code)
-            escaped_display = display_name.replace('_', '\\_')
-            # Clean recent_log of characters that break Markdown parsing
-            safe_log = recent_log if recent_log else ""
-            safe_log = safe_log.replace('`', "'")      # backticks break code blocks
-            safe_log = safe_log.replace('**', '∗∗')    # double asterisks break bold
+            # HTML-escape log content so any <, >, & in tmux output doesn't break parsing
+            import html as _html
+            safe_log = _html.escape(recent_log if recent_log else "")
+            safe_display = _html.escape(display_name)
+            safe_session = _html.escape(session_name)
 
-            # Create reply-targeting optimized message format
-            # Note: Inside backticks (inline code), no escaping needed - text is literal
-            session_action_msg = f"""🎯 **{escaped_display}** 세션 액션
+            # Build prompt hint line (already has backtick-safe content; re-escape for HTML)
+            if prompt_hint.strip():
+                # Extract the hint text from the Markdown format and re-render as HTML
+                import re as _re
+                m = _re.search(r'`([^`]+)`', prompt_hint)
+                hint_text = _html.escape(m.group(1)) if m else ""
+                prompt_hint_html = f"\n🗒 <b>마지막 프롬프트</b>: <code>{hint_text}</code>\n" if hint_text else ""
+            else:
+                prompt_hint_html = ""
 
-📊 **상태**: {status_emoji}
-🎯 **메인 세션**: {'✅ 현재 메인' if is_current else '❌ 다른 세션'}
-🎛️ 세션: `{session_name}`
-
-{prompt_hint}
-
-📺 **최근 진행사항 (30줄)**:
-```
-{safe_log}
-```
-
-💆‍♂️ **원클릭 액션 선택**:
-이 메시지에 답장하여 `{session_name}` 세션에 직접 명령어를 전송할 수 있습니다."""
+            session_action_msg = (
+                f"🎯 <b>{safe_display}</b> 세션 액션\n\n"
+                f"📊 <b>상태</b>: {status_emoji}\n"
+                f"🎯 <b>메인 세션</b>: {'✅ 현재 메인' if is_current else '❌ 다른 세션'}\n"
+                f"🎛️ 세션: <code>{safe_session}</code>"
+                f"{prompt_hint_html}\n"
+                f"📺 <b>최근 진행사항 (30줄)</b>:\n"
+                f"<pre>{safe_log}</pre>\n\n"
+                f"💆‍♂️ <b>원클릭 액션 선택</b>:\n"
+                f"이 메시지에 답장하여 <code>{safe_session}</code> 세션에 직접 명령어를 전송할 수 있습니다."
+            )
 
             await query.edit_message_text(
                 session_action_msg,
                 reply_markup=reply_markup,
-                parse_mode='Markdown'
+                parse_mode='HTML'
             )
-            
+
         except Exception as e:
             logger.error(f"Session grid callback error for {session_name}: {str(e)}", exc_info=True)
             try:
-                await query.answer("❌ 세션 액션 로드 실패")
-            except:
-                pass  # Already answered
+                await query.edit_message_text(
+                    f"❌ 세션 액션 로드 실패\n\n{session_name}\n오류: {str(e)}\n\n/board 를 다시 실행해주세요.",
+                    parse_mode=None
+                )
+            except Exception:
+                pass
     
     async def _direct_action_callback(self, query, context, callback_data):
         """Handle direct action callbacks from enhanced main menu"""

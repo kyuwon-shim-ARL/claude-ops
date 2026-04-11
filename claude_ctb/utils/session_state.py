@@ -823,8 +823,10 @@ class SessionStateAnalyzer:
             if ps_result.returncode != 0:
                 return False
 
-            # Shells and transient helpers that don't count as "real" background work
-            trivial = {'sh', 'bash', 'zsh', 'fish', 'dash', 'ps', 'tmux'}
+            # Shells and transient helpers that don't count as "real" background work.
+            # 'claude' and 'node' are excluded because Claude Code's working/idle state
+            # is detected via screen content analysis (P1/P2), not process presence.
+            trivial = {'sh', 'bash', 'zsh', 'fish', 'dash', 'ps', 'tmux', 'claude', 'node'}
             for line in ps_result.stdout.strip().splitlines():
                 parts = line.split(None, 2)
                 if len(parts) >= 2:

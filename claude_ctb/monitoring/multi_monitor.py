@@ -92,8 +92,10 @@ class MultiSessionMonitor:
         # working-stall detection: WORKING 상태가 너무 오래 지속될 때 알림
         self._working_since: Dict[str, float] = {}        # session -> WORKING 진입 시간
         self._stall_notified_at: Dict[str, float] = {}    # session -> 마지막 stall 알림 시간
+        self._stall_nudge_count: Dict[str, int] = {}      # session -> 자동 재개 신호 전송 횟수
         self._stall_threshold: float = float(os.getenv("STALL_THRESHOLD_SECONDS", "600"))  # 기본 10분
         self._stall_notify_cooldown: float = 300.0        # 5분 쿨다운
+        self._stall_max_nudges: int = 3                   # 최대 자동 재개 시도 횟수
 
         # error auto-resume: auto-send "이어서 진행해줘" after Error Detected
         self._error_detected_at: Dict[str, float] = {}    # session -> when error was detected
@@ -270,6 +272,7 @@ class MultiSessionMonitor:
             # working-stall: WORKING 이탈 시 추적 제거
             self._working_since.pop(session_name, None)
             self._stall_notified_at.pop(session_name, None)
+            self._stall_nudge_count.pop(session_name, None)
 
         # 0. Context limit detected (highest priority - requires immediate action)
         # CRITICAL: Check BEFORE notification_sent guard because context limit
@@ -1030,12 +1033,26 @@ class MultiSessionMonitor:
                                     f"⚠️ {session_name}: WORKING {stall_elapsed:.0f}s 지속 — stall 의심"
                                 )
                                 self._stall_notified_at[session_name] = time.time()
+                                nudge_count = self._stall_nudge_count.get(session_name, 0)
                                 try:
-                                    msg = (
-                                        f"⚠️ *{session_name}* 작업이 {mins:.1f}분째 진행 중\n"
-                                        f"응답 없이 멈춘 것일 수 있습니다. 확인이 필요합니다.\n"
-                                        f"(자동 재시작은 하지 않습니다 — 수동 확인 후 명령 전송)"
-                                    )
+                                    if nudge_count < self._stall_max_nudges:
+                                        # 자동 재개 신호 전송
+                                        subprocess.run(
+                                            ["tmux", "send-keys", "-t", session_name,
+                                             "계속해줘", "Enter"],
+                                            timeout=5, check=False,
+                                        )
+                                        self._stall_nudge_count[session_name] = nudge_count + 1
+                                        msg = (
+                                            f"⚠️ *{session_name}* 작업이 {mins:.1f}분째 진행 중\n"
+                                            f"stall 감지 — 자동 재개 신호를 전송했습니다. "
+                                            f"({nudge_count + 1}/{self._stall_max_nudges}회)"
+                                        )
+                                    else:
+                                        msg = (
+                                            f"⚠️ *{session_name}* 작업이 {mins:.1f}분째 진행 중\n"
+                                            f"자동 재개 {self._stall_max_nudges}회 시도 후 응답 없음 — 수동 확인이 필요합니다."
+                                        )
                                     self.notifier.send_message(msg)
                                 except Exception as e:
                                     logger.warning(f"stall notify failed for {session_name}: {e}")
