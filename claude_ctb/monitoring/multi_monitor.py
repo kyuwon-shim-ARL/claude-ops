@@ -90,12 +90,18 @@ class MultiSessionMonitor:
         self._ca_check_at: Dict[str, float] = {}          # session -> last check timestamp
 
         # working-stall detection: WORKING 상태가 너무 오래 지속될 때 알림
+        # 4-Phase 에스컬레이션: nudge(×3) → Escape(×1) → C-c(×2) → 수동 요청
         self._working_since: Dict[str, float] = {}        # session -> WORKING 진입 시간
         self._stall_notified_at: Dict[str, float] = {}    # session -> 마지막 stall 알림 시간
-        self._stall_nudge_count: Dict[str, int] = {}      # session -> 자동 재개 신호 전송 횟수
+        self._stall_nudge_count: Dict[str, int] = {}      # session -> 텍스트 nudge 횟수 (Phase 1)
+        self._stall_escape_count: Dict[str, int] = {}     # session -> Escape 인터럽트 횟수 (Phase 2)
+        self._stall_ctrlc_count: Dict[str, int] = {}      # session -> C-c 인터럽트 횟수 (Phase 3)
         self._stall_threshold: float = float(os.getenv("STALL_THRESHOLD_SECONDS", "600"))  # 기본 10분
-        self._stall_notify_cooldown: float = 300.0        # 5분 쿨다운
-        self._stall_max_nudges: int = 3                   # 최대 자동 재개 시도 횟수
+        self._stall_notify_cooldown: float = 300.0        # Phase 1 쿨다운 (5분)
+        self._stall_interrupt_cooldown: float = 60.0      # Phase 2-3 쿨다운 (1분, 빠른 에스컬레이션)
+        self._stall_max_nudges: int = 3                   # 최대 텍스트 nudge 횟수
+        self._stall_max_escapes: int = 1                  # 최대 Escape 횟수
+        self._stall_max_ctrlc: int = 2                    # 최대 C-c 횟수
 
         # error auto-resume: auto-send "이어서 진행해줘" after Error Detected
         self._error_detected_at: Dict[str, float] = {}    # session -> when error was detected
@@ -273,6 +279,8 @@ class MultiSessionMonitor:
             self._working_since.pop(session_name, None)
             self._stall_notified_at.pop(session_name, None)
             self._stall_nudge_count.pop(session_name, None)
+            self._stall_escape_count.pop(session_name, None)
+            self._stall_ctrlc_count.pop(session_name, None)
 
         # 0. Context limit detected (highest priority - requires immediate action)
         # CRITICAL: Check BEFORE notification_sent guard because context limit
@@ -1020,23 +1028,31 @@ class MultiSessionMonitor:
 
                     # --- working-stall detection ---
                     # WORKING 상태가 _stall_threshold 초 이상 유지되면 Telegram 알림.
-                    # MCP 툴 호출 후 응답 없이 조용히 멈춘 경우를 감지.
+                    # 타이머 텍스트(✻ Churned Xm Ys)가 스크린을 계속 바꾸므로
+                    # screen-freeze 조건 없이 시간 기반으로 판정.
+                    # 4-Phase: nudge(×3,5분쿨) → Escape(×1,1분쿨) → C-c(×2,1분쿨) → 수동 요청
                     _curr_state = self.last_state.get(session_name)
                     if (_curr_state == SessionState.WORKING
                             and session_name in self._working_since):
                         stall_elapsed = time.time() - self._working_since[session_name]
                         if stall_elapsed >= self._stall_threshold:
+                            nudge_count = self._stall_nudge_count.get(session_name, 0)
+                            escape_count = self._stall_escape_count.get(session_name, 0)
+                            ctrlc_count = self._stall_ctrlc_count.get(session_name, 0)
+                            # Phase 2-3는 쿨다운을 1분으로 단축해 빠르게 에스컬레이션
+                            in_interrupt_phase = nudge_count >= self._stall_max_nudges
+                            cooldown = (self._stall_interrupt_cooldown if in_interrupt_phase
+                                        else self._stall_notify_cooldown)
                             last_stall = self._stall_notified_at.get(session_name, 0)
-                            if time.time() - last_stall > self._stall_notify_cooldown:
+                            if time.time() - last_stall > cooldown:
                                 mins = stall_elapsed / 60
                                 logger.warning(
                                     f"⚠️ {session_name}: WORKING {stall_elapsed:.0f}s 지속 — stall 의심"
                                 )
                                 self._stall_notified_at[session_name] = time.time()
-                                nudge_count = self._stall_nudge_count.get(session_name, 0)
                                 try:
                                     if nudge_count < self._stall_max_nudges:
-                                        # 자동 재개 신호 전송
+                                        # Phase 1: 텍스트 nudge (Claude가 프롬프트 대기 중인 경우)
                                         subprocess.run(
                                             ["tmux", "send-keys", "-t", session_name,
                                              "계속해줘", "Enter"],
@@ -1045,13 +1061,43 @@ class MultiSessionMonitor:
                                         self._stall_nudge_count[session_name] = nudge_count + 1
                                         msg = (
                                             f"⚠️ *{session_name}* 작업이 {mins:.1f}분째 진행 중\n"
-                                            f"stall 감지 — 자동 재개 신호를 전송했습니다. "
+                                            f"stall 감지 — 재개 신호 전송 "
                                             f"({nudge_count + 1}/{self._stall_max_nudges}회)"
                                         )
-                                    else:
+                                    elif escape_count < self._stall_max_escapes:
+                                        # Phase 2: Escape — 입력 버퍼 취소 시도
+                                        subprocess.run(
+                                            ["tmux", "send-keys", "-t", session_name, "Escape"],
+                                            timeout=5, check=False,
+                                        )
+                                        self._stall_escape_count[session_name] = escape_count + 1
                                         msg = (
-                                            f"⚠️ *{session_name}* 작업이 {mins:.1f}분째 진행 중\n"
-                                            f"자동 재개 {self._stall_max_nudges}회 시도 후 응답 없음 — 수동 확인이 필요합니다."
+                                            f"🚨 *{session_name}* 작업이 {mins:.1f}분째 진행 중\n"
+                                            f"nudge {self._stall_max_nudges}회 무효 — "
+                                            f"Escape 인터럽트 전송 ({escape_count + 1}/{self._stall_max_escapes}회)"
+                                        )
+                                    elif ctrlc_count < self._stall_max_ctrlc:
+                                        # Phase 3: C-c (SIGINT) — 실행 중 프로세스 강제 인터럽트
+                                        # Escape보다 강력: API 블로킹 중인 Claude도 중단 가능
+                                        subprocess.run(
+                                            ["tmux", "send-keys", "-t", session_name, "C-c"],
+                                            timeout=5, check=False,
+                                        )
+                                        self._stall_ctrlc_count[session_name] = ctrlc_count + 1
+                                        msg = (
+                                            f"🚨 *{session_name}* 작업이 {mins:.1f}분째 진행 중\n"
+                                            f"Escape 무효 — Ctrl+C 강제 인터럽트 전송 "
+                                            f"({ctrlc_count + 1}/{self._stall_max_ctrlc}회)\n"
+                                            f"hung 스킬/서브에이전트 강제 중단 시도 중"
+                                        )
+                                    else:
+                                        # Phase 4: 모든 자동 시도 소진
+                                        msg = (
+                                            f"🚨 *{session_name}* 자동 복구 실패\n"
+                                            f"작업 {mins:.1f}분, nudge {self._stall_max_nudges}회 + "
+                                            f"Escape {self._stall_max_escapes}회 + "
+                                            f"C-c {self._stall_max_ctrlc}회 모두 무효\n"
+                                            f"수동 확인이 필요합니다 (세션 재시작 권장)"
                                         )
                                     self.notifier.send_message(msg)
                                 except Exception as e:

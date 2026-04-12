@@ -907,7 +907,7 @@
       }
       if (pruned) saveQuadrants(quads);
 
-      const order = { working: 0, waiting: 1, context_limit: 2, error: 3, stuck_after_agent: 4, idle: 5, unknown: 6 };
+      const order = { working: 0, waiting: 1, context_limit: 2, error: 3, idle: 4, stuck_after_agent: 5, unknown: 6 };
       sessions.sort((a, b) => {
         const tierDiff = (pinned.has(a.name) ? 0 : 1) - (pinned.has(b.name) ? 0 : 1);
         if (tierDiff !== 0) return tierDiff;

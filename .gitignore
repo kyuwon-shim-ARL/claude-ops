@@ -124,3 +124,4 @@ data/chembl_*/
 quarto-*
 catboost_info/
 academic/
+.gstack/
