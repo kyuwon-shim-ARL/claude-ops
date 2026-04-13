@@ -327,17 +327,37 @@ async def focus_session(
     if not _SESSION_NAME_RE.match(req.session):
         raise HTTPException(status_code=422, detail="Invalid session name")
 
-    # 1. Activate VSCode window via xdotool (brings VSCode to foreground)
+    # 1. Activate VSCode window via xdotool (brings VSCode to foreground + keyboard focus)
     window_ok = False
     try:
         result = subprocess.run(
-            ["xdotool", "search", "--name", "Visual Studio Code"],
+            # --classname "code" filters out extension host / helper windows
+            # so wids[0] is the actual editor window, not a background process window
+            ["xdotool", "search", "--classname", "code", "--name", "Visual Studio Code"],
             capture_output=True, text=True, timeout=3,
         )
-        wids = result.stdout.strip().split('\n')
-        if wids and wids[0]:
+        wids = [w for w in result.stdout.strip().split('\n') if w.strip()]
+        if not wids:
+            # Fallback: name-only search (older xdotool or different WM)
+            result = subprocess.run(
+                ["xdotool", "search", "--name", "Visual Studio Code"],
+                capture_output=True, text=True, timeout=3,
+            )
+            wids = [w for w in result.stdout.strip().split('\n') if w.strip()]
+        if wids:
+            wid = wids[0]
+            # --sync waits for WM to process activate before returning,
+            # preventing the race where keyboard focus transfer is incomplete
             subprocess.run(
-                ["xdotool", "windowactivate", wids[0]],
+                ["xdotool", "windowactivate", "--sync", wid],
+                capture_output=True, timeout=3,
+            )
+            # windowactivate raises the window; windowfocus explicitly moves
+            # X11 keyboard focus to it. Without this step, some WM configurations
+            # raise the window visually but leave keyboard input routed elsewhere,
+            # causing Ctrl+C / Esc / arrow keys to stop working after focus switch.
+            subprocess.run(
+                ["xdotool", "windowfocus", "--sync", wid],
                 capture_output=True, timeout=3,
             )
             window_ok = True
