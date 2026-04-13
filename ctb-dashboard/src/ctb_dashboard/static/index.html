@@ -907,7 +907,7 @@
       }
       if (pruned) saveQuadrants(quads);
 
-      const order = { working: 0, waiting: 1, context_limit: 2, error: 3, idle: 4, stuck_after_agent: 5, unknown: 6 };
+      const order = { working: 0, stuck_after_agent: 1, waiting: 2, context_limit: 3, error: 4, idle: 5, unknown: 6 };
       sessions.sort((a, b) => {
         const tierDiff = (pinned.has(a.name) ? 0 : 1) - (pinned.has(b.name) ? 0 : 1);
         if (tierDiff !== 0) return tierDiff;
@@ -944,7 +944,7 @@
         for (const qid of ['Q1', 'Q2', 'Q3', 'Q4']) {
           const qcfg = QUAD_CONFIG[qid];
           // e014-T3: stable sort within quadrant by state priority, then recency (newer first)
-          const _qOrd = { working: 0, waiting: 1, error: 2, context_limit: 3, idle: 4, unknown: 5 };
+          const _qOrd = { working: 0, stuck_after_agent: 1, waiting: 2, error: 3, context_limit: 4, idle: 5, unknown: 6 };
           const qRaw = (freshQuads[qid] || []).filter(n => sessionMap[n]);
           const qSessions = qRaw.map((n, i) => ({ s: sessionMap[n], i }));
           qSessions.sort((a, b) => {
