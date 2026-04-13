@@ -102,6 +102,8 @@ class MultiSessionMonitor:
         self._stall_max_nudges: int = 3                   # 최대 텍스트 nudge 횟수
         self._stall_max_escapes: int = 1                  # 최대 Escape 횟수
         self._stall_max_ctrlc: int = 2                    # 최대 C-c 횟수
+        self._post_ctrlc_at: Dict[str, float] = {}        # session -> C-c 전송 시각 (post-C-c resume용)
+        self._stall_ctrlc_resume_timeout: float = 120.0   # WAITING 전환 대기 최대 시간
 
         # error auto-resume: auto-send "이어서 진행해줘" after Error Detected
         self._error_detected_at: Dict[str, float] = {}    # session -> when error was detected
@@ -281,6 +283,7 @@ class MultiSessionMonitor:
             self._stall_nudge_count.pop(session_name, None)
             self._stall_escape_count.pop(session_name, None)
             self._stall_ctrlc_count.pop(session_name, None)
+            self._post_ctrlc_at.pop(session_name, None)
 
         # 0. Context limit detected (highest priority - requires immediate action)
         # CRITICAL: Check BEFORE notification_sent guard because context limit
@@ -982,6 +985,41 @@ class MultiSessionMonitor:
                                     )
                     # --- end stuck-ca nudge ---
 
+                    # --- post-C-c resume ---
+                    # C-c 전송 후 WAITING 상태로 전환되면 "이어서 진행해줘" 자동 전송.
+                    # C-c → ERROR: error auto-resume이 아래에서 처리하므로 여기선 WAITING만 담당.
+                    # 120초 이내 전환 없으면 포기 (Phase 4 또는 error auto-resume에 위임).
+                    if session_name in self._post_ctrlc_at:
+                        _ctrlc_elapsed = time.time() - self._post_ctrlc_at[session_name]
+                        _curr_for_ctrlc = self.last_state.get(session_name)
+                        if (_curr_for_ctrlc == SessionState.WAITING
+                                and _ctrlc_elapsed < self._stall_ctrlc_resume_timeout):
+                            logger.info(
+                                f"⚡ {session_name}: C-c 후 WAITING 전환 감지 "
+                                f"({_ctrlc_elapsed:.0f}s) — 자동 재개 전송"
+                            )
+                            try:
+                                subprocess.run(
+                                    ["tmux", "send-keys", "-t", session_name,
+                                     "이어서 진행해줘", "Enter"],
+                                    timeout=5, check=False,
+                                )
+                                self.notifier.send_message(
+                                    f"✅ *{session_name}* stall 복구 완료\n"
+                                    f"C-c 후 WAITING 전환 확인 — 자동 재개 전송"
+                                )
+                            except Exception as e:
+                                logger.warning(
+                                    f"post-C-c resume failed for {session_name}: {e}"
+                                )
+                            finally:
+                                del self._post_ctrlc_at[session_name]
+                        elif (_curr_for_ctrlc == SessionState.ERROR
+                              or _ctrlc_elapsed >= self._stall_ctrlc_resume_timeout):
+                            # ERROR → error auto-resume이 처리, timeout → 포기
+                            self._post_ctrlc_at.pop(session_name, None)
+                    # --- end post-C-c resume ---
+
                     # --- error auto-resume ---
                     # When Error Detected fires and session stays idle for 90s,
                     # automatically send "이어서 진행해줘" (mirrors what user does manually).
@@ -1084,6 +1122,8 @@ class MultiSessionMonitor:
                                             timeout=5, check=False,
                                         )
                                         self._stall_ctrlc_count[session_name] = ctrlc_count + 1
+                                        # post-C-c resume: WAITING 전환 시 "이어서 진행해줘" 자동 전송
+                                        self._post_ctrlc_at[session_name] = time.time()
                                         msg = (
                                             f"🚨 *{session_name}* 작업이 {mins:.1f}분째 진행 중\n"
                                             f"Escape 무효 — Ctrl+C 강제 인터럽트 전송 "
