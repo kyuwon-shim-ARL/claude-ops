@@ -731,15 +731,15 @@ class SessionStateAnalyzer:
         """Detect API 529 overloaded error or rate limit in recent screen content."""
         if not screen_content:
             return False
-        if any(guard in screen_content[-2000:] for guard in self._WORKING_GUARD_PATTERNS):
-            return False
         recent = '\n'.join(screen_content.split('\n')[-20:])
-        if 'overloaded_error' in recent or 'API Error: 529' in recent:
-            return True
-        # Rate limit: "You've hit your limit · resets Xpm" — treat same as overloaded
-        # so stall nudges are suppressed while waiting for the limit to reset.
+        # Rate limit check BEFORE working guard: "hit your limit" overrides any
+        # working indicators still lingering in the scroll buffer.
         if "hit your limit" in recent and "resets" in recent:
             logger.debug("🚦 OVERLOADED: rate limit detected (hit your limit · resets ...)")
+            return True
+        if any(guard in screen_content[-2000:] for guard in self._WORKING_GUARD_PATTERNS):
+            return False
+        if 'overloaded_error' in recent or 'API Error: 529' in recent:
             return True
         return False
 

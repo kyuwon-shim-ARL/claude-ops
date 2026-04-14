@@ -912,9 +912,33 @@ class MultiSessionMonitor:
                                     logger.warning(f"tmux send-keys failed for {session_name}: {e}")
                                 retry_state.schedule_next()
                     elif session_name in self.overload_retry_states:
-                        # Session recovered — clear retry state
-                        self.overload_retry_states[session_name].mark_recovered()
+                        # Session recovered — clear retry state and resume work
+                        recovered_state = self.overload_retry_states[session_name]
+                        recovered_state.mark_recovered()
                         del self.overload_retry_states[session_name]
+                        # Notify and re-send saved prompt: retries during rate limit
+                        # were blocked, so explicitly resume now that limit is lifted.
+                        elapsed_min = recovered_state.elapsed / 60
+                        resume_prompt = recovered_state.saved_prompt
+                        logger.info(
+                            f"✅ {session_name}: rate limit lifted after "
+                            f"{elapsed_min:.1f}min — resuming with saved prompt"
+                        )
+                        try:
+                            subprocess.run(
+                                ["tmux", "send-keys", "-t", session_name,
+                                 resume_prompt, "Enter"],
+                                timeout=5, check=False,
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                f"tmux send-keys (rate limit recovery) failed "
+                                f"for {session_name}: {e}"
+                            )
+                        self.notifier.send_notification_sync(
+                            f"✅ *{session_name}* Rate limit 해제\n"
+                            f"{elapsed_min:.1f}분 경과 후 복구 — 작업 재개 신호 전송"
+                        )
                     # --- end overload retry ---
 
                     # --- stuck-after-agent auto-nudge ---
