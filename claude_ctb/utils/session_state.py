@@ -382,6 +382,16 @@ class SessionStateAnalyzer:
                 logger.debug("🎯 WORKING: OMC background task '(running)' detected")
                 return True
 
+        # PRIORITY 1b-2: OMC status bar shows active skill execution
+        # e.g. "skill:external-context(다음 키워드...)" in the OMC bar means
+        # a background skill sub-agent is still running, even if the main Claude
+        # prompt shows "✻ Cooked for Xm" (past-tense) and ❯ is visible.
+        _skill_bar_re = re.compile(r'\bskill:[A-Za-z0-9_:\-]+\([^)]+\)')
+        for line in recent_lines:
+            if _skill_bar_re.search(line):
+                logger.debug(f"🎯 WORKING: OMC status bar shows active skill: {line.strip()[:80]}")
+                return True
+
         # PRIORITY 1c: Check for Claude Code background tasks still running
         # "N background task(s) still running" appears on the completion summary
         # line (e.g., "✻ Crunched for 59s · 3 background tasks still running").

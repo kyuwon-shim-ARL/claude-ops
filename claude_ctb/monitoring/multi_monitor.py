@@ -275,6 +275,11 @@ class MultiSessionMonitor:
                 self.tracker.reset_session(session_name)
                 # working-stall: WORKING 진입 시간 기록
                 self._working_since[session_name] = current_time
+            elif session_name not in self._working_since:
+                # 모니터 재시작 후 persisted state가 WORKING이면 previous_state도 WORKING이라
+                # 위 분기가 실행되지 않아 _working_since가 초기화되지 않는 버그 수정.
+                # 이 경우 재시작 시점을 기준으로 타이머 시작.
+                self._working_since[session_name] = current_time
             return False, None
         else:
             # working-stall: WORKING 이탈 시 추적 제거
@@ -1004,7 +1009,7 @@ class MultiSessionMonitor:
                                      "이어서 진행해줘", "Enter"],
                                     timeout=5, check=False,
                                 )
-                                self.notifier.send_message(
+                                self.notifier.send_notification_sync(
                                     f"✅ *{session_name}* stall 복구 완료\n"
                                     f"C-c 후 WAITING 전환 확인 — 자동 재개 전송"
                                 )
@@ -1139,17 +1144,18 @@ class MultiSessionMonitor:
                                             f"C-c {self._stall_max_ctrlc}회 모두 무효\n"
                                             f"수동 확인이 필요합니다 (세션 재시작 권장)"
                                         )
-                                    self.notifier.send_message(msg)
+                                    self.notifier.send_notification_sync(msg)
                                 except Exception as e:
                                     logger.warning(f"stall notify failed for {session_name}: {e}")
                     # --- end working-stall detection ---
 
                     # Check for screen changes (updates activity time)
                     screen_changed = self.has_screen_changed(session_name)
-                    
+
                     # Log activity changes for debugging
                     if screen_changed:
                         logger.debug(f"📺 Screen changed in {session_name}")
+
                     
                     
                     # Snapshot state BEFORE notification check (which updates last_state)
