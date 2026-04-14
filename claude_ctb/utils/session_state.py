@@ -386,10 +386,15 @@ class SessionStateAnalyzer:
         # e.g. "skill:external-context(다음 키워드...)" in the OMC bar means
         # a background skill sub-agent is still running, even if the main Claude
         # prompt shows "✻ Cooked for Xm" (past-tense) and ❯ is visible.
+        #
+        # GUARD: skill: persists in the status bar even AFTER completion.
+        # Only treat as WORKING when ⚡N (N>0) also appears on the same status
+        # bar line — this counter drops to ⚡0 when all background tasks finish.
         _skill_bar_re = re.compile(r'\bskill:[A-Za-z0-9_:\-]+\([^)]+\)')
+        _active_tasks_re = re.compile(r'⚡([1-9]\d*)')
         for line in recent_lines:
-            if _skill_bar_re.search(line):
-                logger.debug(f"🎯 WORKING: OMC status bar shows active skill: {line.strip()[:80]}")
+            if _skill_bar_re.search(line) and _active_tasks_re.search(line):
+                logger.debug(f"🎯 WORKING: OMC status bar shows active skill + background tasks: {line.strip()[:80]}")
                 return True
 
         # PRIORITY 1c: Check for Claude Code background tasks still running
@@ -723,13 +728,20 @@ class SessionStateAnalyzer:
         return None
 
     def _detect_overloaded(self, screen_content: str) -> bool:
-        """Detect API 529 overloaded error in recent screen content."""
+        """Detect API 529 overloaded error or rate limit in recent screen content."""
         if not screen_content:
             return False
         if any(guard in screen_content[-2000:] for guard in self._WORKING_GUARD_PATTERNS):
             return False
         recent = '\n'.join(screen_content.split('\n')[-20:])
-        return 'overloaded_error' in recent or 'API Error: 529' in recent
+        if 'overloaded_error' in recent or 'API Error: 529' in recent:
+            return True
+        # Rate limit: "You've hit your limit · resets Xpm" — treat same as overloaded
+        # so stall nudges are suppressed while waiting for the limit to reset.
+        if "hit your limit" in recent and "resets" in recent:
+            logger.debug("🚦 OVERLOADED: rate limit detected (hit your limit · resets ...)")
+            return True
+        return False
 
     def _detect_context_limit(self, screen_content: str) -> bool:
         """
