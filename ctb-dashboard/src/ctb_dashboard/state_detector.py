@@ -473,7 +473,7 @@ class SessionStateAnalyzer:
     # How long (seconds) after last tool_result before flagging stuck
     _STUCK_DETECTION_DELAY = 10
     # Don't flag sessions whose JSONL hasn't changed in this many seconds
-    _STUCK_MAX_AGE = 600
+    _STUCK_MAX_AGE = 3600
 
     def _detect_stuck_after_agent(self, session_path: str) -> bool:
         """Detect if session is stuck: agent returned tool_result but no assistant follow-up.
@@ -595,7 +595,13 @@ class SessionStateAnalyzer:
         screen_content = self.get_screen_content(session_name, use_cache=use_cache)
 
         if screen_content is None:
-            state = SessionState.UNKNOWN
+            # Prefer stale cached state over UNKNOWN when screen is unreadable —
+            # avoids stuck sessions dropping below idle just because tmux had a
+            # momentary read failure.
+            if session_name in self._state_cache:
+                state = self._state_cache[session_name][0]
+            else:
+                state = SessionState.UNKNOWN
         elif not screen_content.strip():
             state = SessionState.IDLE
         else:
