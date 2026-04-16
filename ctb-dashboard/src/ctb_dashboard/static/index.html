@@ -726,6 +726,21 @@
         </div>`;
     }
 
+    // Stall badge: shown when session has been WORKING beyond threshold
+    function renderStallBadge(session) {
+      if (!session.working_since) return '';
+      const elapsed = Date.now() / 1000 - session.working_since;
+      const STALL_THRESHOLD = 600;   // 10min — nudge phase starts
+      const ALERT_THRESHOLD = 1200;  // 20min — nudge exhausted, manual needed
+      if (elapsed < STALL_THRESHOLD) return '';
+      if (elapsed >= ALERT_THRESHOLD) {
+        const mins = Math.floor(elapsed / 60);
+        return `<div style="margin-top:5px;"><span style="font-size:11px;font-weight:700;background:rgba(239,68,68,0.18);border:1px solid rgba(239,68,68,0.6);color:#ef4444;padding:2px 8px;border-radius:99px;letter-spacing:0.02em;display:inline-block;animation:pulse 1.5s infinite;">🚨 ${mins}분째 무응답 — 수동 확인 필요</span></div>`;
+      }
+      const mins = Math.floor(elapsed / 60);
+      return `<div style="margin-top:5px;"><span style="font-size:11px;font-weight:600;background:rgba(251,191,36,0.15);border:1px solid rgba(251,191,36,0.5);color:#fbbf24;padding:2px 8px;border-radius:99px;letter-spacing:0.02em;display:inline-block;">⚠️ ${mins}분째 작업 중 — stall 의심</span></div>`;
+    }
+
     // Workflow phase badge: shown on ALL cards when a phase is detected
     function renderWorkflowPhase(session, t) {
       const phase = session.workflow_phase;
@@ -817,6 +832,7 @@
       const stuckBadge = isStuck
         ? `<div style="margin-top:5px;"><span style="font-size:11px;font-weight:700;background:rgba(251,146,60,0.18);border:1px solid rgba(251,146,60,0.6);color:#fb923c;padding:2px 8px;border-radius:99px;letter-spacing:0.02em;display:inline-block;">⚠️ 에이전트 멈춤 의심</span></div>`
         : '';
+      const stallBadge = renderStallBadge(session);
 
       const pc = session.pending_count;
       const pendingBadge = pc == null ? ''
@@ -846,6 +862,7 @@
           ${isCompact ? '' : renderWorkContext(session, t)}
           ${isCompact ? '' : renderLastPrompt(session, t)}
           ${stuckBadge}
+          ${stallBadge}
           <div style="font-size:11px;color:${t.textMuted};margin-top:4px;">
             ${updatedText}
           </div>

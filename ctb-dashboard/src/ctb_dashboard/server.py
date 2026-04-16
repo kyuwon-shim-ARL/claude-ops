@@ -62,6 +62,7 @@ _state_analyzer = SessionStateAnalyzer()
 
 # Hold timer: keep WORKING state for a few seconds after indicators disappear
 _working_hold: Dict[str, float] = {}  # session_name -> last_seen_working_time
+_working_since: Dict[str, float] = {}  # session_name -> time when WORKING state started (stall detection)
 _WORKING_HOLD_SECONDS = 8  # hold WORKING for 8s after last working indicator
 _FRESH_TTL = 300  # seconds to keep completed_at visible (5 minutes)
 
@@ -130,7 +131,16 @@ def _probe_session(name: str) -> tuple:
 
     pending_count = _state_analyzer.extract_pending_task_count(screen_content)
 
-    return name, state.value, path, context_percent, last_prompt, work_context, workflow_phase, pending_count
+    # Stall detection: track when WORKING state started
+    if state == SessionState.WORKING:
+        if name not in _working_since:
+            _working_since[name] = now
+        working_since = _working_since[name]
+    else:
+        _working_since.pop(name, None)
+        working_since = None
+
+    return name, state.value, path, context_percent, last_prompt, work_context, workflow_phase, pending_count, working_since
 
 
 def _poll_sessions() -> Dict[str, Any]:
@@ -144,7 +154,7 @@ def _poll_sessions() -> Dict[str, Any]:
         results = list(pool.map(_probe_session, sessions))
 
     session_list = []
-    for name, state_val, path, context_percent, last_prompt, work_context, workflow_phase, pending_count in results:
+    for name, state_val, path, context_percent, last_prompt, work_context, workflow_phase, pending_count, working_since in results:
         # Only update timestamp when state actually changes
         prev_ts = _prev_session_timestamps.get(name, 0)
         prev_state = None
@@ -167,6 +177,7 @@ def _poll_sessions() -> Dict[str, Any]:
             "work_context": work_context or "",   # always string (frontend shows placeholder)
             "workflow_phase": workflow_phase,     # null or phase string (frontend shows badge)
             "pending_count": pending_count,       # null=no TodoWrite, 0=all done, N=pending tasks
+            "working_since": working_since,       # epoch float when WORKING started, null otherwise
         }
         session_list.append(entry)
 
