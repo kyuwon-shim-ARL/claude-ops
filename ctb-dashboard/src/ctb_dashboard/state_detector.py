@@ -800,8 +800,10 @@ class SessionStateAnalyzer:
                 verdict = lock.get("final_verdict", "")
                 summary = lock.get("ticket_summary", "")
                 if verdict in ("CONVERGED", "EXECUTING") and summary:
-                    tag = "exec" if verdict == "EXECUTING" else "plan"
-                    return f"[{tag}] {summary}"[:120]
+                    # Use source_skill as badge tag (e.g. 'ca', 'ralplan') when
+                    # available; fall back to generic 'exec'/'plan' for older locks.
+                    skill = lock.get("source_skill") or ("exec" if verdict == "EXECUTING" else "plan")
+                    return f"[{skill}] {summary}"[:120]
             except (json.JSONDecodeError, OSError):
                 pass
 

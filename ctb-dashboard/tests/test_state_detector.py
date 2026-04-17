@@ -60,3 +60,64 @@ def test_detect_idle_with_prompt():
     analyzer = SessionStateAnalyzer()
     content = "\n".join(["some output"] * 5 + ["\u276f"])
     assert analyzer._detect_working_state(content) is False
+
+
+# --- extract_work_context: source_skill badge tag ---
+
+def test_extract_work_context_source_skill(tmp_path):
+    """source_skill from critique-lock.json is used as badge tag."""
+    import json
+    omc_state = tmp_path / ".omc" / "state"
+    omc_state.mkdir(parents=True)
+    lock = {
+        "final_verdict": "EXECUTING",
+        "source_skill": "ca",
+        "ticket_summary": "T1+T2 구현",
+    }
+    (omc_state / "critique-lock.json").write_text(json.dumps(lock), encoding="utf-8")
+    analyzer = SessionStateAnalyzer()
+    result = analyzer.extract_work_context(str(tmp_path))
+    assert result is not None
+    assert result.startswith("[ca]"), f"Expected [ca] tag, got: {result}"
+
+
+def test_extract_work_context_no_source_skill_falls_back(tmp_path):
+    """Falls back to [exec]/[plan] when source_skill is absent."""
+    import json
+    omc_state = tmp_path / ".omc" / "state"
+    omc_state.mkdir(parents=True)
+    lock = {
+        "final_verdict": "EXECUTING",
+        "ticket_summary": "작업 중",
+    }
+    (omc_state / "critique-lock.json").write_text(json.dumps(lock), encoding="utf-8")
+    analyzer = SessionStateAnalyzer()
+    result = analyzer.extract_work_context(str(tmp_path))
+    assert result is not None
+    assert result.startswith("[exec]"), f"Expected [exec] tag, got: {result}"
+
+
+def test_extract_work_context_empty_source_skill_falls_back(tmp_path):
+    """Empty string source_skill falls back to [exec]/[plan] via falsy check."""
+    import json
+    omc_state = tmp_path / ".omc" / "state"
+    omc_state.mkdir(parents=True)
+    lock = {
+        "final_verdict": "CONVERGED",
+        "source_skill": "",
+        "ticket_summary": "계획 완료",
+    }
+    (omc_state / "critique-lock.json").write_text(json.dumps(lock), encoding="utf-8")
+    analyzer = SessionStateAnalyzer()
+    result = analyzer.extract_work_context(str(tmp_path))
+    assert result is not None
+    assert result.startswith("[plan]"), f"Expected [plan] tag, got: {result}"
+
+
+def test_extract_work_context_no_lock_file(tmp_path):
+    """Returns None (or falls through to next source) when lock file is absent."""
+    analyzer = SessionStateAnalyzer()
+    # tmp_path has no .omc/state/critique-lock.json — 1b block is skipped
+    result = analyzer.extract_work_context(str(tmp_path))
+    # No lock, no notepad, no MANIFEST, no CLAUDE.md → falls through to branch name or None
+    assert result is None or isinstance(result, str)
