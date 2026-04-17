@@ -64,6 +64,11 @@ _state_analyzer = SessionStateAnalyzer()
 _working_hold: Dict[str, float] = {}  # session_name -> last_seen_working_time
 _working_since: Dict[str, float] = {}  # session_name -> time when WORKING state started (stall detection)
 _WORKING_HOLD_SECONDS = 8  # hold WORKING for 8s after last working indicator
+
+# Hold timer: keep STUCK_AFTER_AGENT state stable — prevents sort position from
+# dropping to idle(5) when detection misses a single poll cycle
+_stuck_hold: Dict[str, float] = {}  # session_name -> last_seen_stuck_time
+_STUCK_HOLD_SECONDS = 30  # hold STUCK_AFTER_AGENT for 30s after last detection
 _FRESH_TTL = 300  # seconds to keep completed_at visible (5 minutes)
 
 # T2: Persist last known prompt per session to avoid flickering
@@ -98,6 +103,17 @@ def _probe_session(name: str) -> tuple:
             state = SessionState.WORKING
         else:
             del _working_hold[name]
+
+    # Hold timer: keep STUCK_AFTER_AGENT stable through brief detection gaps
+    if raw_state == SessionState.STUCK_AFTER_AGENT:
+        _stuck_hold[name] = now
+    elif state == SessionState.IDLE and name in _stuck_hold:
+        elapsed = now - _stuck_hold[name]
+        if elapsed < _STUCK_HOLD_SECONDS:
+            logger.debug(f"Hold STUCK_AFTER_AGENT for {name} ({elapsed:.1f}s < {_STUCK_HOLD_SECONDS}s)")
+            state = SessionState.STUCK_AFTER_AGENT
+        else:
+            _stuck_hold.pop(name, None)
 
     # Expire stale completion times
     completed_at = _completion_times.get(name)

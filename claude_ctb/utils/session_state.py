@@ -387,15 +387,22 @@ class SessionStateAnalyzer:
         # a background skill sub-agent is still running, even if the main Claude
         # prompt shows "✻ Cooked for Xm" (past-tense) and ❯ is visible.
         #
-        # GUARD: skill: persists in the status bar even AFTER completion.
+        # GUARD 1: skill: persists in the status bar even AFTER completion.
         # Only treat as WORKING when ⚡N (N>0) also appears on the same status
         # bar line — this counter drops to ⚡0 when all background tasks finish.
-        _skill_bar_re = re.compile(r'\bskill:[A-Za-z0-9_:\-]+\([^)]+\)')
-        _active_tasks_re = re.compile(r'⚡([1-9]\d*)')
-        for line in recent_lines:
-            if _skill_bar_re.search(line) and _active_tasks_re.search(line):
-                logger.debug(f"🎯 WORKING: OMC status bar shows active skill + background tasks: {line.strip()[:80]}")
-                return True
+        # GUARD 2: If ❯ prompt is visible in recent lines, Claude is at an idle
+        # input state. The OMC ⚡N counter can get stuck and not drop to 0 even
+        # after all work completes. Presence of ❯ overrides the status bar signal.
+        _prompt_visible = any(l.strip() in ('❯', '❯\xa0', '❯ ') for l in recent_lines)
+        if not _prompt_visible:
+            _skill_bar_re = re.compile(r'\bskill:[A-Za-z0-9_:\-]+\([^)]+\)')
+            _active_tasks_re = re.compile(r'⚡([1-9]\d*)')
+            for line in recent_lines:
+                if _skill_bar_re.search(line) and _active_tasks_re.search(line):
+                    logger.debug(f"🎯 WORKING: OMC status bar shows active skill + background tasks: {line.strip()[:80]}")
+                    return True
+        else:
+            logger.debug("⏭ SKIP 1b-2: ❯ prompt visible — OMC ⚡N counter ignored (may be stale)")
 
         # PRIORITY 1c: Check for Claude Code background tasks still running
         # "N background task(s) still running" appears on the completion summary
