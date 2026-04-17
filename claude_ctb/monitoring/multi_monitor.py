@@ -811,11 +811,19 @@ class MultiSessionMonitor:
         """Return True if the registered ticket for this session is done → suppress nudge.
 
         H9: Exceptions from is_ticket_done() → False (fail-open, nudge allowed).
-        None return (session not registered) → False (nudge allowed, default behaviour).
+        None return (session not registered) → tries auto-registration from session path,
+        then re-checks. Still None after that → False (nudge allowed, default behaviour).
         """
         try:
-            from ..utils.ticket_registry import is_ticket_done
+            from ..utils.ticket_registry import is_ticket_done, auto_register_from_session_path
             result = is_ticket_done(session_name, self.state_dir)
+            if result is None:
+                # Not registered — try auto-registration from session working directory
+                session_path = session_manager.get_session_path(session_name)
+                if session_path and auto_register_from_session_path(
+                    session_name, session_path, self.state_dir
+                ):
+                    result = is_ticket_done(session_name, self.state_dir)
             if result is not True:
                 return False  # None (not registered) or False (open) → nudge allowed
             # Ticket is done — send dedup Telegram alert (session당 1회)

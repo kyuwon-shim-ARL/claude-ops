@@ -278,6 +278,58 @@ def _check_omc_state(state_path: str) -> bool:
 # Auto-registration from critique-lock.json
 # ---------------------------------------------------------------------------
 
+def auto_register_from_session_path(
+    session_name: str,
+    session_path: str,
+    state_dir: str,
+) -> bool:
+    """Auto-register a session by scanning its working directory for critique-lock.json.
+
+    Called by the CTB monitor when a session is not yet in the registry.
+    Looks for {session_path}/.omc/state/critique-lock.json and registers the
+    github_issue found there. Idempotent — skips if already registered with the same issue.
+
+    Returns True if newly registered, False if skipped.
+    """
+    if not session_path or not os.path.isdir(session_path):
+        return False
+
+    lock_path = os.path.join(session_path, ".omc", "state", "critique-lock.json")
+    if not os.path.exists(lock_path):
+        return False
+
+    try:
+        with open(lock_path, "r", encoding="utf-8") as f:
+            lock = json.load(f)
+    except Exception as exc:
+        logger.debug("[ticket_registry] auto_register: failed to read %s: %s", lock_path, exc)
+        return False
+
+    github_issue = lock.get("github_issue")
+    if not github_issue:
+        return False
+
+    try:
+        issue_num = int(github_issue)
+    except (TypeError, ValueError):
+        return False
+
+    # Skip if already registered with the same issue (idempotent)
+    fl = _get_filelock(state_dir)
+    with fl:
+        registry = _load_registry(state_dir)
+    existing = registry.get(session_name, {})
+    if existing.get("type") == "github_issue" and existing.get("ref") == issue_num:
+        return False
+
+    register(session_name, "github_issue", issue_num, state_dir)
+    logger.info(
+        "[ticket_registry] auto-registered %s → issue #%d (from %s)",
+        session_name, issue_num, lock_path,
+    )
+    return True
+
+
 def register_from_critique_lock(
     state_dir: str,
     lock_path: str = ".omc/state/critique-lock.json",
