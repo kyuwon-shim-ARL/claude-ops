@@ -286,9 +286,14 @@ def auto_register_from_session_path(
     """Auto-register a session by scanning its working directory for critique-lock.json.
 
     Called by the CTB monitor when a session is not yet in the registry.
-    Looks for {session_path}/.omc/state/critique-lock.json and registers the
-    github_issue found there. Idempotent — skips if already registered with the same issue.
 
+    Priority order:
+    1. github_issue field → register as github_issue type (GitHub API check)
+    2. ticket_ref / ticket_file field → register as omc_task type (local file check)
+       The critique-lock.json itself serves as the state file: _check_omc_state()
+       reads final_verdict (EXECUTED/CANCELLED/FAILED/...) to determine done status.
+
+    Idempotent — skips if already registered with the same ref/path.
     Returns True if newly registered, False if skipped.
     """
     if not session_path or not os.path.isdir(session_path):
@@ -305,27 +310,45 @@ def auto_register_from_session_path(
         logger.debug("[ticket_registry] auto_register: failed to read %s: %s", lock_path, exc)
         return False
 
+    # --- Path 1: github_issue field ---
     github_issue = lock.get("github_issue")
-    if not github_issue:
-        return False
+    if github_issue:
+        try:
+            issue_num = int(github_issue)
+        except (TypeError, ValueError):
+            pass
+        else:
+            fl = _get_filelock(state_dir)
+            with fl:
+                registry = _load_registry(state_dir)
+            existing = registry.get(session_name, {})
+            if existing.get("type") == "github_issue" and existing.get("ref") == issue_num:
+                return False  # already registered
+            register(session_name, "github_issue", issue_num, state_dir)
+            logger.info(
+                "[ticket_registry] auto-registered %s → issue #%d (from %s)",
+                session_name, issue_num, lock_path,
+            )
+            return True
 
-    try:
-        issue_num = int(github_issue)
-    except (TypeError, ValueError):
-        return False
+    # --- Path 2: omc_task via ticket_ref / ticket_file or critique-lock.json itself ---
+    # critique-lock.json stores final_verdict when done; _check_omc_state handles this.
+    # Use lock_path as the state_path so _check_omc_state reads final_verdict directly.
+    ticket_state_path = lock.get("ticket_ref") or lock.get("ticket_file") or lock_path
+    if not os.path.isabs(ticket_state_path):
+        ticket_state_path = os.path.join(session_path, ticket_state_path)
 
-    # Skip if already registered with the same issue (idempotent)
     fl = _get_filelock(state_dir)
     with fl:
         registry = _load_registry(state_dir)
     existing = registry.get(session_name, {})
-    if existing.get("type") == "github_issue" and existing.get("ref") == issue_num:
-        return False
+    if existing.get("type") == "omc_task" and existing.get("state_path") == ticket_state_path:
+        return False  # already registered
 
-    register(session_name, "github_issue", issue_num, state_dir)
+    register(session_name, "omc_task", ticket_state_path, state_dir)
     logger.info(
-        "[ticket_registry] auto-registered %s → issue #%d (from %s)",
-        session_name, issue_num, lock_path,
+        "[ticket_registry] auto-registered %s → omc_task %s (from %s)",
+        session_name, ticket_state_path, lock_path,
     )
     return True
 
