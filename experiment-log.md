@@ -73,3 +73,10 @@
 - **Status**: started
 - **배경**: 사용자 피드백: (1) 세션목표(work_context)가 아예 안 보임 — 3단계 fallback 모두 OMC 전용 파일 의존, 일반 세션 None, (2) 마지막 프롬프트가 보이다 말다 함 — 캐시 TTL 1초 vs 폴링 3초 타이밍 불일치 + 과도한 필터링. Critic 비평 H1-H4, M1-M4 식별.
 - **Tasks**: T1-T5 (5개)
+
+## 2026-04-17: e023 시작
+- **목표**: Ticket-Driven Nudge Suppression — 세션-티켓 레지스트리 도입
+- **Issue**: #14
+- **Branch**: main
+- **Status**: started
+- **비평**: 5개 HIGH, 5개 MEDIUM 반영 (H2: exp-workflow 등록 scope 포함, H5: Path4 guard 추가)

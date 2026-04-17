@@ -238,3 +238,18 @@ experiments:
       - "T3: server.py 필드 항상 포함 — last_prompt/work_context는 항상 entry에 포함, None이면 빈 문자열. context_percent는 None이면 null(프론트에서 게이지 숨김)"
       - "T4: slash 커맨드 필터 완화 — /로 시작해도 표시. blocklist: /help /clear /exit /quit /reset /model /compact"
       - "T5: 프론트엔드 빈 상태 placeholder — work_context 없으면 muted '목표 미설정', last_prompt 없으면 muted '프롬프트 대기 중'"
+  e023:
+    path: outputs/e023/
+    script: null
+    params: {}
+    outputs: []
+    status: experimental
+    description: "Ticket-Driven Nudge Suppression — 세션-티켓 레지스트리 도입"
+    issue: 14
+    branch: main
+    tasks:
+      - "ticket_registry.py 구현 (gh cache, atomic write, OMC state check)"
+      - "multi_monitor.py _check_resume_actions에 is_ticket_done() guard"
+      - "ca/cc 완료 시 레지스트리 자동 등록"
+      - "tests/test_stall_detection.py 확장 (16개)"
+      - "nudge 억제 알림 dedup"

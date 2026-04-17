@@ -5,12 +5,15 @@ Monitors all Claude sessions simultaneously and sends notifications
 when any session completes work.
 """
 
+import glob
 import os
+import json
 import time
 import logging
 import threading
 import subprocess
 import hashlib
+from datetime import datetime, timezone
 from typing import Dict, Set, Tuple, Optional
 from ..config import ClaudeOpsConfig
 from ..session_manager import session_manager
@@ -40,7 +43,10 @@ logger = logging.getLogger(__name__)
 
 class MultiSessionMonitor:
     """Monitor multiple Claude Code sessions simultaneously"""
-    
+
+    _HOOK_EVENT_TTL = 30.0       # hook 이벤트 유효 기간 (초)
+    _HOOK_EVENT_GC_TTL = 90.0    # hook 이벤트 GC 기간 (초)
+
     def __init__(self, config: ClaudeOpsConfig = None):
         self.config = config or ClaudeOpsConfig()
         self.notifier = SmartNotifier(self.config)
@@ -111,6 +117,10 @@ class MultiSessionMonitor:
         # error auto-resume: auto-send "이어서 진행해줘" after Error Detected
         self._error_detected_at: Dict[str, float] = {}    # session -> when error was detected
         self._error_auto_resume_count: Dict[str, int] = {} # session -> resume attempt count
+
+        # M13: Ticket-driven nudge suppression (e023)
+        # Advisory dedup: session당 1회만 "티켓 완료" 알림 전송. 재시작 시 초기화는 설계 의도.
+        self._ticket_done_notified: Dict[str, bool] = {}  # session -> notified flag
 
         # T028: State persistence directory
         import tempfile
@@ -797,6 +807,34 @@ class MultiSessionMonitor:
             logger.error(f"Error sending completion notification for {session_name}: {e}")
     
     
+    def _is_ticket_done_guard(self, session_name: str) -> bool:
+        """Return True if the registered ticket for this session is done → suppress nudge.
+
+        H9: Exceptions from is_ticket_done() → False (fail-open, nudge allowed).
+        None return (session not registered) → False (nudge allowed, default behaviour).
+        """
+        try:
+            from ..utils.ticket_registry import is_ticket_done
+            result = is_ticket_done(session_name, self.state_dir)
+            if result is not True:
+                return False  # None (not registered) or False (open) → nudge allowed
+            # Ticket is done — send dedup Telegram alert (session당 1회)
+            if not self._ticket_done_notified.get(session_name):
+                self._ticket_done_notified[session_name] = True
+                try:
+                    self.notifier.send_notification_sync(
+                        f"✅ *{session_name}* 티켓 완료 — nudge 억제"
+                    )
+                except Exception:
+                    pass
+            return True
+        except Exception as exc:
+            logger.debug(
+                "[ticket_registry] _is_ticket_done_guard error for %s: %s — returning False (nudge allowed)",
+                session_name, exc,
+            )
+            return False  # fail-open
+
     def _check_resume_actions(self, session_name: str, curr_state: SessionState, prev_state: SessionState) -> None:
         """Check and trigger resume actions based on current session state.
 
@@ -815,6 +853,8 @@ class MultiSessionMonitor:
             else:
                 path = None
             if path and self.state_analyzer.detect_stuck_after_agent(path, delay_seconds=45):
+                if self._is_ticket_done_guard(session_name):
+                    return  # 티켓 완료 — nudge 억제
                 last_nudge = self._stuck_nudge_sent_at.get(session_name, 0)
                 if time.time() - last_nudge > 300:
                     logger.info(f"🔔 {session_name}: stuck after agent result — sending nudge '마저해줘'")
@@ -836,6 +876,8 @@ class MultiSessionMonitor:
             else:
                 ca_path = None
             if ca_path and self.state_analyzer.detect_stuck_ca(ca_path, delay_seconds=60):
+                if self._is_ticket_done_guard(session_name):
+                    return  # 티켓 완료 — nudge 억제
                 last_ca_nudge = self._ca_nudge_sent_at.get(session_name, 0)
                 if time.time() - last_ca_nudge > 300:
                     logger.info(f"🔔 {session_name}: /ca stuck in EXECUTING — sending resume nudge '/ca'")
@@ -911,6 +953,8 @@ class MultiSessionMonitor:
                     self._error_auto_resume_count.pop(session_name, None)
 
         # --- working-stall detection ---
+        if self._is_ticket_done_guard(session_name):
+            return  # 티켓 완료 — stall nudge 억제
         if curr_state == SessionState.WORKING and session_name in self._working_since:
             stall_elapsed = time.time() - self._working_since[session_name]
             if stall_elapsed >= self._stall_threshold:
@@ -921,6 +965,23 @@ class MultiSessionMonitor:
                 cooldown = (self._stall_interrupt_cooldown if in_interrupt_phase
                             else self._stall_notify_cooldown)
                 last_stall = self._stall_notified_at.get(session_name, 0)
+                # hook 이벤트 체크 (Phase A: TTL 내 이벤트 있으면 확실히 working)
+                if self._is_hook_supported(session_name) and self._check_hook_event(session_name):
+                    logger.debug(f"⏸️ {session_name}: stall skip — hook event within TTL")
+                    self._gc_hook_events(session_name)
+                    return
+                # GC (hook 지원 여부와 무관하게 오래된 파일 정리)
+                self._gc_hook_events(session_name)
+                # 멀티시그널 체크: bash child 또는 network 연결 있으면 stall 아님
+                bash_child, net_est = self._check_stall_signals(session_name)
+                if bash_child or net_est > 0:
+                    logger.debug(
+                        f"⏸️ {session_name}: stall skip — "
+                        f"bash_child={bash_child}, net_est={net_est}"
+                    )
+                    self._log_stall_baseline(session_name, bash_child, net_est, curr_state.value, False)
+                    return
+                self._log_stall_baseline(session_name, bash_child, net_est, curr_state.value, False)
                 if time.time() - last_stall > cooldown:
                     mins = stall_elapsed / 60
                     logger.warning(f"⚠️ {session_name}: WORKING {stall_elapsed:.0f}s 지속 — stall 의심")
@@ -970,8 +1031,199 @@ class MultiSessionMonitor:
                                 f"수동 확인이 필요합니다 (세션 재시작 권장)"
                             )
                         self.notifier.send_notification_sync(msg)
+                        self._log_stall_baseline(session_name, bash_child, net_est, curr_state.value, True)
                     except Exception as e:
                         logger.warning(f"stall notify failed for {session_name}: {e}")
+
+    def _get_claude_pid(self, session_name: str) -> Optional[int]:
+        """tmux pane PID로부터 claude 프로세스 PID를 찾습니다."""
+        try:
+            result = subprocess.run(
+                ["tmux", "display-message", "-t", session_name, "-p", "#{pane_pid}"],
+                capture_output=True, text=True, timeout=3, check=False,
+            )
+            if result.returncode != 0 or not result.stdout.strip():
+                return None
+            shell_pid = int(result.stdout.strip())
+            try:
+                import psutil
+                shell_proc = psutil.Process(shell_pid)
+                for child in shell_proc.children(recursive=False):
+                    try:
+                        cmdline = " ".join(child.cmdline())
+                        if "claude" in cmdline.lower():
+                            return child.pid
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+            except ImportError:
+                ps_result = subprocess.run(
+                    ["ps", "--ppid", str(shell_pid), "-o", "pid,args", "--no-headers"],
+                    capture_output=True, text=True, timeout=3, check=False,
+                )
+                for line in ps_result.stdout.splitlines():
+                    parts = line.strip().split(None, 1)
+                    if len(parts) == 2 and "claude" in parts[1].lower():
+                        return int(parts[0])
+        except Exception:
+            pass
+        return None
+
+    def _check_stall_signals(self, session_name: str) -> tuple:
+        """Process tree + network 신호로 stall 여부를 보조 판단합니다.
+
+        Returns:
+            (bash_child: bool, net_est: int)
+            bash_child=True이면 bash/sh/zsh 자식 프로세스 실행 중 (definitely working)
+            net_est>0이면 api.anthropic.com과 ESTABLISHED 연결 있음 (LLM inference 중)
+            실패 시 (False, 0) 반환 (보수적 폴백 — false negative 허용)
+        """
+        bash_child = False
+        net_est = 0
+        try:
+            claude_pid = self._get_claude_pid(session_name)
+            if claude_pid is None:
+                return False, 0
+
+            # bash child 탐지
+            try:
+                import psutil
+                claude_proc = psutil.Process(claude_pid)
+                for child in claude_proc.children(recursive=False):
+                    try:
+                        comm = child.name()
+                        cmdline = child.cmdline()
+                        if (comm in ("bash", "sh", "zsh")
+                                and "-c" not in cmdline):
+                            bash_child = True
+                            break
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+            except ImportError:
+                ps_result = subprocess.run(
+                    ["ps", "--ppid", str(claude_pid), "-o", "comm,args", "--no-headers"],
+                    capture_output=True, text=True, timeout=3, check=False,
+                )
+                for line in ps_result.stdout.splitlines():
+                    parts = line.strip().split(None, 1)
+                    if parts and parts[0] in ("bash", "sh", "zsh"):
+                        args = parts[1] if len(parts) > 1 else ""
+                        if "-c" not in args.split():
+                            bash_child = True
+                            break
+
+            # 네트워크 감지 (api.anthropic.com:443 ESTABLISHED)
+            net_est = self._get_net_established(claude_pid)
+
+        except Exception as exc:
+            logger.debug(f"_check_stall_signals error for {session_name}: {exc}")
+        return bash_child, net_est
+
+    def _check_hook_event(self, session_name: str) -> bool:
+        """TTL 내 hook 이벤트 파일이 존재하면 True 반환 (stall skip 신호).
+
+        Returns:
+            True if a recent (within TTL) hook event exists for this session.
+        """
+        try:
+            pattern = f"/tmp/ctb-events-{session_name}-*.json"
+            now = time.time()
+            for fpath in glob.glob(pattern):
+                try:
+                    if now - os.path.getmtime(fpath) > self._HOOK_EVENT_TTL:
+                        continue
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        event = json.load(f)
+                    ts_str = event.get("timestamp_iso", "")
+                    if ts_str:
+                        ts = datetime.fromisoformat(ts_str.rstrip("Z")).replace(tzinfo=timezone.utc)
+                        if now - ts.timestamp() <= self._HOOK_EVENT_TTL:
+                            return True
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return False
+
+    def _gc_hook_events(self, session_name: str) -> None:
+        """90s 초과 hook 이벤트 파일을 삭제합니다 (GC)."""
+        try:
+            now = time.time()
+            for fpath in glob.glob(f"/tmp/ctb-events-{session_name}-*.json"):
+                try:
+                    if now - os.path.getmtime(fpath) > self._HOOK_EVENT_GC_TTL:
+                        os.unlink(fpath)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _is_hook_supported(self, session_name: str) -> bool:
+        """이 세션이 hook 이벤트를 지원하는지 확인합니다."""
+        flag_path = os.path.join(".omc", "state", "sessions", session_name, "hook_supported")
+        return os.path.exists(flag_path)
+
+    def _get_net_established(self, claude_pid: int) -> int:
+        """claude 프로세스의 api.anthropic.com:443 ESTABLISHED 연결 수를 반환합니다."""
+        try:
+            result = subprocess.run(
+                ["ss", "-tnp", f"pid,{claude_pid}"],
+                capture_output=True, text=True, timeout=3, check=False,
+            )
+            count = 0
+            for line in result.stdout.splitlines():
+                if "ESTAB" in line and ":443" in line:
+                    count += 1
+            if count > 0 or result.returncode == 0:
+                return count
+        except Exception:
+            pass
+
+        # /proc 폴백
+        try:
+            tcp_file = f"/proc/{claude_pid}/net/tcp6"
+            if not os.path.exists(tcp_file):
+                tcp_file = f"/proc/{claude_pid}/net/tcp"
+            count = 0
+            with open(tcp_file, "r") as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 4 and parts[3] == "0A":
+                        # ESTABLISHED(0x0A), 원격 포트 443 = 0x01BB
+                        remote = parts[2]
+                        remote_port = int(remote.split(":")[1], 16) if ":" in remote else 0
+                        if remote_port == 443:
+                            count += 1
+            return count
+        except Exception:
+            pass
+        return 0
+
+    def _log_stall_baseline(
+        self,
+        session_name: str,
+        bash_child_exists: bool,
+        net_established: int,
+        screen_state: str,
+        stall_fired: bool,
+    ) -> None:
+        """Log stall check signals for baseline measurement."""
+        try:
+            log_dir = ".omc/logs"
+            os.makedirs(log_dir, exist_ok=True)
+            now = datetime.utcnow()
+            log_path = os.path.join(log_dir, f"stall-baseline-{now.strftime('%Y-%m-%d')}.jsonl")
+            entry = {
+                "timestamp": now.isoformat() + "Z",
+                "session_id": session_name,
+                "bash_child_exists": bash_child_exists,
+                "net_established": net_established,
+                "screen_state": screen_state,
+                "stall_fired": stall_fired,
+            }
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception as exc:
+            logger.debug(f"stall baseline log failed: {exc}")
 
     def monitor_session(self, session_name: str, status_file: str):
         """Monitor a single session using simplified detection logic"""
@@ -1213,6 +1465,9 @@ class MultiSessionMonitor:
                 # T027: Clean up reconnection state
                 if session_name in self.reconnection_states:
                     del self.reconnection_states[session_name]
+
+                # e023: Clean up ticket-done dedup flag
+                self._ticket_done_notified.pop(session_name, None)
 
                 # T028: Clean up persisted state file
                 try:

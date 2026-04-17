@@ -4,9 +4,164 @@ Session Manager for Multi-Session Support
 Manages active session state and switching between different Claude Code sessions.
 """
 
-import os
+import glob
 import json
+import os
+import time
+from datetime import datetime
 from typing import Dict, List
+
+
+# ---------------------------------------------------------------------------
+# Hook event helpers (module-level)
+# ---------------------------------------------------------------------------
+
+_CTB_HOOK_MARKER = "ctb-stall-hook"  # settings.json에서 CTB hook을 식별하는 마커
+
+
+def write_hook_event(session_id: str, event_type: str) -> None:
+    """hook 이벤트를 원자적으로 /tmp/ctb-events-{session_id}-{ts_ns}.json에 기록."""
+    try:
+        ts_ns = int(time.time_ns())
+        event = {
+            "session_id": session_id,
+            "timestamp_iso": datetime.utcnow().isoformat() + "Z",
+            "event_type": event_type,
+        }
+        tmp_path = f"/tmp/ctb-events-{session_id}-{ts_ns}.tmp"
+        final_path = f"/tmp/ctb-events-{session_id}-{ts_ns}.json"
+        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, json.dumps(event, ensure_ascii=False).encode("utf-8"))
+        finally:
+            os.close(fd)
+        os.rename(tmp_path, final_path)
+    except Exception:
+        pass  # 이벤트 기록 실패는 무시 (모니터링 보조 기능)
+
+
+def _build_hook_command(session_id: str) -> str:
+    """PreToolUse hook에 사용할 셸 명령어를 생성합니다."""
+    return (
+        f"python3 -c \""
+        f"import os,json,time;"
+        f"sid='{session_id}';"
+        f"ts=int(time.time_ns());"
+        f"event={{'session_id':sid,'timestamp_iso':__import__('datetime').datetime.utcnow().isoformat()+'Z','event_type':'tool_start'}};"
+        f"tmp=f'/tmp/ctb-events-{{sid}}-{{ts}}.tmp';"
+        f"final=f'/tmp/ctb-events-{{sid}}-{{ts}}.json';"
+        f"fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600);"
+        f"os.write(fd,json.dumps(event).encode());"
+        f"os.close(fd);"
+        f"os.rename(tmp,final)"
+        f"\""
+    )
+
+
+def register_session_hooks(project_dir: str, session_id: str) -> bool:
+    """프로젝트의 .claude/settings.json에 CTB stall 감지 hooks를 등록합니다.
+
+    Args:
+        project_dir: Claude Code 프로젝트 루트 디렉토리
+        session_id: 세션 식별자 (tmux 세션명 권장)
+
+    Returns:
+        True if successfully registered, False otherwise
+    """
+    try:
+        settings_path = os.path.join(project_dir, ".claude", "settings.json")
+        os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+
+        # 기존 settings 로드
+        settings: Dict = {}
+        if os.path.exists(settings_path):
+            with open(settings_path, "r", encoding="utf-8") as f:
+                settings = json.load(f)
+
+        # hooks 섹션 초기화
+        if "hooks" not in settings:
+            settings["hooks"] = {}
+
+        # 이미 CTB hook이 등록되어 있으면 스킵
+        pre_hooks = settings["hooks"].get("PreToolUse", [])
+        for h in pre_hooks:
+            if isinstance(h, dict) and any(
+                _CTB_HOOK_MARKER in hk.get("command", "")
+                for hk in h.get("hooks", [])
+            ):
+                return True  # 이미 등록됨
+
+        # PreToolUse hook 추가
+        cmd = _build_hook_command(session_id)
+        ctb_hook = {
+            "matcher": "",
+            "hooks": [{"type": "command", "command": f"# {_CTB_HOOK_MARKER}\n{cmd}"}],
+        }
+        if "PreToolUse" not in settings["hooks"]:
+            settings["hooks"]["PreToolUse"] = []
+        settings["hooks"]["PreToolUse"].append(ctb_hook)
+
+        # .omc/state/sessions/{session_id}/ 디렉토리에 hook_supported 플래그 생성
+        flag_dir = os.path.join(".omc", "state", "sessions", session_id)
+        os.makedirs(flag_dir, exist_ok=True)
+        with open(os.path.join(flag_dir, "hook_supported"), "w") as f:
+            f.write(session_id)
+
+        # settings.json 저장
+        with open(settings_path, "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=2, ensure_ascii=False)
+
+        return True
+    except Exception:
+        return False
+
+
+def unregister_session_hooks(project_dir: str, session_id: str) -> None:
+    """CTB hooks를 settings.json에서 제거하고 이벤트 파일을 정리합니다."""
+    try:
+        settings_path = os.path.join(project_dir, ".claude", "settings.json")
+        if os.path.exists(settings_path):
+            with open(settings_path, "r", encoding="utf-8") as f:
+                settings = json.load(f)
+
+            if "hooks" in settings and "PreToolUse" in settings["hooks"]:
+                settings["hooks"]["PreToolUse"] = [
+                    h for h in settings["hooks"]["PreToolUse"]
+                    if not (
+                        isinstance(h, dict)
+                        and any(
+                            _CTB_HOOK_MARKER in hk.get("command", "")
+                            for hk in h.get("hooks", [])
+                        )
+                    )
+                ]
+                if not settings["hooks"]["PreToolUse"]:
+                    del settings["hooks"]["PreToolUse"]
+                if not settings["hooks"]:
+                    del settings["hooks"]
+
+            with open(settings_path, "w", encoding="utf-8") as f:
+                json.dump(settings, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+    # 이벤트 파일 정리
+    try:
+        for path in glob.glob(f"/tmp/ctb-events-{session_id}-*.json"):
+            try:
+                os.unlink(path)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # hook_supported 플래그 제거
+    try:
+        flag_path = os.path.join(".omc", "state", "sessions", session_id, "hook_supported")
+        if os.path.exists(flag_path):
+            os.unlink(flag_path)
+    except Exception:
+        pass
 
 
 class SessionManager:
@@ -226,7 +381,6 @@ class SessionManager:
 
         Handles sessions with suffixes like claude_my-app-1, claude_my-app-2.
         """
-        import subprocess
         project_path = os.path.abspath(os.path.expanduser(project_path))
         matching_sessions = []
 
@@ -388,6 +542,14 @@ class SessionManager:
                 "status": "error",
                 "error": f"Failed to create session: {str(e)}"
             }
+
+    def register_hooks(self, project_dir: str, session_id: str) -> bool:
+        """프로젝트에 CTB stall 감지 hooks를 등록합니다."""
+        return register_session_hooks(project_dir, session_id)
+
+    def unregister_hooks(self, project_dir: str, session_id: str) -> None:
+        """프로젝트에서 CTB hooks를 제거하고 이벤트 파일을 정리합니다."""
+        unregister_session_hooks(project_dir, session_id)
 
 
 # Global session manager instance
