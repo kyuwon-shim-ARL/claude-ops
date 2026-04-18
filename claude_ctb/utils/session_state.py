@@ -429,6 +429,21 @@ class SessionStateAnalyzer:
             logger.debug("🎯 WORKING: Claude background task(s)/local agents still running detected in recent lines")
             return True
 
+        # PRIORITY 1c-2: OMC status bar shows active sub-agents
+        # When OMC sub-agents are running, the main Claude sits at ❯ prompt
+        # (no interrupt strings). The OMC bar reports live agent count:
+        # "[OMC#4.12.0] | ... | agents:1 | ..."
+        # agents:0 = all done, agents:N (N>0) = actively running.
+        # Guard: skip if agents:0 explicitly shown.
+        _omc_agents_re = re.compile(r'\bagents:([1-9]\d*)\b')
+        for line in recent_lines:
+            if '[OMC#' not in line:
+                continue
+            m = _omc_agents_re.search(line)
+            if m:
+                logger.debug(f"🎯 WORKING: OMC status bar shows agents:{m.group(1)} running")
+                return True
+
         # PRIORITY 1d: Active spinner glyph with ellipsis in recent raw lines
         # Claude Code shows "✻ Cogitating…" (glyph + verb + U+2026) while actively
         # working. The ellipsis (…) distinguishes active spinners from past-tense
