@@ -23,6 +23,7 @@ from ..utils.task_completion_detector import task_detector, TaskCompletion, Aler
 from ..utils.session_reconnect import SessionReconnectionState  # T027: Reconnection tracking
 from ..utils.overload_retry import OverloadRetryState, _FALLBACK_PROMPT  # 529 overloaded auto-retry
 from ..utils.state_persistence import PersistedSessionState  # T028: Restart state persistence
+from ..utils.progress_tracker import read_active_skill, parse_screen_progress, detect_stall as detect_progress_stall
 from ..telegram.notifier import SmartNotifier
 from .completion_event_system import (
     CompletionEventBus, CompletionEventType, CompletionEvent,
@@ -121,6 +122,15 @@ class MultiSessionMonitor:
         # M13: Ticket-driven nudge suppression (e023)
         # Advisory dedup: session당 1회만 "티켓 완료" 알림 전송. 재시작 시 초기화는 설계 의도.
         self._ticket_done_notified: Dict[str, bool] = {}  # session -> notified flag
+
+        # Progress stall detection: multi-stage skill이 중간에 멈췄을 때 감지
+        # 3단계 에스컬레이션: nudge(×2) → Telegram(×1) → 침묵
+        self._progress_nudge_count: Dict[str, int] = {}      # session -> nudge 횟수
+        self._progress_nudge_sent_at: Dict[str, float] = {}  # session -> 마지막 nudge 시각
+        self._progress_telegram_sent: Dict[str, bool] = {}   # session -> Telegram 알림 발송 여부
+        self._progress_last_stage: Dict[str, int] = {}       # session -> 마지막 확인한 stage_num (리셋 감지용)
+        self._progress_check_interval: float = 15.0          # 파일 I/O 빈도 제한 (15초)
+        self._progress_check_at: Dict[str, float] = {}       # session -> 마지막 체크 시각
 
         # T028: State persistence directory
         import tempfile
@@ -843,6 +853,110 @@ class MultiSessionMonitor:
             )
             return False  # fail-open
 
+    def _check_progress_stall(self, session_name: str, curr_state: SessionState) -> None:
+        """Detect multi-stage skill stall and escalate: nudge(×2) → Telegram(×1) → silence.
+
+        Reads .omc/state/active-skill.json from the session's working directory
+        and parses [Stage N/M] from screen content as fallback signal.
+        Only triggers when session is IDLE (not WORKING/WAITING_INPUT).
+        """
+        now = time.time()
+
+        # Rate-limit file I/O: check at most every 15 seconds
+        if now - self._progress_check_at.get(session_name, 0) < self._progress_check_interval:
+            return
+        self._progress_check_at[session_name] = now
+
+        # Get session working directory
+        try:
+            working_dir = session_manager.get_session_path(session_name)
+        except Exception:
+            return
+        if not working_dir:
+            return
+
+        # Read file-based progress (v2 schema)
+        file_progress = read_active_skill(working_dir)
+
+        # Read screen-based progress (fallback)
+        screen_content = self.state_analyzer.get_current_screen_only(session_name)
+        screen_progress = parse_screen_progress(screen_content) if screen_content else None
+
+        # Detect stall using dual-signal matrix
+        is_stall = detect_progress_stall(
+            file_progress=file_progress,
+            screen_progress=screen_progress,
+            session_state=curr_state.value,
+            stall_threshold_seconds=300.0,
+        )
+
+        if not is_stall:
+            return
+
+        # Check stage change → reset counters
+        current_stage = file_progress.stage_num if file_progress else (screen_progress[0] if screen_progress else 0)
+        last_stage = self._progress_last_stage.get(session_name, -1)
+        if current_stage != last_stage:
+            self._progress_last_stage[session_name] = current_stage
+            self._progress_nudge_count[session_name] = 0
+            self._progress_nudge_sent_at.pop(session_name, None)
+            self._progress_telegram_sent[session_name] = False
+
+        # Ticket done guard
+        if self._is_ticket_done_guard(session_name):
+            return
+
+        nudge_count = self._progress_nudge_count.get(session_name, 0)
+        last_nudge = self._progress_nudge_sent_at.get(session_name, 0)
+        telegram_sent = self._progress_telegram_sent.get(session_name, False)
+
+        # Build label for logging
+        skill_name = file_progress.skill if file_progress else 'unknown'
+        stage_label = file_progress.stage_label if file_progress else ''
+        total = file_progress.total_stages if file_progress else (screen_progress[1] if screen_progress else '?')
+        stage_info = f"Stage {current_stage}/{total}"
+        if stage_label:
+            stage_info += f" ({stage_label})"
+
+        # Escalation: nudge(×2) → Telegram(×1) → silence
+        if nudge_count < 2:
+            # Cooldown check (first nudge is immediate, subsequent after 300s)
+            if nudge_count > 0 and (now - last_nudge) < 300:
+                return
+
+            logger.info(f"🔔 {session_name}: progress stall at {stage_info} — nudge #{nudge_count + 1}/2")
+            try:
+                subprocess.run(
+                    ["tmux", "send-keys", "-t", session_name, "이어서 진행해줘", "Enter"],
+                    timeout=5, check=False,
+                )
+                self._progress_nudge_count[session_name] = nudge_count + 1
+                self._progress_nudge_sent_at[session_name] = now
+            except Exception as e:
+                logger.warning(f"tmux send-keys (progress nudge) failed for {session_name}: {e}")
+
+        elif not telegram_sent:
+            # Cooldown after last nudge
+            if (now - last_nudge) < 300:
+                return
+
+            # Calculate elapsed time
+            if file_progress:
+                elapsed_min = (datetime.now(timezone.utc) - file_progress.updated_at).total_seconds() / 60
+            else:
+                elapsed_min = 0
+
+            logger.warning(f"⚠️ {session_name}: progress stall at {stage_info} — nudge exhausted, sending Telegram")
+            try:
+                self.notifier.send_notification_sync(
+                    f"⚠️ *{session_name}*: {stage_info}에서 {elapsed_min:.0f}분째 정체\n"
+                    f"스킬: {skill_name}\n"
+                    f"액션: /log로 확인 또는 해당 세션에서 수동 입력"
+                )
+                self._progress_telegram_sent[session_name] = True
+            except Exception as e:
+                logger.warning(f"Telegram notification (progress stall) failed for {session_name}: {e}")
+
     def _check_resume_actions(self, session_name: str, curr_state: SessionState, prev_state: SessionState) -> None:
         """Check and trigger resume actions based on current session state.
 
@@ -959,6 +1073,10 @@ class MultiSessionMonitor:
                 with self.thread_lock:
                     self._error_detected_at.pop(session_name, None)
                     self._error_auto_resume_count.pop(session_name, None)
+
+        # --- progress stall detection (multi-stage skill) ---
+        if not is_overloaded and _not_active:
+            self._check_progress_stall(session_name, curr_state)
 
         # --- working-stall detection ---
         if self._is_ticket_done_guard(session_name):
