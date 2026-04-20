@@ -470,10 +470,36 @@ class SessionStateAnalyzer:
         recent_content = '\n'.join(lines[-10:])
         return any(pattern in recent_content for pattern in error_patterns)
 
-    # How long (seconds) after last tool_result before flagging stuck
-    _STUCK_DETECTION_DELAY = 10
+    # How long (seconds) after last tool_result before flagging stuck.
+    # 60s matches session_state.py's 45s nudge threshold + buffer for API latency —
+    # OMC sub-agents (Agent tool) take 30-120s; 10s was causing false positives.
+    _STUCK_DETECTION_DELAY = 60
     # Don't flag sessions whose JSONL hasn't changed in this many seconds
     _STUCK_MAX_AGE = 3600
+
+    def _is_omc_skill_active(self, session_path: str) -> bool:
+        """Return True if the session has a live OMC skill in progress.
+
+        Reads {session_path}/.omc/state/active-skill.json (v2 schema).
+        A skill with status='in_progress' means Claude is orchestrating sub-agents
+        and being IDLE is expected — suppress the stuck badge in that case.
+        """
+        if not session_path:
+            return False
+        import time as _time
+        active_skill_path = os.path.join(session_path, '.omc', 'state', 'active-skill.json')
+        if not os.path.isfile(active_skill_path):
+            return False
+        try:
+            # Ignore stale files (> 10 min old without an update = skill likely died)
+            age = _time.time() - os.path.getmtime(active_skill_path)
+            if age > 600:
+                return False
+            with open(active_skill_path, 'r', encoding='utf-8', errors='ignore') as fh:
+                data = json.loads(fh.read())
+            return data.get('status') == 'in_progress'
+        except Exception:
+            return False
 
     def _detect_stuck_after_agent(self, session_path: str) -> bool:
         """Detect if session is stuck: agent returned tool_result but no assistant follow-up.
@@ -483,6 +509,11 @@ class SessionStateAnalyzer:
         that has been sitting for at least _STUCK_DETECTION_DELAY seconds.
         """
         if not session_path:
+            return False
+
+        # OMC skill running → orchestrator session is intentionally idle while
+        # sub-agents work; suppress the stuck badge entirely.
+        if self._is_omc_skill_active(session_path):
             return False
 
         import glob as _glob
