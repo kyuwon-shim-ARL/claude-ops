@@ -23,7 +23,7 @@ from ..utils.task_completion_detector import task_detector, TaskCompletion, Aler
 from ..utils.session_reconnect import SessionReconnectionState  # T027: Reconnection tracking
 from ..utils.overload_retry import OverloadRetryState, _FALLBACK_PROMPT  # 529 overloaded auto-retry
 from ..utils.state_persistence import PersistedSessionState  # T028: Restart state persistence
-from ..utils.progress_tracker import read_active_skill, parse_screen_progress, detect_stall as detect_progress_stall
+from ..utils.progress_tracker import read_active_skill, parse_screen_progress, detect_stall as detect_progress_stall, SkillProgress
 from ..telegram.notifier import SmartNotifier
 from .completion_event_system import (
     CompletionEventBus, CompletionEventType, CompletionEvent,
@@ -40,6 +40,21 @@ except ImportError:
     from ..utils.wait_time_tracker import wait_tracker
 
 logger = logging.getLogger(__name__)
+
+
+def _is_screen_progress_current(
+    file_progress: Optional[SkillProgress],
+    screen_content: str,
+) -> bool:
+    """screen_content가 현재 런의 것임을 검증.
+
+    file_progress=None 또는 screen_content 공백: True 반환 (보수적 허용).
+    그 외: file_progress.skill이 screen_content에 포함되어야 함.
+    False 반환 시 screen_progress 무시, file_progress fallback 사용.
+    """
+    if not file_progress or not screen_content.strip():
+        return True
+    return file_progress.skill in screen_content
 
 
 class MultiSessionMonitor:
@@ -881,6 +896,7 @@ class MultiSessionMonitor:
         # Read screen-based progress (fallback)
         screen_content = self.state_analyzer.get_current_screen_only(session_name)
         screen_progress = parse_screen_progress(screen_content) if screen_content else None
+        screen_is_current = _is_screen_progress_current(file_progress, screen_content or "")
 
         # Detect stall using dual-signal matrix
         is_stall = detect_progress_stall(
@@ -894,7 +910,14 @@ class MultiSessionMonitor:
             return
 
         # Check stage change → reset counters
-        current_stage = file_progress.stage_num if file_progress else (screen_progress[0] if screen_progress else 0)
+        # screen_progress is primary when screen is verified to be current run's output;
+        # fall back to file_progress when screen is stale/residual from a different run.
+        if screen_progress and screen_is_current:
+            current_stage = screen_progress[0]
+        elif file_progress:
+            current_stage = file_progress.stage_num
+        else:
+            current_stage = 0
         last_stage = self._progress_last_stage.get(session_name, -1)
         if current_stage != last_stage:
             self._progress_last_stage[session_name] = current_stage
@@ -905,6 +928,24 @@ class MultiSessionMonitor:
         # Ticket done guard
         if self._is_ticket_done_guard(session_name):
             return
+
+        # Recovery: if telegram already exhausted but screen has advanced past file stage,
+        # the session is actually progressing — file just wasn't updated. Reset nudge state
+        # so the next nudge cycle fires again. screen_is_current=True guards against residual
+        # text from a different run triggering a spurious reset.
+        # fall-through (no return): line below re-reads nudge_count=0/telegram_sent=False →
+        # line 922+ `if nudge_count < 2:` block fires immediately.
+        if (self._progress_telegram_sent.get(session_name, False)
+                and file_progress and screen_progress and screen_is_current
+                and file_progress.stage_num < screen_progress[0]):
+            logger.info(
+                f"🔄 {session_name}: stage mismatch recovery "
+                f"(file={file_progress.stage_num} < screen={screen_progress[0]}), resetting nudge state"
+            )
+            self._progress_nudge_count[session_name] = 0
+            self._progress_telegram_sent[session_name] = False
+            self._progress_nudge_sent_at.pop(session_name, None)
+            self._progress_last_stage.pop(session_name, None)
 
         nudge_count = self._progress_nudge_count.get(session_name, 0)
         last_nudge = self._progress_nudge_sent_at.get(session_name, 0)

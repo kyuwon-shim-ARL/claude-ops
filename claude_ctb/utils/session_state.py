@@ -149,6 +149,9 @@ class SessionStateAnalyzer:
             "│ Other ",                   # Other option
             "┌────────┬",                # Table top border
             "(<=",                        # Character limit hint like "(<=5 words)"
+            # y/n confirmation prompts (English and Korean ralplan/plan skills)
+            "(y/n)",                      # e.g. "이 계획대로 구현을 시작할까요? (y/n)"
+            "(Y/n)",                      # e.g. "Continue? (Y/n)"
         ]
         
         # Completion message patterns
@@ -435,12 +438,51 @@ class SessionStateAnalyzer:
         # "[OMC#4.12.0] | ... | agents:1 | ..."
         # agents:0 = all done, agents:N (N>0) = actively running.
         # Guard: skip if agents:0 explicitly shown.
+        #
+        # GUARD C — stale agents:N:
+        # When the executor finishes but the OMC bar hasn't updated yet,
+        # the screen shows both "✻ Baked for Xs" (past-tense) and ❯ (idle)
+        # while agents:N is still non-zero. In this case the bar is stale.
+        # Detect: ❯ visible AND last non-blank non-status-bar line above ❯
+        # matches the past-tense completion pattern → skip agents:N.
         _omc_agents_re = re.compile(r'\bagents:([1-9]\d*)\b')
+        _past_completion_re = re.compile(
+            rf'[{SessionStateAnalyzer._TOOL_GLYPHS}] \w+ for \d+'
+        )
+        # Pre-compute last content line before ❯ (for GUARD C)
+        _last_before_prompt = None
+        if _prompt_visible:
+            for _ln in reversed(recent_lines):
+                _s = _ln.strip()
+                if not _s or _s in ('❯', '❯\xa0', '❯ '):
+                    continue
+                if any(_m in _ln for _m in ['[OMC#', '⏵⏵', 'bypass permissions', '└─']):
+                    continue
+                # Skip separator lines (────)
+                if _s.startswith('─') and _s.endswith('─'):
+                    continue
+                _last_before_prompt = _s
+                break
+
         for line in recent_lines:
             if '[OMC#' not in line:
                 continue
             m = _omc_agents_re.search(line)
             if m:
+                # GUARD C: ❯ visible + last content is past-tense completion → stale bar
+                # Exception: if the completion line itself contains "background task
+                # still running" or "local agents still running", the session IS
+                # still working (mirrors the 2b-guard exception in Priority 2).
+                if (_prompt_visible and _last_before_prompt
+                        and _past_completion_re.search(_last_before_prompt)
+                        and 'background task' not in _last_before_prompt
+                        and 'local agents' not in _last_before_prompt):
+                    logger.debug(
+                        "⏭ SKIP 1c-2: ❯ visible + last content is past-tense completion "
+                        f"(GUARD C) — agents:{m.group(1)} treated as stale: "
+                        f"{_last_before_prompt[:60]}"
+                    )
+                    continue
                 logger.debug(f"🎯 WORKING: OMC status bar shows agents:{m.group(1)} running")
                 return True
 
