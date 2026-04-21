@@ -369,3 +369,13 @@ SESSION_SCREEN_HISTORY_LINES=200  # Lines to capture
 - Fewer false notifications
 - Better handling of long-running commands
 
+
+# DVC-NUDGE-INSTALLED
+## DVC Auto-Management
+
+이 프로젝트는 DVC로 대용량 데이터를 관리합니다.
+
+**Claude 행동 규칙:**
+- 새 파일이 data/ 하위에 생기고 크기가 20MB 이상이면: `dvc add <경로>` 실행 여부를 먼저 물어보세요.
+- `git add` 전에 DVC 추적 여부를 확인하세요.
+- DVC remote: `dvc push` 로 데이터를 원격에 동기화하세요.
