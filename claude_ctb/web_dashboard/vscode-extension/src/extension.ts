@@ -176,12 +176,14 @@ class DashboardPanel {
     DashboardPanel.panel.webview.html = getWebviewContent(context);
 
     // Handle messages from webview (card click → terminal focus)
-    DashboardPanel.panel.webview.onDidReceiveMessage((message: { type: string; session?: string }) => {
+    DashboardPanel.panel.webview.onDidReceiveMessage((message: { type: string; session?: string; url?: string }) => {
       if (message.type === 'focusSession' && message.session) {
         const found = focusTerminalForSession(message.session);
         if (!found) {
           vscode.window.showWarningMessage(`Terminal not found for: ${message.session}`);
         }
+      } else if (message.type === 'openUrl' && message.url) {
+        vscode.env.openExternal(vscode.Uri.parse(message.url));
       }
     });
 
