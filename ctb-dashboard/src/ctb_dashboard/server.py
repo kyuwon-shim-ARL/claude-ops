@@ -28,6 +28,15 @@ from sse_starlette.sse import EventSourceResponse
 from .state_detector import SessionStateAnalyzer, SessionState
 from .sessions import get_all_claude_sessions, get_session_path
 
+import sys as _sys
+_PSTATUS_DIR = "/home/kyuwon/projects/project-status"
+if _PSTATUS_DIR not in _sys.path:
+    _sys.path.insert(0, _PSTATUS_DIR)
+import projects_router as _pstatus_module
+_pstatus_scan_loop = _pstatus_module.scan_loop
+projects_router = _pstatus_module.router
+pstatus_static_app = _pstatus_module.pstatus_static_app
+
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 3  # seconds between state refreshes
@@ -252,12 +261,15 @@ async def lifespan(app: FastAPI):
     if not _FOCUS_SECRET:
         logger.warning("CTB_FOCUS_SECRET not set, focus endpoint is unauthenticated")
     task = asyncio.create_task(_background_poller())
+    pstatus_task = asyncio.create_task(_pstatus_scan_loop())
     yield
     task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    pstatus_task.cancel()
+    for t in (task, pstatus_task):
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
     logger.info("Dashboard server shutting down")
 
 
@@ -278,6 +290,10 @@ app.add_middleware(
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+# Project-status integration (Phase C)
+app.mount("/pstatus-static", pstatus_static_app, name="pstatus-static")
+app.include_router(projects_router, prefix="/projects")
 
 
 @app.get("/")

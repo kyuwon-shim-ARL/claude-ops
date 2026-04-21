@@ -196,6 +196,11 @@
 </head>
 <body class="min-h-screen" style="background: radial-gradient(ellipse 80% 50% at 50% 0%, #1a1530 0%, #0f0d14 60%), #0f0d14; color: #e2dff0;">
 
+<nav style="background:#0f0d14;padding:0.5rem 2rem;border-bottom:1px solid #21262d;display:flex;gap:1.5rem;">
+  <a href="/" style="color:#c9d1d9;text-decoration:none;font-family:'Nunito',sans-serif;font-size:13px;">Sessions</a>
+  <a href="/projects" style="color:#c9d1d9;text-decoration:none;font-family:'Nunito',sans-serif;font-size:13px;">Projects</a>
+</nav>
+
   <header id="app-header" class="px-4 py-3 flex items-center justify-between" style="background: linear-gradient(180deg, rgba(22,18,31,0.95) 0%, rgba(15,13,20,0.8) 100%); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255,255,255,0.06); transition: background 0.4s ease, border-color 0.4s ease;">
     <div class="flex items-center gap-3">
       <h1 id="app-title" class="text-lg font-semibold tracking-tight">Claude-CTB Dashboard</h1>
@@ -1464,6 +1469,7 @@
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/static/sw.js').catch(() => {});
     }
+
   </script>
 </body>
 </html>
