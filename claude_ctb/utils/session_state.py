@@ -450,8 +450,12 @@ class SessionStateAnalyzer:
             rf'[{SessionStateAnalyzer._TOOL_GLYPHS}] \w+ for \d+'
         )
         # Pre-compute last content line before ❯ (for GUARD C)
+        # Also pre-compute whether ANY recent line is a past-tense completion
+        # (fallback when the last content line is a multi-line OMC recap).
         _last_before_prompt = None
+        _any_past_completion = False
         if _prompt_visible:
+            _in_recap = False
             for _ln in reversed(recent_lines):
                 _s = _ln.strip()
                 if not _s or _s in ('❯', '❯\xa0', '❯ '):
@@ -461,8 +465,25 @@ class SessionStateAnalyzer:
                 # Skip separator lines (────)
                 if _s.startswith('─') and _s.endswith('─'):
                     continue
-                _last_before_prompt = _s
-                break
+                # Skip OMC recap lines (※ recap: ...) — they appear between
+                # "✻ Worked for Xs" and ❯. Multi-line recaps: the first line
+                # starts with ※, continuation lines are indented. Track state.
+                if _s.startswith('※'):
+                    _in_recap = True
+                    continue
+                if _in_recap and _ln.startswith('  '):
+                    # Continuation of recap block
+                    continue
+                _in_recap = False
+                if _last_before_prompt is None:
+                    _last_before_prompt = _s
+            # Secondary: scan all recent lines for any past-tense completion
+            _past_completion_re_check = re.compile(
+                rf'[{SessionStateAnalyzer._TOOL_GLYPHS}] \w+ for \d+'
+            )
+            _any_past_completion = any(
+                _past_completion_re_check.search(l) for l in recent_lines
+            )
 
         for line in recent_lines:
             if '[OMC#' not in line:
@@ -473,14 +494,24 @@ class SessionStateAnalyzer:
                 # Exception: if the completion line itself contains "background task
                 # still running" or "local agents still running", the session IS
                 # still working (mirrors the 2b-guard exception in Priority 2).
-                if (_prompt_visible and _last_before_prompt
-                        and _past_completion_re.search(_last_before_prompt)
-                        and 'background task' not in _last_before_prompt
-                        and 'local agents' not in _last_before_prompt):
+                _guard_c_direct = (
+                    _last_before_prompt
+                    and _past_completion_re.search(_last_before_prompt)
+                    and 'background task' not in _last_before_prompt
+                    and 'local agents' not in _last_before_prompt
+                )
+                _guard_c_fallback = (
+                    _any_past_completion
+                    and _last_before_prompt
+                    and 'background task' not in _last_before_prompt
+                    and 'local agents' not in _last_before_prompt
+                )
+                if _prompt_visible and (_guard_c_direct or _guard_c_fallback):
+                    _reason = "last content" if _guard_c_direct else "any recent line"
                     logger.debug(
-                        "⏭ SKIP 1c-2: ❯ visible + last content is past-tense completion "
+                        f"⏭ SKIP 1c-2: ❯ visible + past-tense completion in {_reason} "
                         f"(GUARD C) — agents:{m.group(1)} treated as stale: "
-                        f"{_last_before_prompt[:60]}"
+                        f"{(_last_before_prompt or '')[:60]}"
                     )
                     continue
                 logger.debug(f"🎯 WORKING: OMC status bar shows agents:{m.group(1)} running")
