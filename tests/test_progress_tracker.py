@@ -68,9 +68,31 @@ class TestReadActiveSkill:
         assert result.status == "in_progress"
         assert result.skill == "rpt"
 
-    def test_v1_returns_none(self, tmp_workdir):
-        """2. v1 파일 (schema_version 없음) → None, 예외 없음."""
-        data = {"skill": "rpt", "stage": "Stage 2", "stage_num": 2}
+    def test_v1_best_effort_parse(self, tmp_workdir):
+        """2. v1 파일 (schema_version 없음) → best-effort SkillProgress."""
+        data = {"skill": "rpt", "stage": "Stage 2", "stage_detail": "Color Map",
+                "updated_at": "2026-04-21T02:00:00Z"}
+        _write_skill_json(tmp_workdir, data)
+        result = read_active_skill(str(tmp_workdir))
+        assert result is not None
+        assert result.schema_version == 1
+        assert result.skill == "rpt"
+        assert result.stage_num == 2
+        assert result.total_stages == 999  # sentinel
+        assert result.stage_label == "Color Map"
+        assert result.status == "in_progress"
+
+    def test_v1_decimal_stage(self, tmp_workdir):
+        """2b. v1 'Stage 2.5' → stage_num=2 (integer part only)."""
+        data = {"skill": "rpt", "stage": "Stage 2.5"}
+        _write_skill_json(tmp_workdir, data)
+        result = read_active_skill(str(tmp_workdir))
+        assert result is not None
+        assert result.stage_num == 2
+
+    def test_v1_no_stage_field_returns_none(self, tmp_workdir):
+        """2c. v1 without parseable stage → None."""
+        data = {"skill": "rpt", "phase": "analysis"}
         _write_skill_json(tmp_workdir, data)
         result = read_active_skill(str(tmp_workdir))
         assert result is None

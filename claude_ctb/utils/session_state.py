@@ -692,7 +692,7 @@ class SessionStateAnalyzer:
 
     def detect_stuck_after_agent(self, session_path: str,
                                  delay_seconds: int = 45,
-                                 max_age_seconds: int = 600) -> bool:
+                                 max_age_seconds: int = 3600) -> bool:
         """Return True if the most recent session JSONL ends with unanswered tool_result.
 
         Only fires when the JSONL has been idle >= delay_seconds (gives Claude time

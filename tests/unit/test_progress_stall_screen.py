@@ -57,7 +57,7 @@ def _call_stall_check(monitor, session, file_prog, screen_text, *, exhausted=Fal
     Patches:
     - session_manager.get_session_path → '/tmp/fakedir'
     - read_active_skill → file_prog
-    - state_analyzer.get_current_screen_only → screen_text
+    - state_analyzer.get_screen_content → screen_text (scrollback, Fix 2)
     - detect_progress_stall → True  (stall always detected so we test escalation logic)
     - _is_ticket_done_guard → False
     - subprocess.run  (captured)
@@ -67,7 +67,7 @@ def _call_stall_check(monitor, session, file_prog, screen_text, *, exhausted=Fal
         monitor._progress_nudge_count[session] = 2
         monitor._progress_last_stage[session] = 8
 
-    monitor.state_analyzer.get_current_screen_only.return_value = screen_text
+    monitor.state_analyzer.get_screen_content.return_value = screen_text
 
     with patch('claude_ctb.monitoring.multi_monitor.session_manager') as mock_sm, \
          patch('claude_ctb.monitoring.multi_monitor.read_active_skill', return_value=file_prog), \
@@ -203,3 +203,65 @@ class TestCaseD_Recovery:
         mock_run.assert_called_once()
         cmd_args = mock_run.call_args[0][0]
         assert "이어서 진행해줘" in cmd_args
+
+
+# ---------------------------------------------------------------------------
+# Fix 4: Incomplete workflow warning on WORKING→IDLE completion
+# ---------------------------------------------------------------------------
+
+class TestIncompleteWorkflowWarning:
+
+    @pytest.fixture
+    def notify_monitor(self, monitor):
+        """Extend base monitor fixture with attributes needed by send_completion_notification."""
+        monitor.config = MagicMock()
+        monitor.tracker = MagicMock()
+        monitor.debugger = MagicMock()
+        return monitor
+
+    def test_incomplete_stage_sends_warning(self, notify_monitor):
+        """WORKING→IDLE with [Stage 7/12] in scrollback → warning Telegram sent."""
+        session = "session-warn"
+        notify_monitor.last_state = {session: SessionState.IDLE}
+        notify_monitor.notification_sent = {session: True}
+        notify_monitor.last_notification_time = {session: 0}
+
+        scrollback = "output...\n[Stage 7/12] Designer Review\n✻ Cogitated for 35m 19s\n❯ "
+        notify_monitor.state_analyzer.get_screen_content.return_value = scrollback
+
+        with patch('claude_ctb.monitoring.multi_monitor.session_manager') as mock_sm, \
+             patch('claude_ctb.monitoring.multi_monitor.SmartNotifier') as MockNotifier, \
+             patch('claude_ctb.monitoring.multi_monitor.task_detector') as mock_td:
+            mock_sm.get_active_session.return_value = "other"
+            MockNotifier.return_value.send_work_completion_notification.return_value = True
+            mock_td.get_priority_emoji.return_value = "✅"
+
+            notify_monitor.send_completion_notification(session, None)
+
+            # Should have called send_notification_sync with warning
+            notify_monitor.notifier.send_notification_sync.assert_called_once()
+            call_args = notify_monitor.notifier.send_notification_sync.call_args[0][0]
+            assert "Stage 7/12" in call_args
+            assert "멈춤" in call_args
+
+    def test_complete_stage_no_warning(self, notify_monitor):
+        """WORKING→IDLE with [Stage 12/12] in scrollback → no warning."""
+        session = "session-ok"
+        notify_monitor.last_state = {session: SessionState.IDLE}
+        notify_monitor.notification_sent = {session: True}
+        notify_monitor.last_notification_time = {session: 0}
+
+        scrollback = "output...\n[Stage 12/12] Final Check\n✻ Done\n❯ "
+        notify_monitor.state_analyzer.get_screen_content.return_value = scrollback
+
+        with patch('claude_ctb.monitoring.multi_monitor.session_manager') as mock_sm, \
+             patch('claude_ctb.monitoring.multi_monitor.SmartNotifier') as MockNotifier, \
+             patch('claude_ctb.monitoring.multi_monitor.task_detector') as mock_td:
+            mock_sm.get_active_session.return_value = "other"
+            MockNotifier.return_value.send_work_completion_notification.return_value = True
+            mock_td.get_priority_emoji.return_value = "✅"
+
+            notify_monitor.send_completion_notification(session, None)
+
+            # No warning sent (stage complete)
+            notify_monitor.notifier.send_notification_sync.assert_not_called()

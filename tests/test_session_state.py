@@ -1114,6 +1114,18 @@ class TestDetectStuckAfterAgent:
         monkeypatch.setattr("os.path.expanduser", lambda p: str(tmp_path) if "~" in p else p)
         assert self.analyzer.detect_stuck_after_agent("/no/such/path") is False
 
+    def test_long_cogitation_within_new_max_age(self, tmp_path, monkeypatch):
+        """JSONL age=2100s (35min cogitation) — within new max_age=3600, should detect."""
+        self._make_proj(tmp_path, monkeypatch,
+                        [self._assistant_tool_use(), self._tool_result()], age_seconds=2100)
+        assert self.analyzer.detect_stuck_after_agent("/fake/path") is True
+
+    def test_beyond_max_age_returns_false(self, tmp_path, monkeypatch):
+        """JSONL age=4000s — beyond max_age=3600, should skip."""
+        self._make_proj(tmp_path, monkeypatch,
+                        [self._assistant_tool_use(), self._tool_result()], age_seconds=4000)
+        assert self.analyzer.detect_stuck_after_agent("/fake/path") is False
+
 
 class TestExtractWorkflowPhase:
     """Tests for extract_workflow_phase() — 8 cases per ticket CTB-GLANCEABLE T1."""

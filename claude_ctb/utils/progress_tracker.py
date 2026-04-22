@@ -62,11 +62,26 @@ def read_active_skill(working_dir: str) -> Optional[SkillProgress]:
         logger.warning(f"progress_tracker: failed to parse {filepath}: {e}")
         return None
 
-    # v1 check: no schema_version → skip stall detection
+    # v1 best-effort: extract timing + stage for stall detection
     schema_version = data.get('schema_version', 0)
     if schema_version < 2:
-        logger.debug(f"progress_tracker: v1 schema at {filepath}, stall skip")
-        return None
+        stage_field = data.get('stage', '')
+        m = re.match(r'Stage\s+(\d+)', stage_field)
+        if not m:
+            logger.debug(f"progress_tracker: v1 schema at {filepath}, no parseable stage — skip")
+            return None
+        stage_num = int(m.group(1))
+        updated_at = _parse_updated_at(data.get('updated_at', ''), filepath)
+        logger.debug(f"progress_tracker: v1 best-effort parse at {filepath}: stage={stage_num}")
+        return SkillProgress(
+            skill=data.get('skill', 'unknown'),
+            stage_num=stage_num,
+            total_stages=999,
+            stage_label=data.get('stage_detail', stage_field),
+            status='in_progress',
+            updated_at=updated_at,
+            schema_version=1,
+        )
 
     # Extract required fields with defaults
     stage_num = data.get('stage_num', 0)

@@ -822,6 +822,24 @@ class MultiSessionMonitor:
                 logger.info(f"{priority_emoji} Sent completion notification for session: {session_name}")
                 # NOTE: Completion time is now marked in should_send_completion_notification()
                 # This ensures it's recorded even if notification fails
+
+                # Check for incomplete workflow: [Stage N/M] where N < M
+                try:
+                    scrollback = self.state_analyzer.get_screen_content(session_name)
+                    if scrollback:
+                        recent = '\n'.join(scrollback.split('\n')[-100:])
+                        stage_info = parse_screen_progress(recent)
+                        if stage_info and stage_info[0] < stage_info[1]:
+                            self.notifier.send_notification_sync(
+                                f"⚠️ *{session_name}* Stage {stage_info[0]}/{stage_info[1]}에서 멈춤\n"
+                                f"워크플로우 미완료 — /log로 확인 필요"
+                            )
+                            logger.warning(
+                                f"⚠️ {session_name}: incomplete workflow "
+                                f"Stage {stage_info[0]}/{stage_info[1]}"
+                            )
+                except Exception as e:
+                    logger.debug(f"Incomplete workflow check failed for {session_name}: {e}")
             else:
                 logger.debug(f"⏭️ Skipped notification for session: {session_name} (duplicate or failed)")
                 # Still mark completion if state changed (v2 tracker feature)
@@ -893,10 +911,16 @@ class MultiSessionMonitor:
         # Read file-based progress (v2 schema)
         file_progress = read_active_skill(working_dir)
 
-        # Read screen-based progress (fallback)
-        screen_content = self.state_analyzer.get_current_screen_only(session_name)
-        screen_progress = parse_screen_progress(screen_content) if screen_content else None
-        screen_is_current = _is_screen_progress_current(file_progress, screen_content or "")
+        # Read screen-based progress (scrollback for stage pattern visibility)
+        screen_content = self.state_analyzer.get_screen_content(session_name)
+        # Limit to last 100 lines for freshness (avoid stale stage patterns from old runs)
+        if screen_content:
+            screen_lines = screen_content.split('\n')
+            screen_for_stage = '\n'.join(screen_lines[-100:])
+        else:
+            screen_for_stage = None
+        screen_progress = parse_screen_progress(screen_for_stage) if screen_for_stage else None
+        screen_is_current = _is_screen_progress_current(file_progress, screen_for_stage or "")
 
         # Detect stall using dual-signal matrix
         is_stall = detect_progress_stall(
