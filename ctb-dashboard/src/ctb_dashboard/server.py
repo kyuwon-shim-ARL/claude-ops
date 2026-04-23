@@ -7,6 +7,7 @@ Works in both hook-only mode and polling mode.
 
 import asyncio
 import hashlib
+import hmac as _hmac_mod
 import json
 import logging
 import os
@@ -15,16 +16,20 @@ import secrets
 import shutil
 import subprocess
 import time
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from typing import AsyncGenerator, Dict, Any
 
+import filelock as _filelock
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
+from starlette.middleware.sessions import SessionMiddleware
 
 from .state_detector import SessionStateAnalyzer, SessionState
 from .sessions import get_all_claude_sessions, get_session_path
@@ -45,6 +50,15 @@ BIND_HOST = "0.0.0.0"  # accessible via Tailscale network
 BIND_PORT = 8420
 _FOCUS_SECRET = os.environ.get("CTB_FOCUS_SECRET", "")
 _SESSION_NAME_RE = re.compile(r'^[a-zA-Z0-9_\-:.]{1,64}$')
+
+# PI Review Gate
+_REVIEW_SECRET = os.environ.get("CTB_REVIEW_SECRET", "")
+_REVIEW_OVERLAY_DIR = os.path.expanduser(
+    os.environ.get("CTB_REVIEW_OVERLAY_DIR", "~/.claude-ops")
+)
+_REVIEW_LOCK_TIMEOUT = int(os.environ.get("CTB_REVIEW_OVERLAY_LOCK_TIMEOUT", "10"))
+if not _REVIEW_SECRET:
+    logger.warning("CTB_REVIEW_SECRET not set — /review route will return 403")
 
 
 class FocusRequest(BaseModel):
@@ -239,6 +253,115 @@ def _poll_sessions() -> Dict[str, Any]:
     }
 
 
+# --- PI Review Gate helpers ---
+
+def _verify_review_sig(card: str, focus: str, rv: str, exp: str, sig: str) -> bool:
+    msg = f"{card}|{focus}|{rv}|{exp}".encode()
+    expected = _hmac_mod.new(_REVIEW_SECRET.encode(), msg, hashlib.sha256).hexdigest()
+    return secrets.compare_digest(expected, sig)
+
+
+def _read_consumed_links(path: str) -> dict:
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return {"links": {}}
+
+
+def _write_consumed_links(path: str, data: dict) -> bool:
+    dir_ = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=dir_, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        return False
+
+
+def _write_overlay_link_access(card: str, rv: str, overlay_path: str) -> bool:
+    """Append link_accessed entry to ticket review_history. Returns False if write fails."""
+    try:
+        with open(overlay_path) as f:
+            data = json.load(f)
+    except Exception:
+        return True  # no overlay to update — not a write failure
+
+    tickets = data.get("tickets", {})
+    ticket = tickets.get(card)
+    if ticket is None:
+        return True  # unknown ticket — not a write failure
+
+    history = ticket.setdefault("review_history", [])
+    history.append({"action": "link_accessed", "reviewer": rv, "ts": datetime.now(timezone.utc).isoformat()})
+    ticket["review_history"] = history[-50:]
+    tickets[card] = ticket
+    data["tickets"] = tickets
+
+    dir_ = os.path.dirname(overlay_path) or "."
+    fd, tmp = tempfile.mkstemp(dir=dir_, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, overlay_path)
+        return True
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        return False
+
+
+def _get_review_tickets() -> list:
+    overlay_path = os.path.join(_REVIEW_OVERLAY_DIR, "ticket-overlay.json")
+    try:
+        with open(overlay_path) as f:
+            data = json.load(f)
+    except Exception:
+        return []
+    return [
+        {"id": tid, "review_state": t.get("review_state", ""), "updated_at": t.get("updated_at", "")}
+        for tid, t in data.get("tickets", {}).items()
+        if t.get("review_state") == "needs_pi_review"
+    ]
+
+
+async def _purge_consumed_loop() -> None:
+    """Hourly purge of consumed-links.json entries older than 7 days."""
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            consumed_path = os.path.join(_REVIEW_OVERLAY_DIR, "consumed-links.json")
+            lock_path = os.path.join(_REVIEW_OVERLAY_DIR, "overlay.lock")
+            cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+            lock = _filelock.FileLock(lock_path, timeout=10)
+            with lock:
+                data = _read_consumed_links(consumed_path)
+                links = data.get("links", {})
+                pruned = {}
+                for k, entry in links.items():
+                    try:
+                        ts = datetime.fromisoformat(entry.get("consumed_at", ""))
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=timezone.utc)
+                        if ts >= cutoff:
+                            pruned[k] = entry
+                    except Exception:
+                        pass
+                if len(pruned) < len(links):
+                    data["links"] = pruned
+                    _write_consumed_links(consumed_path, data)
+        except Exception as e:
+            logger.warning("purge_consumed_loop error: %s", e)
+
+
 async def _background_poller():
     """Background task that polls sessions every POLL_INTERVAL seconds."""
     global _cached_state
@@ -288,10 +411,13 @@ async def lifespan(app: FastAPI):
 
     task = asyncio.create_task(_background_poller())
     pstatus_task = asyncio.create_task(_pstatus_scan_loop())
+    purge_task = asyncio.create_task(_purge_consumed_loop())
+    app.state.purge_consumed_task = purge_task
     yield
     task.cancel()
     pstatus_task.cancel()
-    for t in (task, pstatus_task):
+    purge_task.cancel()
+    for t in (task, pstatus_task, purge_task):
         try:
             await t
         except asyncio.CancelledError:
@@ -311,6 +437,8 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+_SESSION_SECRET_KEY = os.environ.get("SESSION_SECRET_KEY") or secrets.token_hex(32)
+app.add_middleware(SessionMiddleware, secret_key=_SESSION_SECRET_KEY, max_age=72 * 3600)
 
 # Serve static files (HTML frontend)
 static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -514,6 +642,72 @@ async def focus_session(
         logger.warning(f"Failed to write focus signal: {e}")
 
     return {"status": "focused", "session": req.session, "tmux_switched": tmux_ok, "window_activated": window_ok}
+
+
+@app.get("/review")
+async def review_gate(
+    request: Request,
+    card: str = "",
+    focus: str = "",
+    rv: str = "",
+    exp: str = "",
+    sig: str = "",
+):
+    """PI Review Gate — HMAC deep-link or session-cookie auth."""
+    if not _REVIEW_SECRET:
+        raise HTTPException(status_code=403, detail="Review gate not configured")
+
+    # Session bypass: already authenticated reviewer
+    if not sig and request.session.get("reviewer_id"):
+        tickets = _get_review_tickets()
+        return templates.TemplateResponse(
+            "review.html",
+            {"request": request, "tickets": tickets, "reviewer_id": request.session["reviewer_id"]},
+        )
+
+    if not (rv and exp and sig):
+        raise HTTPException(status_code=403, detail="Missing required parameters")
+
+    try:
+        exp_int = int(exp)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Invalid expiry")
+
+    if time.time() > exp_int:
+        raise HTTPException(status_code=403, detail="Link expired")
+
+    if not _verify_review_sig(card, focus, rv, exp, sig):
+        raise HTTPException(status_code=403, detail="Invalid signature")
+
+    consumed_path = os.path.join(_REVIEW_OVERLAY_DIR, "consumed-links.json")
+    overlay_path = os.path.join(_REVIEW_OVERLAY_DIR, "ticket-overlay.json")
+    lock_path = os.path.join(_REVIEW_OVERLAY_DIR, "overlay.lock")
+
+    with _filelock.FileLock(lock_path, timeout=_REVIEW_LOCK_TIMEOUT):
+        cl_data = _read_consumed_links(consumed_path)
+        links = cl_data.setdefault("links", {})
+        link_status = links.get(sig, {}).get("status")
+
+        if link_status == "consumed":
+            raise HTTPException(status_code=403, detail="Link already used")
+        # "write-failed" → allow one retry (fall through)
+
+        links[sig] = {"status": "consumed", "consumed_at": datetime.now(timezone.utc).isoformat()}
+        if not _write_consumed_links(consumed_path, cl_data):
+            raise HTTPException(status_code=503, detail="Service unavailable")
+
+        if card and not _write_overlay_link_access(card, rv, overlay_path):
+            # Rollback: mark as write-failed so next attempt can retry
+            links[sig]["status"] = "write-failed"
+            _write_consumed_links(consumed_path, cl_data)
+            raise HTTPException(status_code=503, detail="Overlay write failed")
+
+    request.session["reviewer_id"] = rv
+    tickets = _get_review_tickets()
+    return templates.TemplateResponse(
+        "review.html",
+        {"request": request, "tickets": tickets, "reviewer_id": rv},
+    )
 
 
 def _kill_previous_on_port(port: int):
