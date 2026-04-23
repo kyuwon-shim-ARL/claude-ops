@@ -253,3 +253,21 @@ experiments:
       - "ca/cc 완료 시 레지스트리 자동 등록"
       - "tests/test_stall_detection.py 확장 (16개)"
       - "nudge 억제 알림 dedup"
+  e024:
+    path: outputs/e024/
+    script: ""
+    params: {}
+    outputs: []
+    status: experimental
+    description: "Projects 탭 UX 개선: 테마/수렴/챗/렌더링/티켓소스/테스트"
+    issue: 18
+    branch: feature-18
+    tasks:
+      - "T0: Pydantic 스키마 + CSS 변수명 사전 정의"
+      - "T1: style.css CSS custom properties + light theme"
+      - "T2: templates/index.html 테마 토글 버튼 + JS"
+      - "T3: convergence rounds 엔드포인트"
+      - "T4: chat history[] + asyncio.subprocess"
+      - "T5: gather_tickets GitHub Issues TTL + OMC plans + git커밋"
+      - "T6: 프론트엔드 수렴 타임라인 + 가독성 렌더링"
+      - "T7: 테스트"
