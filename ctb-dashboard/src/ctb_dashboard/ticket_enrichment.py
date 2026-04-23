@@ -11,7 +11,6 @@ import os
 logger = logging.getLogger(__name__)
 
 _CACHE_PATH = os.path.expanduser("~/.claude-ops/l1-enrichment-cache.json")
-_CACHE_MAX_AGE = None  # infinite TTL; invalidated by mtime+hash change
 
 def _cache_key(source: str, ticket_id: str, body: str) -> str:
     raw = f"{source}:{ticket_id}:{body[:512]}"
@@ -103,7 +102,7 @@ async def attach_l1(tickets: list[dict], semaphore: asyncio.Semaphore | None = N
             haiku_tasks.append((len(result) - 1, key, ticket))
 
     if semaphore:
-        pending = [(i, k, t) for item in haiku_tasks if item is not None for i, k, t in [item]]
+        pending = [item for item in haiku_tasks if item is not None]
         coros = [_haiku_enrich(t, semaphore) for _, _, t in pending]
         enriched = await asyncio.gather(*coros, return_exceptions=True)
         for (idx, key, _), enc in zip(pending, enriched):

@@ -6,6 +6,7 @@ Uses file locking to prevent concurrent write corruption.
 import json
 import logging
 import os
+from contextlib import nullcontext
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ def _get_filelock(path: str):
 
 def load_overlay() -> dict[str, Any]:
     lock = _get_filelock(_OVERLAY_PATH)
-    ctx = lock if lock else _null_ctx()
+    ctx = lock if lock else nullcontext()
     with ctx:
         try:
             with open(_OVERLAY_PATH) as f:
@@ -41,7 +42,7 @@ def load_overlay() -> dict[str, Any]:
 def save_overlay(tickets: dict[str, Any]) -> None:
     os.makedirs(os.path.dirname(_OVERLAY_PATH), exist_ok=True)
     lock = _get_filelock(_OVERLAY_PATH)
-    ctx = lock if lock else _null_ctx()
+    ctx = lock if lock else nullcontext()
     with ctx:
         try:
             existing = {}
@@ -71,8 +72,3 @@ def apply_overlay(tickets: list[dict]) -> list[dict]:
             t = {**t, **meta}
         result.append(t)
     return result
-
-
-class _null_ctx:
-    def __enter__(self): return self
-    def __exit__(self, *a): pass
