@@ -178,16 +178,19 @@ class DashboardPanel {
     // Handle messages from webview (card click → terminal focus)
     DashboardPanel.panel.webview.onDidReceiveMessage((message: { type: string; session?: string; url?: string }) => {
       if (message.type === 'focusSession' && message.session) {
-        const found = focusTerminalForSession(message.session);
-        if (!found) {
-          vscode.window.showWarningMessage(`Terminal not found for: ${message.session}`);
-        }
+        focusOrCreateTerminalForSession(message.session);
       } else if (message.type === 'openUrl' && message.url) {
-        // Load the URL in-panel as an iframe so Projects view stays in the webview
+        // Load the URL in-panel as an iframe so Projects view stays in the webview.
+        // The proxy script forwards child-iframe postMessages to the extension so that
+        // the Sessions page loaded inside the iframe can still use the VSCode API
+        // (acquireVsCodeApi is only available in the top-level webview frame).
+        const _va = `acquireVsCodeApi()`;
         DashboardPanel.panel!.webview.html =
           `<!DOCTYPE html><html><head><style>` +
           `body{margin:0;overflow:hidden}iframe{width:100%;height:100vh;border:none}` +
-          `</style></head><body><iframe src="${message.url}"></iframe></body></html>`;
+          `</style></head><body><iframe src="${message.url}"></iframe>` +
+          `<script>const _va=${_va};window.addEventListener('message',e=>{if(e.data&&e.data.type)_va.postMessage(e.data);});</script>` +
+          `</body></html>`;
       }
     });
 
@@ -291,6 +294,17 @@ function focusTerminalForSession(sessionName: string): boolean {
     return true;
   }
 
+  // 2.5. Worktree pattern: claude_{project}_wt_{leaf} → match against leaf name only
+  // e.g. "claude_claude-ops_wt_ctb-dashboard" → leaf = "ctb-dashboard"
+  const wtMatch = sessionName.match(/^claude_.*?_wt_(.+)$/);
+  if (wtMatch) {
+    const leaf = wtMatch[1];
+    const wt = terminals.find(t =>
+      t.name === leaf || t.name.toLowerCase().includes(leaf.toLowerCase())
+    );
+    if (wt) { activateTerminal(wt); return true; }
+  }
+
   // 3. Case-insensitive partial match
   const lowerStripped = stripped.toLowerCase();
   const partial = terminals.find(t =>
@@ -302,6 +316,29 @@ function focusTerminalForSession(sessionName: string): boolean {
   }
 
   return false;
+}
+
+/**
+ * Create a new VSCode terminal attached to the given tmux session.
+ * Used as fallback when focusTerminalForSession finds no existing terminal.
+ */
+function createTerminalForSession(sessionName: string): vscode.Terminal {
+  // Derive a clean display name: worktree leaf or stripped prefix
+  const wtMatch = sessionName.match(/^claude_.*?_wt_(.+)$/);
+  const displayName = wtMatch ? wtMatch[1] : sessionName.replace(/^claude[_-]/, '');
+
+  const terminal = vscode.window.createTerminal({ name: displayName });
+  terminal.sendText(`tmux attach-session -t ${sessionName}`, true);
+  return terminal;
+}
+
+/** Focus an existing terminal for the session, or create one if none exists. */
+function focusOrCreateTerminalForSession(sessionName: string): void {
+  const found = focusTerminalForSession(sessionName);
+  if (!found) {
+    const t = createTerminalForSession(sessionName);
+    activateTerminal(t);
+  }
 }
 
 /**
@@ -329,10 +366,7 @@ class CTBUriHandler implements vscode.UriHandler {
     const params = new URLSearchParams(uri.query);
     const session = params.get('session');
     if (uri.path === '/focus' && session) {
-      const found = focusTerminalForSession(session);
-      if (!found) {
-        vscode.window.showWarningMessage(`Terminal not found for session: ${session}`);
-      }
+      focusOrCreateTerminalForSession(session);
     }
   }
 }
@@ -383,10 +417,7 @@ class FocusSignalWatcher {
       if (signal.session && signal.ts) {
         // Clear signal immediately to prevent re-triggering
         fs.writeFileSync(FOCUS_SIGNAL_PATH, '', { mode: 0o666 });
-        const found = focusTerminalForSession(signal.session);
-        if (!found) {
-          vscode.window.showWarningMessage(`Terminal not found for: ${signal.session}`);
-        }
+        focusOrCreateTerminalForSession(signal.session);
       }
     } catch { /* ignore parse errors, empty file, etc. */ }
   }
@@ -415,10 +446,7 @@ export function activate(context: vscode.ExtensionContext): void {
       treeProvider.refresh();
     }),
     vscode.commands.registerCommand('claudeCtb.focusSession', (item: SessionItem) => {
-      const found = focusTerminalForSession(item.session.name);
-      if (!found) {
-        vscode.window.showWarningMessage(`Terminal not found for: ${item.session.name}`);
-      }
+      focusOrCreateTerminalForSession(item.session.name);
     }),
     vscode.window.registerUriHandler(new CTBUriHandler()),
     { dispose: () => { statusBar.dispose(); treeProvider.dispose(); focusWatcher.dispose(); } },
