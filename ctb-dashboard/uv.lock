@@ -74,6 +74,7 @@ dependencies = [
     { name = "jinja2" },
     { name = "markdown" },
     { name = "sse-starlette" },
+    { name = "starlette" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -84,6 +85,7 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "markdown", specifier = ">=3.5.0" },
     { name = "sse-starlette", specifier = ">=2.0.0" },
+    { name = "starlette", specifier = ">=0.27" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29.0" },
 ]
 
