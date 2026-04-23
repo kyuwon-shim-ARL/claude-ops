@@ -261,6 +261,31 @@ async def lifespan(app: FastAPI):
     logger.info(f"Dashboard server starting on {BIND_HOST}:{BIND_PORT}")
     if not _FOCUS_SECRET:
         logger.warning("CTB_FOCUS_SECRET not set, focus endpoint is unauthenticated")
+
+    # Haiku rate-limiting semaphore: max 5 concurrent calls
+    app.state.haiku_semaphore = asyncio.Semaphore(5)
+    app.state.startup_ready = asyncio.Event()
+    app.state.degraded = False
+
+    # OAuth2 startup check (graceful)
+    try:
+        import google.auth.transport.requests as _gtr  # noqa: PLC0415
+        import google.oauth2.credentials as _gcreds  # noqa: PLC0415
+        _token_path = os.path.expanduser("~/.config/gcloud/application_default_credentials.json")
+        if os.path.exists(_token_path):
+            with open(_token_path) as _f:
+                _cred_data = json.load(_f)
+            _creds = _gcreds.Credentials(token=None, **{k: _cred_data[k] for k in ("client_id","client_secret","refresh_token","token_uri") if k in _cred_data})
+            _creds.refresh(_gtr.Request())
+            logger.info("OAuth2 startup check PASSED")
+        else:
+            logger.info("OAuth2 credentials not found, skipping startup check")
+    except Exception as _e:
+        logger.warning("OAuth2 startup check FAILED: %s — dashboard continues in degraded mode", _e)
+        app.state.degraded = True
+
+    app.state.startup_ready.set()
+
     task = asyncio.create_task(_background_poller())
     pstatus_task = asyncio.create_task(_pstatus_scan_loop())
     yield
@@ -300,6 +325,11 @@ app.mount("/pstatus-static", pstatus_static_app, name="pstatus-static")
 app.include_router(projects_router, prefix="/projects")
 
 
+@app.get("/dev/cards")
+async def dev_cards(request: Request):
+    return templates.TemplateResponse("dev_cards.html", {"request": request, "csp_nonce": secrets.token_hex(16)})
+
+
 @app.get("/")
 async def root(request: Request):
     """Serve dashboard HTML via Jinja2 template with CSP nonce."""
@@ -317,6 +347,10 @@ async def root(request: Request):
     )
     response.headers["Content-Security-Policy"] = csp
     return response
+
+
+async def get_haiku_semaphore(request: Request) -> asyncio.Semaphore:
+    return request.app.state.haiku_semaphore
 
 
 @app.get("/api/sessions")
@@ -360,10 +394,12 @@ async def get_session_log(name: str, lines: int = 50):
 
 
 @app.get("/api/health")
-async def health():
+async def health(request: Request):
     """Health check endpoint."""
+    degraded = getattr(request.app.state, "degraded", False)
     return {
-        "status": "ok",
+        "status": "degraded" if degraded else "ok",
+        "degraded": degraded,
         "sessions_count": len(_cached_state.get("sessions", [])),
         "last_updated": _cached_state.get("updated_at", 0),
     }

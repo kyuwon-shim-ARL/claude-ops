@@ -43,3 +43,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 ctb_dashboard = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
