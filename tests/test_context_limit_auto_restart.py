@@ -400,7 +400,8 @@ class TestFullRestartFlow:
             ["Enter"],                                  # Step 1d: execute /exit
             ["clear", "Enter"],                         # Step 3: clear screen
             ["claude --dangerously-skip-permissions", "Enter"],  # Step 4: start new claude
-            ["handoff text", "Enter"],                  # Step 5: send handoff
+            ["handoff text"],                           # Step 5a: send handoff text
+            ["Enter"],                                  # Step 5b: execute handoff (separate for reliability)
         ]
 
         assert len(send_keys_calls) == len(expected_order), \

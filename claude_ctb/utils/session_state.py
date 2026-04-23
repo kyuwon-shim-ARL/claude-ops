@@ -364,9 +364,40 @@ class SessionStateAnalyzer:
         # Claude Code shows either 'esc to interrupt' or 'ctrl+c to interrupt' when working.
         # Also check with adjacent lines joined to handle tmux line-wrap where the
         # pattern might be split across two lines (e.g., "esc to inter" + "rupt").
+        #
+        # Override: if an idle-prompt appears AFTER the interrupt line, the interrupt
+        # text is stale (Claude has already finished and is waiting for input).
+        # Idle-prompt patterns: bare `>` (Claude Code input), boxed `│ >`, Python `>>>`,
+        # full shell PS1 ending in $ or ❯ (e.g. user@host:path$, user@host dir ❯).
+        # Bare `❯` alone is excluded — it appears in Claude's active working UI.
+        # `│ > ` (boxed input with border) is Claude Code's persistent input box,
+        # visible WHILE Claude is actively working — not an idle indicator.
+        # Only bare `>` (no border) signals the post-completion conversation prompt.
+        _idle_prompt_re = re.compile(
+            r'^\s*>\s*$'                    # bare `>` — Claude Code post-completion prompt
+            r'|>>>\s*$'                    # Python >>>
+            r'|\w+@[\w\-\.]+.*[$❯]\s*$'   # full shell PS1 (user@host prefix required)
+            r'|(?<!│)\s>\s*$'             # inline `>` at end — but not `│ >` (active input box)
+        )
+
+        def _idle_prompt_follows(from_lines: list) -> bool:
+            # ⏵⏵ present means Claude's interactive edit/diff UI is active —
+            # the `>` is an edit cursor, not a conversation-end prompt.
+            if any('⏵⏵' in l for l in from_lines):
+                return False
+            return any(_idle_prompt_re.search(l) for l in from_lines)
+
         interrupt_patterns = ["esc to interrupt", "ctrl+c to interrupt"]
         for pattern in interrupt_patterns:
             if pattern in recent_content:
+                interrupt_idx = next(
+                    (i for i, l in enumerate(recent_lines) if pattern in l), 0
+                )
+                if _idle_prompt_follows(recent_lines[interrupt_idx:]):
+                    # Idle prompt after interrupt → Claude has finished; stale indicator.
+                    # Return False immediately so P1d/P2 spinners don't re-fire.
+                    logger.debug(f"⏭️ IDLE: '{pattern}' found but idle prompt follows → returning IDLE")
+                    return False
                 logger.debug(f"🎯 WORKING: '{pattern}' detected in recent lines")
                 return True
         # Line-wrap fallback: join consecutive line pairs and re-check
@@ -374,6 +405,9 @@ class SessionStateAnalyzer:
             joined = recent_lines[i].rstrip() + recent_lines[i + 1].lstrip()
             for pattern in interrupt_patterns:
                 if pattern in joined:
+                    if _idle_prompt_follows(recent_lines[i:]):
+                        logger.debug(f"⏭️ IDLE: '{pattern}' (wrap) but idle prompt follows → returning IDLE")
+                        return False
                     logger.debug(f"🎯 WORKING: '{pattern}' detected via line-wrap join")
                     return True
 

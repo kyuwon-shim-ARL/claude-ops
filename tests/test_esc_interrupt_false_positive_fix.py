@@ -68,10 +68,11 @@ More output
         Test that various prompt types override "esc to interrupt"
         """
         test_cases = [
-            # Claude's edit prompt
+            # Claude's edit prompt (bare `>` = post-completion conversation prompt)
             ("Old text (esc to interrupt)\n>", False),
-            # Boxed prompt
-            ("Text with esc to interrupt\n│ >", False),
+            # Boxed `│ >` is Claude Code's persistent input box — visible WHILE working,
+            # not an idle indicator. "esc to interrupt" wins.
+            ("Text with esc to interrupt\n│ >", True),
             # Bash prompt
             ("esc to interrupt text\nuser@host:~/dir$ ", False),
             # Zsh prompt
