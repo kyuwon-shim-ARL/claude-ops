@@ -1172,6 +1172,10 @@ class MultiSessionMonitor:
                     )
                     self._log_stall_baseline(session_name, bash_child, net_est, curr_state.value, False)
                     return
+                # OMC 서브에이전트 실행 중이면 stall 아님 (agents:N, N≥1)
+                if self._has_active_omc_agents(session_name):
+                    logger.debug(f"⏸️ {session_name}: stall skip — OMC subagent active (agents:N≥1)")
+                    return
                 self._log_stall_baseline(session_name, bash_child, net_est, curr_state.value, False)
                 if time.time() - last_stall > cooldown:
                     mins = stall_elapsed / 60
@@ -1258,6 +1262,29 @@ class MultiSessionMonitor:
         except Exception:
             pass
         return None
+
+    def _has_active_omc_agents(self, session_name: str) -> bool:
+        """OMC status bar에서 agents:N (N≥1) 을 감지해 서브에이전트 실행 중 여부를 반환합니다.
+
+        OMC status bar 예: [OMC#4.13.2] | ... | agents:1 | ...
+        서브에이전트가 실행 중이면 파일 I/O만 하므로 bash child / network 신호가 없어도
+        stall이 아닙니다.
+        """
+        import re
+        try:
+            result = subprocess.run(
+                ["tmux", "capture-pane", "-t", session_name, "-p"],
+                capture_output=True, text=True, timeout=3, check=False,
+            )
+            if result.returncode != 0:
+                return False
+            screen = result.stdout
+            m = re.search(r'\bagents:(\d+)\b', screen)
+            if m and int(m.group(1)) >= 1:
+                return True
+        except Exception as exc:
+            logger.debug(f"_has_active_omc_agents error for {session_name}: {exc}")
+        return False
 
     def _check_stall_signals(self, session_name: str) -> tuple:
         """Process tree + network 신호로 stall 여부를 보조 판단합니다.
