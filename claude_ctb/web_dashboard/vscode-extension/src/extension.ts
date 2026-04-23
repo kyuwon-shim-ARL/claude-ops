@@ -183,7 +183,11 @@ class DashboardPanel {
           vscode.window.showWarningMessage(`Terminal not found for: ${message.session}`);
         }
       } else if (message.type === 'openUrl' && message.url) {
-        vscode.env.openExternal(vscode.Uri.parse(message.url));
+        // Load the URL in-panel as an iframe so Projects view stays in the webview
+        DashboardPanel.panel!.webview.html =
+          `<!DOCTYPE html><html><head><style>` +
+          `body{margin:0;overflow:hidden}iframe{width:100%;height:100vh;border:none}` +
+          `</style></head><body><iframe src="${message.url}"></iframe></body></html>`;
       }
     });
 

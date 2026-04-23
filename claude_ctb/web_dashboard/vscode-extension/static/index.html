@@ -603,6 +603,15 @@
       return `${Math.floor(diff / 86400)}d ago`;
     }
 
+    function formatDuration(secs) {
+      if (!secs || secs < 0) return '--';
+      if (secs < 60) return `${Math.floor(secs)}s`;
+      if (secs < 3600) return `${Math.floor(secs / 60)}m`;
+      const h = Math.floor(secs / 3600);
+      const m = Math.floor((secs % 3600) / 60);
+      return m > 0 ? `${h}h ${m}m` : `${h}h`;
+    }
+
     function escapeHtml(s) {
       return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
@@ -691,6 +700,7 @@
       const tagColors = {
         autopilot: '#a78bfa', ralph: '#f472b6', team: '#60a5fa',
         ultrawork: '#34d399', pipeline: '#fbbf24',
+        ca: '#f97316', cc: '#fb923c', ralplan: '#c084fc', 'office-hours': '#38bdf8',
       };
       const tagColor = (tag && tagColors[tag.toLowerCase()]) || (isDark() ? '#94a3b8' : '#64748b');
 
@@ -722,15 +732,38 @@
         </div>`;
     }
 
-    // Workflow phase badge: always visible on waiting/error cards (no interaction needed)
+    // Stall badge: shown when session has been WORKING beyond threshold
+    function renderStallBadge(session) {
+      if (!session.working_since) return '';
+      const elapsed = Date.now() / 1000 - session.working_since;
+      const STALL_THRESHOLD = 600;   // 10min — nudge phase starts
+      const ALERT_THRESHOLD = 1200;  // 20min — nudge exhausted, manual needed
+      if (elapsed < STALL_THRESHOLD) return '';
+      if (elapsed >= ALERT_THRESHOLD) {
+        const mins = Math.floor(elapsed / 60);
+        return `<div style="margin-top:5px;"><span style="font-size:11px;font-weight:700;background:rgba(239,68,68,0.18);border:1px solid rgba(239,68,68,0.6);color:#ef4444;padding:2px 8px;border-radius:99px;letter-spacing:0.02em;display:inline-block;animation:pulse 1.5s infinite;">🚨 ${mins}분째 무응답 — 수동 확인 필요</span></div>`;
+      }
+      const mins = Math.floor(elapsed / 60);
+      return `<div style="margin-top:5px;"><span style="font-size:11px;font-weight:600;background:rgba(251,191,36,0.15);border:1px solid rgba(251,191,36,0.5);color:#fbbf24;padding:2px 8px;border-radius:99px;letter-spacing:0.02em;display:inline-block;">⚠️ ${mins}분째 작업 중 — stall 의심</span></div>`;
+    }
+
+    // Workflow phase badge: shown on ALL cards when a phase is detected
     function renderWorkflowPhase(session, t) {
-      if (session.state !== 'waiting' && session.state !== 'error') return '';
       const phase = session.workflow_phase;
       if (!phase) return '';
       const badges = {
-        awaiting_approval:   { text: '⏳ 승인 필요', bg: 'rgba(240,165,0,0.15)',    border: 'rgba(240,165,0,0.45)',    color: '#f0a500' },
-        reporting_completion:{ text: '✅ 완료 보고', bg: 'rgba(52,211,153,0.15)',   border: 'rgba(52,211,153,0.45)',   color: '#34d399' },
-        error:               { text: '⚠️ 확인 필요', bg: 'rgba(251,113,133,0.15)',  border: 'rgba(251,113,133,0.45)', color: '#fb7185' },
+        // waiting/error phases
+        awaiting_approval:    { text: '⏳ 승인 필요', bg: 'rgba(240,165,0,0.15)',    border: 'rgba(240,165,0,0.45)',    color: '#f0a500' },
+        reporting_completion: { text: '✅ 완료 보고', bg: 'rgba(52,211,153,0.15)',   border: 'rgba(52,211,153,0.45)',   color: '#34d399' },
+        error:                { text: '⚠️ 확인 필요', bg: 'rgba(251,113,133,0.15)',  border: 'rgba(251,113,133,0.45)', color: '#fb7185' },
+        idle_wait:            { text: '⏸ 대기 중',   bg: 'rgba(148,163,184,0.12)',  border: 'rgba(148,163,184,0.35)', color: '#94a3b8' },
+        // working lifecycle phases
+        exploring:   { text: '🔍 탐색 중',   bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.4)',  color: '#60a5fa' },
+        planning:    { text: '📋 계획 수립', bg: 'rgba(167,139,250,0.12)', border: 'rgba(167,139,250,0.4)', color: '#a78bfa' },
+        plan_review: { text: '👁 계획 검토', bg: 'rgba(251,191,36,0.12)',  border: 'rgba(251,191,36,0.4)',  color: '#fbbf24' },
+        executing:   { text: '⚡ 작업 중',   bg: 'rgba(52,211,153,0.12)',  border: 'rgba(52,211,153,0.4)',  color: '#34d399' },
+        committing:  { text: '📦 커밋 중',   bg: 'rgba(251,146,60,0.12)',  border: 'rgba(251,146,60,0.4)',  color: '#fb923c' },
+        reporting:   { text: '📊 보고서',    bg: 'rgba(52,211,153,0.12)',  border: 'rgba(52,211,153,0.4)',  color: '#34d399' },
       };
       const badge = badges[phase];
       if (!badge) return '';
@@ -761,7 +794,22 @@
         : '';
       const updatedText = fresh
         ? `<span style="color:${t.freshTextColor};font-weight:500;">${fresh.label}</span>`
-        : `<span>Updated: ${formatAge(session.updated_at)}</span>`;
+        : (() => {
+            if (!session.updated_at) return `<span style="color:${t.textMuted};">--</span>`;
+            const secs = Math.floor(Date.now() / 1000 - session.updated_at);
+            const dur = formatDuration(secs);
+            const st = session.state;
+            let color = t.textMuted;
+            if (st === 'working') {
+              color = secs < 1800 ? '#34d399' : secs < 5400 ? '#f97316' : '#ef4444';
+            } else if (st === 'waiting') {
+              color = secs < 600 ? '#fbbf24' : '#f97316';
+            } else if (st === 'stuck_after_agent') {
+              color = '#fb923c';
+            }
+            const stateLabel = { working: '작업중', waiting: '대기', idle: '유휴', stuck_after_agent: '멈춤', context_limit: '컨텍스트', error: '오류' }[st] || st;
+            return `<span style="color:${color};font-weight:500;">${stateLabel} ${dur}</span>`;
+          })();
 
       const pinIcon = isPinned ? '📌' : '📍';
       const pinOpacity = isPinned ? '1' : '0.3';
@@ -787,6 +835,17 @@
       const isCompact = session.state === 'working' && !fresh;
       const cardPadding = isCompact ? '8px 12px 8px 38px' : '12px 12px 10px 38px';
 
+      const stuckBadge = isStuck
+        ? `<div style="margin-top:5px;"><span style="font-size:11px;font-weight:700;background:rgba(251,146,60,0.18);border:1px solid rgba(251,146,60,0.6);color:#fb923c;padding:2px 8px;border-radius:99px;letter-spacing:0.02em;display:inline-block;">⚠️ 에이전트 멈춤 의심</span></div>`
+        : '';
+      const stallBadge = renderStallBadge(session);
+
+      const pc = session.pending_count;
+      const pendingBadge = pc == null ? ''
+        : pc === 0
+          ? `<div style="margin-top:4px;"><span style="font-size:11px;background:rgba(52,211,153,0.10);border:1px solid rgba(52,211,153,0.35);color:#34d399;padding:2px 8px;border-radius:99px;display:inline-block;">✅ 할 일 완료</span></div>`
+          : `<div style="margin-top:4px;"><span style="font-size:11px;font-weight:600;background:rgba(251,191,36,0.12);border:1px solid rgba(251,191,36,0.45);color:#fbbf24;padding:2px 8px;border-radius:99px;display:inline-block;">⏳ 대기 ${pc}개</span></div>`;
+
       return `
         <div class="group relative overflow-hidden ${cfg.border} draggable-card${freshClass}"
              data-session-name="${name}"
@@ -804,9 +863,12 @@
               ${cfg.label}${renderContextGauge(session, t)}${freshBadge}
             </span>
           </div>
+          ${renderWorkflowPhase(session, t)}
+          ${pendingBadge}
           ${isCompact ? '' : renderWorkContext(session, t)}
           ${isCompact ? '' : renderLastPrompt(session, t)}
-          ${isCompact ? '' : renderWorkflowPhase(session, t)}
+          ${stuckBadge}
+          ${stallBadge}
           <div style="font-size:11px;color:${t.textMuted};margin-top:4px;">
             ${updatedText}
           </div>
@@ -868,7 +930,7 @@
       }
       if (pruned) saveQuadrants(quads);
 
-      const order = { working: 0, waiting: 1, context_limit: 2, error: 3, stuck_after_agent: 4, idle: 5, unknown: 6 };
+      const order = { working: 0, stuck_after_agent: 1, waiting: 2, context_limit: 3, error: 4, idle: 5, unknown: 6 };
       sessions.sort((a, b) => {
         const tierDiff = (pinned.has(a.name) ? 0 : 1) - (pinned.has(b.name) ? 0 : 1);
         if (tierDiff !== 0) return tierDiff;
@@ -905,7 +967,7 @@
         for (const qid of ['Q1', 'Q2', 'Q3', 'Q4']) {
           const qcfg = QUAD_CONFIG[qid];
           // e014-T3: stable sort within quadrant by state priority, then recency (newer first)
-          const _qOrd = { working: 0, waiting: 1, error: 2, context_limit: 3, idle: 4, unknown: 5 };
+          const _qOrd = { working: 0, stuck_after_agent: 1, waiting: 2, error: 3, context_limit: 4, idle: 5, unknown: 6 };
           const qRaw = (freshQuads[qid] || []).filter(n => sessionMap[n]);
           const qSessions = qRaw.map((n, i) => ({ s: sessionMap[n], i }));
           qSessions.sort((a, b) => {
@@ -1346,10 +1408,12 @@
     // --- Focus session (desktop) ---
     // Detect VSCode webview: acquireVsCodeApi is available only inside webview
     const _vscodeApi = (typeof acquireVsCodeApi === 'function') ? acquireVsCodeApi() : null;
+
+    // VSCode-only: Projects nav → load in webview panel via openUrl message
     document.getElementById('nav-projects')?.addEventListener('click', function(e) {
       e.preventDefault();
       if (_vscodeApi) {
-        _vscodeApi.postMessage({ type: 'openUrl', url: 'http://127.0.0.1:8080/projects' });
+        _vscodeApi.postMessage({ type: 'openUrl', url: 'http://127.0.0.1:8420/projects' });
       }
     });
 
@@ -1413,6 +1477,7 @@
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/static/sw.js').catch(() => {});
     }
+
   </script>
 </body>
 </html>
