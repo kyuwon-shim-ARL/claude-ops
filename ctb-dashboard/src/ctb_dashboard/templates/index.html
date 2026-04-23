@@ -738,6 +738,22 @@
     }
 
     // Stall badge: shown when session has been WORKING beyond threshold
+    function renderTicketBadge(sessionName) {
+      const entry = _ticketLinks[sessionName];
+      if (!entry) return '';
+      const isStale = _ticketLinksStaleAt > 0 && Date.now() > _ticketLinksStaleAt;
+      const staleStyle = isStale ? 'opacity:0.5;' : '';
+      const needsReview = entry.review_state === 'needs_pi_review';
+      const cursor = needsReview ? 'pointer' : 'default';
+      const onclick = needsReview
+        ? `onclick="window.location.href='/review?card=${encodeURIComponent(entry.ticket_id)}'"` : '';
+      const color = needsReview ? '#fbbf24' : '#60a5fa';
+      const bg = needsReview ? 'rgba(251,191,36,0.12)' : 'rgba(96,165,250,0.12)';
+      const border = needsReview ? 'rgba(251,191,36,0.45)' : 'rgba(96,165,250,0.35)';
+      const icon = needsReview ? '🔍' : '🎫';
+      return `<div style="margin-top:4px;${staleStyle}"><span style="font-size:11px;background:${bg};border:1px solid ${border};color:${color};padding:2px 8px;border-radius:99px;display:inline-block;cursor:${cursor};" ${onclick}>${icon} ${escapeHtml(entry.ticket_id)}</span></div>`;
+    }
+
     function renderStallBadge(session) {
       if (!session.working_since) return '';
       const elapsed = Date.now() / 1000 - session.working_since;
@@ -874,6 +890,7 @@
           ${isCompact ? '' : renderLastPrompt(session, t)}
           ${stuckBadge}
           ${stallBadge}
+          ${renderTicketBadge(name)}
           <div style="font-size:11px;color:${t.textMuted};margin-top:4px;">
             ${updatedText}
           </div>
@@ -891,6 +908,9 @@
     let _dragTimeout = null;
     let _dragConfirmed = false; // e014-T1: click suppression flag
     let lastSSEData = null;
+    let _ticketLinks = {};           // {session_name: {ticket_id, review_state}}
+    let _ticketLinksStaleAt = 0;     // ms timestamp after which badges are stale
+    let _ticketClockOffset = 0;      // ms: serverTime*1000 - receiveTime (for ±30s correction)
 
     // T3: render() with (isDragging || _pressTimer) guard + inline SSE caching
     function render(data) {
@@ -1338,6 +1358,29 @@
         .then(render)
         .catch(() => {});
     }, 30000);
+
+    function pollTicketLinks() {
+      const receiveTime = Date.now();
+      fetch('/api/session-ticket-links')
+        .then(r => {
+          const serverTime = parseInt(r.headers.get('X-Server-Time') || '0', 10);
+          const ttl = parseInt(r.headers.get('X-Badge-TTL') || '30', 10);
+          if (serverTime) {
+            _ticketClockOffset = serverTime * 1000 - receiveTime;
+            // clamp offset to ±30s to avoid wild skew
+            _ticketClockOffset = Math.max(-30000, Math.min(30000, _ticketClockOffset));
+          }
+          _ticketLinksStaleAt = receiveTime + ttl * 1000;
+          return r.json();
+        })
+        .then(data => {
+          _ticketLinks = data.links || {};
+          refreshRender();
+        })
+        .catch(() => {});
+    }
+    pollTicketLinks();
+    setInterval(pollTicketLinks, 30000);
 
     // --- Clipboard helper ---
     function _execCopy(text) {

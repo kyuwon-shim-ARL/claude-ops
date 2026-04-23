@@ -1,5 +1,4 @@
 import asyncio
-import pytest
 from ctb_dashboard.ticket_enrichment import attach_l1, _cache_key, _native_l1
 
 def test_native_l1_github():

@@ -1,5 +1,3 @@
-import json, os, tempfile, threading
-import pytest
 from unittest.mock import patch
 
 def test_load_empty_overlay(tmp_path):

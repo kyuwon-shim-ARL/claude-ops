@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Dict, Any
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -391,6 +391,23 @@ async def get_session_log(name: str, lines: int = 50):
         return {"session": name, "log": result.stdout}
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="tmux timeout")
+
+
+_TICKET_LINKS_PATH = os.path.expanduser("~/.claude-ops/session-ticket-links.json")
+_BADGE_TTL = 30  # seconds
+
+
+@app.get("/api/session-ticket-links")
+async def session_ticket_links(response: Response):
+    """Return session→ticket mapping for badge overlay on session grid."""
+    try:
+        with open(_TICKET_LINKS_PATH) as f:
+            links = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        links = {}
+    response.headers["X-Server-Time"] = str(int(time.time()))
+    response.headers["X-Badge-TTL"] = str(_BADGE_TTL)
+    return {"links": links, "ttl": _BADGE_TTL}
 
 
 @app.get("/api/health")
