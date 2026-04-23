@@ -255,6 +255,23 @@ def _poll_sessions() -> Dict[str, Any]:
 
 # --- PI Review Gate helpers ---
 
+def _atomic_json_write(path: str, data: dict) -> bool:
+    """Write JSON to path atomically via write-then-rename. Returns False on error."""
+    dir_ = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=dir_, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        return False
+
+
 def _verify_review_sig(card: str, focus: str, rv: str, exp: str, sig: str) -> bool:
     msg = f"{card}|{focus}|{rv}|{exp}".encode()
     expected = _hmac_mod.new(_REVIEW_SECRET.encode(), msg, hashlib.sha256).hexdigest()
@@ -270,19 +287,7 @@ def _read_consumed_links(path: str) -> dict:
 
 
 def _write_consumed_links(path: str, data: dict) -> bool:
-    dir_ = os.path.dirname(path) or "."
-    fd, tmp = tempfile.mkstemp(dir=dir_, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp, path)
-        return True
-    except Exception:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        return False
+    return _atomic_json_write(path, data)
 
 
 def _write_overlay_link_access(card: str, rv: str, overlay_path: str) -> bool:
@@ -304,19 +309,7 @@ def _write_overlay_link_access(card: str, rv: str, overlay_path: str) -> bool:
     tickets[card] = ticket
     data["tickets"] = tickets
 
-    dir_ = os.path.dirname(overlay_path) or "."
-    fd, tmp = tempfile.mkstemp(dir=dir_, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp, overlay_path)
-        return True
-    except Exception:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        return False
+    return _atomic_json_write(overlay_path, data)
 
 
 def _get_review_tickets() -> list:
@@ -341,8 +334,7 @@ async def _purge_consumed_loop() -> None:
             consumed_path = os.path.join(_REVIEW_OVERLAY_DIR, "consumed-links.json")
             lock_path = os.path.join(_REVIEW_OVERLAY_DIR, "overlay.lock")
             cutoff = datetime.now(timezone.utc) - timedelta(days=7)
-            lock = _filelock.FileLock(lock_path, timeout=10)
-            with lock:
+            with _filelock.FileLock(lock_path, timeout=_REVIEW_LOCK_TIMEOUT):
                 data = _read_consumed_links(consumed_path)
                 links = data.get("links", {})
                 pruned = {}

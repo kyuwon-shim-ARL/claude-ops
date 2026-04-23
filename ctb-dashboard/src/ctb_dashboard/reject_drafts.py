@@ -94,23 +94,14 @@ async def generate_draft(
     overlay_path: str,
     lock_path: str,
 ) -> None:
-    """
-    Generate Haiku reject draft and store in overlay. Designed to be called via
-    asyncio.create_task() — returns immediately, stores result asynchronously.
-    Uses per-ticket lock with immediate local binding to prevent WeakValueDictionary GC race.
-    Outer flag check (before lock) is atomic in asyncio — no await between check and lock
-    acquisition, so concurrent tasks that pass the outer check are serialised by the lock
-    and caught by the inner double-check.
-    """
-    # Fast path: skip without acquiring lock if draft is already in progress.
-    # In asyncio (cooperative), the check-to-lock-acquire sequence has no await,
-    # so this is effectively atomic for concurrently scheduled tasks.
+    """Generate Haiku reject draft and store in overlay (non-blocking via create_task)."""
+    # Outer flag check (no await before lock acquire) is atomic in asyncio cooperative
+    # scheduling — concurrent tasks that pass are caught by the inner double-check.
     if _draft_pending.get(ticket_id):
         return
     # Immediate local binding prevents GC from collecting the Lock before we acquire it
     lock = _draft_locks.setdefault(ticket_id, asyncio.Lock())
     async with lock:
-        # Double-check inside lock for any callers that raced past the outer check
         if _draft_pending.get(ticket_id):
             return
         _draft_pending[ticket_id] = True

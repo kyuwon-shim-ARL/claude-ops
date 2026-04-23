@@ -10,6 +10,8 @@ import tempfile
 from datetime import datetime, timezone
 from typing import Any
 
+import filelock as _filelock
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_OVERLAY_DIR = os.path.expanduser("~/.claude-ops")
@@ -39,15 +41,6 @@ def _get_overlay_dir() -> str:
 
 def _get_lock_timeout() -> int:
     return int(os.environ.get("CTB_REVIEW_OVERLAY_LOCK_TIMEOUT", str(_LOCK_TIMEOUT_DEFAULT)))
-
-
-def _get_filelock(lock_path: str):
-    try:
-        import filelock  # noqa: PLC0415
-        return filelock.FileLock(lock_path, timeout=_get_lock_timeout())
-    except ImportError:
-        logger.warning("filelock not available; concurrent writes may corrupt overlay")
-        return None
 
 
 def _atomic_write(path: str, data: Any) -> None:
@@ -145,10 +138,7 @@ class ReviewController:
         to_state: str,
         history_entry: dict,
     ) -> None:
-        from contextlib import nullcontext  # noqa: PLC0415
-        lock = _get_filelock(self._lock_path)
-        ctx = lock if lock else nullcontext()
-        with ctx:
+        with _filelock.FileLock(self._lock_path, timeout=_get_lock_timeout()):
             tickets = self._load()
             ticket = tickets.get(ticket_id, {})
             current = ticket.get("review_state", "planned")
@@ -177,11 +167,8 @@ class ReviewController:
         suppress_notification: bool = False,
     ) -> None:
         """Transition to needs_pi_review. Allowed from planned or revising."""
-        from contextlib import nullcontext  # noqa: PLC0415
         notification_status = "suppressed" if suppress_notification else "pending"
-        lock = _get_filelock(self._lock_path)
-        ctx = lock if lock else nullcontext()
-        with ctx:
+        with _filelock.FileLock(self._lock_path, timeout=_get_lock_timeout()):
             tickets = self._load()
             ticket = tickets.get(ticket_id, {})
             current = ticket.get("review_state", "planned")
@@ -208,10 +195,7 @@ class ReviewController:
 
     def approve(self, ticket_id: str, reviewer_id: str) -> None:
         """Transition needs_pi_review → approved → in_progress."""
-        from contextlib import nullcontext  # noqa: PLC0415
-        lock = _get_filelock(self._lock_path)
-        ctx = lock if lock else nullcontext()
-        with ctx:
+        with _filelock.FileLock(self._lock_path, timeout=_get_lock_timeout()):
             tickets = self._load()
             ticket = tickets.get(ticket_id, {})
             current = ticket.get("review_state", "planned")

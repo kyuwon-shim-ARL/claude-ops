@@ -3,13 +3,17 @@ Email dispatch and Telegram escalation for PI review notifications.
 _send_email_cmd() is the subprocess boundary — patch it in tests.
 """
 import asyncio
+import json
 import logging
 import os
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+import filelock as _filelock
 
 logger = logging.getLogger(__name__)
 
@@ -78,16 +82,7 @@ def _update_notification_status(
     ticket_id: str, reviewer_id: str, status: str, overlay_path: str, lock_path: str
 ) -> None:
     """Update the latest review_history entry's notification_status for a reviewer."""
-    from contextlib import nullcontext  # noqa: PLC0415
-    import json, tempfile  # noqa: PLC0415, E401
-
-    try:
-        import filelock  # noqa: PLC0415
-        lock = filelock.FileLock(lock_path, timeout=10)
-    except ImportError:
-        lock = None
-    ctx = lock if lock else nullcontext()
-    with ctx:
+    with _filelock.FileLock(lock_path, timeout=10):
         try:
             with open(overlay_path) as f:
                 data = json.load(f)
@@ -161,7 +156,6 @@ async def dispatch_review_notification(
 
 
 def _load_overlay_tickets(overlay_path: str) -> dict[str, Any]:
-    import json  # noqa: PLC0415
     try:
         with open(overlay_path) as f:
             return json.load(f).get("tickets", {})
