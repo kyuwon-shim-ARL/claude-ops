@@ -136,6 +136,52 @@ class TestReadActiveSkill:
         # mtime fallback should produce a reasonable timestamp
         assert (datetime.now(timezone.utc) - result.updated_at).total_seconds() < 10
 
+    def test_future_updated_at_falls_back_to_mtime(self, tmp_workdir):
+        """Future-dated updated_at (e.g. KST-as-UTC bug) → mtime fallback.
+
+        Regression: PIU-v2 case where cc skill wrote local KST time with
+        Z suffix (9h ahead of actual UTC). This made elapsed go negative
+        and silently disabled stall detection.
+        """
+        future = (datetime.now(timezone.utc) + timedelta(hours=9)).isoformat().replace("+00:00", "Z")
+        data = _make_v2(updated_at=future)
+        _write_skill_json(tmp_workdir, data)
+        result = read_active_skill(str(tmp_workdir))
+        assert result is not None
+        # mtime fallback should produce a near-now timestamp, NOT 9h future.
+        delta_from_now = (datetime.now(timezone.utc) - result.updated_at).total_seconds()
+        assert -5 < delta_from_now < 10, f"expected near-now, got delta={delta_from_now}s"
+
+    def test_future_updated_at_within_tolerance_accepted(self, tmp_workdir):
+        """Small clock skew (< 5min) should be accepted as-is (NTP drift tolerance)."""
+        near_future = (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat().replace("+00:00", "Z")
+        data = _make_v2(updated_at=near_future)
+        _write_skill_json(tmp_workdir, data)
+        result = read_active_skill(str(tmp_workdir))
+        assert result is not None
+        delta = (result.updated_at - datetime.now(timezone.utc)).total_seconds()
+        assert 45 < delta < 75, f"expected ~+60s, got {delta}s (should accept small skew)"
+
+    def test_v1_stage_with_total_extracts_both(self, tmp_workdir):
+        """v1 'Stage 3/5' → stage_num=3, total_stages=5 (no sentinel).
+
+        cc/ca skills emit 'Stage N/M' in the v1 `stage` field. Previously the
+        parser stripped after the first integer and used sentinel 999 for
+        total, which disabled completion detection for these skills.
+        """
+        data = {
+            "skill": "cc",
+            "stage": "Stage 3/5",
+            "stage_detail": "수렴 판단",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _write_skill_json(tmp_workdir, data)
+        result = read_active_skill(str(tmp_workdir))
+        assert result is not None
+        assert result.schema_version == 1
+        assert result.stage_num == 3
+        assert result.total_stages == 5, "total_stages must be parsed, not sentinel 999"
+
 
 # ===== T2: parse_screen_progress =====
 
@@ -164,6 +210,23 @@ class TestParseScreenProgress:
         """복수 매치 시 마지막(최신) 반환."""
         content = "[Stage 3/12] MANIFEST\n...\n[Stage 7/12] Designer Review"
         assert parse_screen_progress(content) == (7, 12)
+
+    def test_stage_with_label_in_bracket(self):
+        """[Stage 7/12 Designer Review] 파싱 → (7, 12).
+
+        Some skills embed the label inside the brackets instead of after.
+        """
+        content = "[Stage 7/12 Designer Review] review pending"
+        assert parse_screen_progress(content) == (7, 12)
+
+    def test_stage_with_em_dash_round(self):
+        """cc/ca convergence loop: [Stage 3/5 — Round 1/2] 파싱 → (3, 5).
+
+        Regression: PIU-v2 case. The em-dash + Round notation was not matched
+        by the old regex that required `]` immediately after N/M.
+        """
+        content = "[Stage 3/5 — Round 1/2] 수렴 판단: H1-H3 반영 확인"
+        assert parse_screen_progress(content) == (3, 5)
 
 
 # ===== T3: detect_stall =====

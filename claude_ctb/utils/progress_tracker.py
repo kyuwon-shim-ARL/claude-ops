@@ -26,8 +26,14 @@ from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# Screen output pattern: [Stage 7/12] or [Stage 7/12] Designer Review: ...
-_STAGE_PATTERN = re.compile(r'\[Stage\s+(\d+)/(\d+)\]')
+# Screen output pattern. Accepts any of:
+#   [Stage 7/12]
+#   [Stage 7/12] Designer Review: ...
+#   [Stage 7/12 Designer Review]
+#   [Stage 3/5 — Round 1/2]          (cc/ca convergence loop format)
+# The N/M must be inside the brackets, but arbitrary label text may follow
+# before the closing bracket.
+_STAGE_PATTERN = re.compile(r'\[Stage\s+(\d+)/(\d+)(?:\s[^\]]*)?\]')
 
 
 @dataclass
@@ -62,21 +68,34 @@ def read_active_skill(working_dir: str) -> Optional[SkillProgress]:
         logger.warning(f"progress_tracker: failed to parse {filepath}: {e}")
         return None
 
-    # v1 best-effort: extract timing + stage for stall detection
+    # v1 best-effort: extract timing + stage for stall detection.
+    # Prefer "Stage N/M" when present (carries total_stages); fall back to
+    # "Stage N" with sentinel 999 when total is unknown. This means cc/ca
+    # skills that write "Stage 3/5" in the v1 `stage` field get real total
+    # tracking even without schema_version upgrade.
     schema_version = data.get('schema_version', 0)
     if schema_version < 2:
         stage_field = data.get('stage', '')
-        m = re.match(r'Stage\s+(\d+)', stage_field)
-        if not m:
-            logger.debug(f"progress_tracker: v1 schema at {filepath}, no parseable stage — skip")
-            return None
-        stage_num = int(m.group(1))
+        m_full = re.match(r'Stage\s+(\d+)\s*/\s*(\d+)', stage_field)
+        if m_full:
+            stage_num = int(m_full.group(1))
+            total_stages = int(m_full.group(2))
+        else:
+            m = re.match(r'Stage\s+(\d+)', stage_field)
+            if not m:
+                logger.debug(f"progress_tracker: v1 schema at {filepath}, no parseable stage — skip")
+                return None
+            stage_num = int(m.group(1))
+            total_stages = 999  # sentinel: unknown total
         updated_at = _parse_updated_at(data.get('updated_at', ''), filepath)
-        logger.debug(f"progress_tracker: v1 best-effort parse at {filepath}: stage={stage_num}")
+        logger.debug(
+            f"progress_tracker: v1 best-effort parse at {filepath}: "
+            f"stage={stage_num}/{total_stages}"
+        )
         return SkillProgress(
             skill=data.get('skill', 'unknown'),
             stage_num=stage_num,
-            total_stages=999,
+            total_stages=total_stages,
             stage_label=data.get('stage_detail', stage_field),
             status='in_progress',
             updated_at=updated_at,
@@ -111,13 +130,28 @@ def read_active_skill(working_dir: str) -> Optional[SkillProgress]:
 
 
 def _parse_updated_at(updated_at_str: str, filepath: str) -> datetime:
-    """Parse ISO datetime string, fallback to file mtime."""
+    """Parse ISO datetime string, fallback to file mtime.
+
+    Rejects timestamps more than 5 minutes in the future — this catches
+    both clock skew and the KST-as-UTC class of skill bugs (local time
+    written with `Z` suffix). The resulting elapsed time (now - updated_at)
+    would be negative, which silently disables stall detection.
+    """
+    now = datetime.now(timezone.utc)
     if updated_at_str:
         try:
             dt = datetime.fromisoformat(updated_at_str.replace('Z', '+00:00'))
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
-            return dt
+            skew = (dt - now).total_seconds()
+            if skew > 300:
+                logger.warning(
+                    f"progress_tracker: updated_at '{updated_at_str}' is "
+                    f"{skew:.0f}s in the future (likely tz bug or clock skew), "
+                    f"using mtime instead"
+                )
+            else:
+                return dt
         except (ValueError, TypeError):
             logger.warning(f"progress_tracker: bad updated_at '{updated_at_str}', using mtime")
 
@@ -126,7 +160,7 @@ def _parse_updated_at(updated_at_str: str, filepath: str) -> datetime:
         mtime = os.path.getmtime(filepath)
         return datetime.fromtimestamp(mtime, tz=timezone.utc)
     except OSError:
-        return datetime.now(timezone.utc)
+        return now
 
 
 def parse_screen_progress(screen_content: str) -> Optional[Tuple[int, int]]:
