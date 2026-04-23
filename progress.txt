@@ -1,0 +1,40 @@
+## e023: Ticket-Driven Nudge Suppression — Implementation Complete
+
+### Files Changed
+- claude_ctb/utils/ticket_registry.py (NEW)
+- claude_ctb/monitoring/multi_monitor.py (MODIFIED)
+- tests/test_stall_detection.py (EXTENDED)
+
+### Implementation Summary
+
+**T1: ticket_registry.py**
+- register/unregister/is_ticket_done API
+- GitHub Issue check via gh CLI (TTL 120s, fallback 600s)
+- OMC state check (active==False or missing = done)
+- threading.Lock + filelock (filelock→Lock order)
+- Atomic write (tmp→rename, same-fs)
+- Stale 24h cleanup on write
+- register_from_critique_lock() for ca/cc auto-registration
+
+**T2: multi_monitor.py**
+- _is_ticket_done_guard() method added (H9: exception→False comment)
+- Guards at stuck-after-agent, stuck-ca, working-stall paths
+- _ticket_done_notified: Dict[str, bool] in __init__ (M13)
+- finally cleanup in monitor_session()
+- Telegram dedup alert on suppression
+
+**T3: register_from_critique_lock()**
+- CLAUDE_SESSION_ID → TMUX env → skip+warning
+- Empty string treated as None
+
+**T4: 25 tests pass**
+- 14 unit tests (TestTicketRegistry)
+- 2 integration tests (TestTicketRegistryIntegration)
+- M12: concurrent write TOCTOU test included
+- All subprocess calls mocked
+
+### Learnings
+- filelock must be acquired BEFORE threading.Lock to prevent deadlock
+- /tmp tmp files must be in same directory as target for os.replace() cross-fs safety
+- gh CLI fallback: serve last-success cache up to 600s on failure
+- _ticket_done_notified is advisory dedup — restart re-notification is acceptable
