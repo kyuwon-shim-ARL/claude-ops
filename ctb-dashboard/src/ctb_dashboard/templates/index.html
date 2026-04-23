@@ -1,0 +1,1480 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude-CTB Dashboard</title>
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="theme-color" content="#0f0d14">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            warm: { 950: '#0f0d14', 900: '#16121f', 800: '#1c1628' }
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    body {
+      font-family: 'Nunito', sans-serif;
+      transition: background-color 0.4s ease, color 0.4s ease;
+    }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+    @keyframes breathe {
+      0%, 100% { transform: scale(1); opacity: 0.55; }
+      50%      { transform: scale(1.35); opacity: 1; }
+    }
+    .breathe-dot { animation: breathe 2.8s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
+
+    @keyframes warm-bloom {
+      0%, 100% {
+        box-shadow: 0 0 16px 4px var(--glow-fresh-lo, rgba(240,165,0,0.15)),
+                    0 0 0 1px var(--glow-fresh-ring-lo, rgba(240,165,0,0.2)),
+                    inset 0 0 20px var(--glow-fresh-inset-lo, rgba(240,165,0,0.03));
+      }
+      50% {
+        box-shadow: 0 0 32px 10px var(--glow-fresh-hi, rgba(240,165,0,0.28)),
+                    0 0 0 1px var(--glow-fresh-ring-hi, rgba(240,165,0,0.4)),
+                    inset 0 0 30px var(--glow-fresh-inset-hi, rgba(240,165,0,0.06));
+      }
+    }
+    .card-fresh {
+      animation: warm-bloom 3.5s ease-in-out infinite;
+      border-color: rgba(240,165,0,0.5) !important;
+    }
+
+    @keyframes soft-pulse {
+      0%, 100% {
+        box-shadow: 0 0 12px 3px var(--glow-work-lo, rgba(52,211,153,0.15)),
+                    0 0 0 1px var(--glow-work-ring-lo, rgba(52,211,153,0.25));
+      }
+      50% {
+        box-shadow: 0 0 28px 8px var(--glow-work-hi, rgba(52,211,153,0.30)),
+                    0 0 0 1px var(--glow-work-ring-hi, rgba(52,211,153,0.50));
+      }
+    }
+    .card-work-sparkle {
+      animation: soft-pulse 2.2s ease-in-out infinite;
+      border-color: rgba(52,211,153,0.6) !important;
+    }
+
+    @keyframes copy-toast-fade {
+      0%   { opacity: 1; transform: translateY(0); }
+      70%  { opacity: 1; transform: translateY(0); }
+      100% { opacity: 0; transform: translateY(-4px); }
+    }
+    .copy-toast {
+      animation: copy-toast-fade 1.5s ease-out forwards;
+      pointer-events: none;
+    }
+
+    @keyframes stuck-pulse {
+      0%, 100% {
+        box-shadow: 0 0 14px 3px rgba(251,146,60,0.18),
+                    0 0 0 1px rgba(251,146,60,0.25);
+      }
+      50% {
+        box-shadow: 0 0 28px 8px rgba(251,146,60,0.38),
+                    0 0 0 1px rgba(251,146,60,0.55);
+      }
+    }
+    .card-stuck {
+      animation: stuck-pulse 2.0s ease-in-out infinite;
+      border-color: rgba(251,146,60,0.55) !important;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .card-fresh, .card-work-sparkle, .card-stuck, .breathe-dot { animation: none; }
+    }
+
+    /* Context indicator (dot + number) */
+
+    /* Last prompt tooltip */
+    .last-prompt {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      cursor: default;
+      position: relative;
+    }
+    .last-prompt:hover .prompt-tooltip {
+      display: block;
+    }
+    .prompt-tooltip {
+      display: none;
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 0;
+      right: 0;
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 11px;
+      line-height: 1.4;
+      white-space: normal;
+      word-break: break-word;
+      z-index: 100;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+      max-height: 120px;
+      overflow-y: auto;
+    }
+
+    .matrix-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    @media (max-width: 640px) {
+      .matrix-grid { grid-template-columns: 1fr; }
+    }
+    .quadrant {
+      border-radius: 16px;
+      padding: 8px;
+      min-height: 80px;
+      transition: background-color 0.3s, box-shadow 0.2s, border-color 0.3s;
+    }
+    .quadrant.drag-over {
+      box-shadow: inset 0 0 0 2px rgba(255,255,255,0.3);
+    }
+    .quadrant-cards {
+      display: grid;
+      gap: 6px;
+      grid-template-columns: 1fr;
+    }
+    @media (min-width: 1024px) {
+      .quadrant-cards { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+    }
+
+    .drag-ghost {
+      position: fixed;
+      pointer-events: none;
+      opacity: 0.85;
+      z-index: 9999;
+      transform: rotate(2deg) scale(1.04);
+      transition: none;
+    }
+    /* T2: touch-action: none for proper long-press DnD */
+    .draggable-card {
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+      touch-action: none;
+      cursor: copy;
+    }
+    .long-press-ring {
+      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      border-radius: inherit;
+      pointer-events: none;
+      border: 2px solid rgba(255,255,255,0);
+      transition: border-color 0.5s ease;
+    }
+    .long-press-ring.active {
+      border-color: rgba(255,255,255,0.4);
+    }
+
+    /* T5: Theme toggle button */
+    .theme-toggle {
+      cursor: pointer;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 9999px;
+      padding: 2px 10px;
+      font-size: 14px;
+      background: rgba(255,255,255,0.07);
+      transition: background-color 0.2s, border-color 0.3s;
+      line-height: 1.6;
+    }
+    .theme-toggle:hover { background: rgba(255,255,255,0.12); }
+  </style>
+  <!-- Alpine.js CSP build (eval-free) — vendored fallback if CDN fails -->
+  <script nonce="{{ csp_nonce }}"
+          src="https://cdn.jsdelivr.net/npm/@alpinejs/csp@3/dist/cdn.min.js"
+          defer
+          onerror="this.onerror=null;this.src='/static/vendor/alpine.csp.min.js'"></script>
+</head>
+<body class="min-h-screen" style="background: radial-gradient(ellipse 80% 50% at 50% 0%, #1a1530 0%, #0f0d14 60%), #0f0d14; color: #e2dff0;">
+
+<nav style="background:#0f0d14;padding:0.5rem 2rem;border-bottom:1px solid #21262d;display:flex;gap:1.5rem;">
+  <a href="/" style="color:#c9d1d9;text-decoration:none;font-family:'Nunito',sans-serif;font-size:13px;">Sessions</a>
+  <a href="/projects" style="color:#c9d1d9;text-decoration:none;font-family:'Nunito',sans-serif;font-size:13px;">Projects</a>
+</nav>
+
+  <header id="app-header" class="px-4 py-3 flex items-center justify-between" style="background: linear-gradient(180deg, rgba(22,18,31,0.95) 0%, rgba(15,13,20,0.8) 100%); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255,255,255,0.06); transition: background 0.4s ease, border-color 0.4s ease;">
+    <div class="flex items-center gap-3">
+      <h1 id="app-title" class="text-lg font-semibold tracking-tight">Claude-CTB Dashboard</h1>
+      <span id="badge-count" class="text-xs px-2.5 py-0.5 rounded-full" style="background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.1); transition: background 0.3s, border-color 0.3s, color 0.3s;">0 sessions</span>
+      <button id="btn-copy-names" class="hidden hover:bg-white/10 text-xs px-2.5 py-0.5 rounded-full transition-colors cursor-pointer" style="background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.1);" title="Copy session names to clipboard">Copy Names</button>
+    </div>
+    <div class="flex items-center gap-2 text-xs" style="color: #8b85a0;">
+      <button id="btn-theme" class="theme-toggle" title="Toggle light/dark theme" aria-label="Toggle light/dark theme">🌙</button>
+      <span id="conn-status" class="flex items-center gap-1">
+        <span id="conn-dot" class="inline-block w-2 h-2 rounded-full bg-gray-600"></span>
+        Connecting...
+      </span>
+      <span id="last-update" class="hidden">Updated <time></time></span>
+      <button id="btn-notif" class="hover:bg-white/10 px-2 py-0.5 rounded-full transition-colors cursor-pointer" style="background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.1);" title="Toggle completion alerts">OFF</button>
+    </div>
+  </header>
+
+  <main id="grid" class="p-5 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <div class="col-span-full text-center py-20 text-sm" id="empty-state" style="color: #8b85a0;">
+      No sessions detected. Start a Claude session to see it here.
+    </div>
+  </main>
+
+  <script>
+    // =============================================
+    // T4/T5: Theme system
+    // =============================================
+    const THEME_KEY = 'ctb_theme';
+
+    function isDark() {
+      const stored = localStorage.getItem(THEME_KEY);
+      if (stored) return stored === 'dark';
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+
+    function getThemeColors() {
+      if (isDark()) {
+        return {
+          bodyBg: 'radial-gradient(ellipse 80% 50% at 50% 0%, #1a1530 0%, #0f0d14 60%), #0f0d14',
+          textPrimary: '#e2dff0',
+          textSecondary: '#8b85a0',
+          textMuted: '#5a5470',
+          cardBg: 'linear-gradient(145deg,rgba(255,255,255,0.035) 0%,transparent 60%),#1c1628',
+          cardBorder: 'rgba(255,255,255,0.06)',
+          cardShadowBase: '0 4px 24px rgba(0,0,0,0.35),0 1px 0 rgba(255,255,255,0.04) inset',
+          headerBg: 'linear-gradient(180deg, rgba(22,18,31,0.95) 0%, rgba(15,13,20,0.8) 100%)',
+          headerBorder: 'rgba(255,255,255,0.06)',
+          badgeBg: 'rgba(255,255,255,0.07)',
+          badgeBorder: 'rgba(255,255,255,0.1)',
+          pinBtnBg: 'rgba(255,255,255,0.05)',
+          pinBtnBorder: 'rgba(255,255,255,0.08)',
+          sectionLabelPinned: '#e8c96d',
+          sectionLabelOthers: '#5a5470',
+          emptyBorder: 'rgba(255,255,255,0.1)',
+          emptyText: 'rgba(255,255,255,0.15)',
+          quadLabelColor: 'rgba(255,255,255,0.45)',
+          metaThemeColor: '#0f0d14',
+          freshBarGrad: 'linear-gradient(90deg,#f0a500,#fbbf24)',
+          freshBadgeBg: 'linear-gradient(135deg,#f0a500,#fbbf24)',
+          freshBadgeText: '#0f0d14',
+          freshTextColor: '#f0a500',
+          dotGlowColor: '0 0 6px currentColor',
+          ringActive: 'rgba(255,255,255,0.4)',
+          connDotOk: 'bg-emerald-400',
+          connDotFail: 'bg-red-400',
+          wtStripe: 'rgba(56,189,248,0.65)',
+          wtBranch: 'rgba(125,211,252,0.80)',
+          wtBg: 'rgba(56,189,248,0.03)',
+        };
+      }
+      return {
+        bodyBg: 'radial-gradient(ellipse 80% 50% at 50% 0%, #fef3e8 0%, #fdf8f2 60%), #fdf8f2',
+        textPrimary: '#2d2318',
+        textSecondary: '#7a6450',
+        textMuted: '#b09880',
+        cardBg: 'linear-gradient(145deg,rgba(255,255,255,0.6) 0%,transparent 60%),#fffcf7',
+        cardBorder: 'rgba(180,150,110,0.2)',
+        cardShadowBase: '0 2px 12px rgba(160,120,80,0.10),0 1px 3px rgba(160,120,80,0.06)',
+        headerBg: 'linear-gradient(180deg, rgba(253,248,242,0.95) 0%, rgba(253,248,242,0.85) 100%)',
+        headerBorder: 'rgba(200,170,130,0.18)',
+        badgeBg: 'rgba(0,0,0,0.04)',
+        badgeBorder: 'rgba(180,150,110,0.2)',
+        pinBtnBg: 'rgba(0,0,0,0.04)',
+        pinBtnBorder: 'rgba(180,150,110,0.2)',
+        sectionLabelPinned: '#c08a20',
+        sectionLabelOthers: '#b09880',
+        emptyBorder: 'rgba(180,150,110,0.2)',
+        emptyText: 'rgba(100,80,60,0.3)',
+        quadLabelColor: 'rgba(45,35,24,0.5)',
+        metaThemeColor: '#fdf8f2',
+        freshBarGrad: 'linear-gradient(90deg,#e08c00,#f0a500)',
+        freshBadgeBg: 'linear-gradient(135deg,#e08c00,#f0a500)',
+        freshBadgeText: '#fffcf7',
+        freshTextColor: '#c08a20',
+        dotGlowColor: '0 0 4px currentColor',
+        ringActive: 'rgba(100,80,60,0.35)',
+        connDotOk: 'bg-emerald-500',
+        connDotFail: 'bg-red-500',
+        wtStripe: 'rgba(14,165,233,0.55)',
+        wtBranch: 'rgba(2,132,199,0.85)',
+        wtBg: 'rgba(14,165,233,0.03)',
+      };
+    }
+
+    function getStateConfig() {
+      if (isDark()) {
+        return {
+          working:           { label: 'Working',       dot: 'bg-emerald-400 breathe-dot', border: 'border-emerald-500/30', glow: '0 0 20px rgba(52,211,153,0.15)' },
+          waiting:           { label: 'Waiting Input', dot: 'bg-amber-400 breathe-dot',   border: 'border-amber-500/30',   glow: '0 0 20px rgba(240,165,0,0.18)' },
+          stuck_after_agent: { label: '응답 없음',      dot: 'bg-orange-400 breathe-dot',  border: 'border-orange-500/40',  glow: '0 0 22px rgba(251,146,60,0.25)' },
+          idle:              { label: 'Idle',          dot: 'bg-gray-500',                border: 'border-gray-700/50',    glow: '0 0 12px rgba(139,133,160,0.08)' },
+          error:             { label: 'Error',         dot: 'bg-red-400 breathe-dot',     border: 'border-red-500/30',     glow: '0 0 20px rgba(251,113,133,0.15)' },
+          context_limit:     { label: 'Context Limit', dot: 'bg-rose-400 breathe-dot',    border: 'border-rose-500/30',    glow: '0 0 20px rgba(251,113,133,0.15)' },
+          unknown:           { label: 'Unknown',       dot: 'bg-slate-500',               border: 'border-slate-700/50',   glow: '0 0 12px rgba(139,133,160,0.05)' },
+        };
+      }
+      // e014-T2: stronger light mode glow + borderColor emphasis (WCAG 3:1 vs #fdf8f2)
+      return {
+        working:           { label: 'Working',       dot: 'bg-emerald-500 breathe-dot', border: 'border-emerald-400/25', glow: '0 0 20px rgba(34,185,138,0.20)',  borderColor: '#16a085' },
+        waiting:           { label: 'Waiting Input', dot: 'bg-amber-500 breathe-dot',   border: 'border-amber-400/25',   glow: '0 0 20px rgba(192,138,32,0.22)',  borderColor: '#c08a20' },
+        stuck_after_agent: { label: '응답 없음',      dot: 'bg-orange-500 breathe-dot',  border: 'border-orange-400/30',  glow: '0 0 22px rgba(220,110,20,0.28)',  borderColor: '#d06010' },
+        idle:              { label: 'Idle',          dot: 'bg-stone-400',               border: 'border-stone-300/30',   glow: 'none',                            borderColor: null },
+        error:             { label: 'Error',         dot: 'bg-red-500 breathe-dot',     border: 'border-red-400/20',     glow: '0 0 20px rgba(192,50,43,0.18)',   borderColor: '#c0392b' },
+        context_limit:     { label: 'Context Limit', dot: 'bg-rose-500 breathe-dot',    border: 'border-rose-400/20',    glow: '0 0 20px rgba(192,50,43,0.18)',   borderColor: '#c0392b' },
+        unknown:           { label: 'Unknown',       dot: 'bg-stone-400',               border: 'border-stone-300/20',   glow: 'none',                            borderColor: null },
+      };
+    }
+
+    function getQuadConfig() {
+      if (isDark()) {
+        return {
+          Q1: { tint: 'rgba(251,113,133,0.06)', border: 'rgba(251,113,133,0.15)' },
+          Q2: { tint: 'rgba(240,165,0,0.06)',   border: 'rgba(240,165,0,0.15)' },
+          Q3: { tint: 'rgba(96,165,250,0.06)',  border: 'rgba(96,165,250,0.15)' },
+          Q4: { tint: 'rgba(139,133,160,0.06)', border: 'rgba(139,133,160,0.15)' },
+        };
+      }
+      return {
+        Q1: { tint: 'rgba(220,100,90,0.07)',  border: 'rgba(220,100,90,0.18)' },
+        Q2: { tint: 'rgba(220,160,0,0.07)',    border: 'rgba(220,160,0,0.18)' },
+        Q3: { tint: 'rgba(80,150,220,0.06)',   border: 'rgba(80,150,220,0.14)' },
+        Q4: { tint: 'rgba(170,150,130,0.07)',  border: 'rgba(170,150,130,0.16)' },
+      };
+    }
+
+    // T5: Apply theme to document
+    function applyTheme() {
+      const t = getThemeColors();
+      const dark = isDark();
+
+      document.body.style.background = t.bodyBg;
+      document.body.style.color = t.textPrimary;
+
+      const header = document.getElementById('app-header');
+      header.style.background = t.headerBg;
+      header.style.borderBottom = '1px solid ' + t.headerBorder;
+
+      const badge = document.getElementById('badge-count');
+      badge.style.background = t.badgeBg;
+      badge.style.borderColor = t.badgeBorder;
+      badge.style.color = t.textSecondary;
+
+      const btnTheme = document.getElementById('btn-theme');
+      btnTheme.textContent = dark ? '🌙' : '☀️';
+      btnTheme.style.background = t.badgeBg;
+      btnTheme.style.borderColor = t.badgeBorder;
+
+      document.querySelector('meta[name="theme-color"]').content = t.metaThemeColor;
+
+      // Update CSS custom properties for animations
+      const root = document.documentElement;
+      if (dark) {
+        root.style.setProperty('--glow-fresh-lo', 'rgba(240,165,0,0.15)');
+        root.style.setProperty('--glow-fresh-hi', 'rgba(240,165,0,0.28)');
+        root.style.setProperty('--glow-fresh-ring-lo', 'rgba(240,165,0,0.2)');
+        root.style.setProperty('--glow-fresh-ring-hi', 'rgba(240,165,0,0.4)');
+        root.style.setProperty('--glow-fresh-inset-lo', 'rgba(240,165,0,0.03)');
+        root.style.setProperty('--glow-fresh-inset-hi', 'rgba(240,165,0,0.06)');
+        root.style.setProperty('--glow-work-lo', 'rgba(52,211,153,0.15)');
+        root.style.setProperty('--glow-work-hi', 'rgba(52,211,153,0.30)');
+        root.style.setProperty('--glow-work-ring-lo', 'rgba(52,211,153,0.25)');
+        root.style.setProperty('--glow-work-ring-hi', 'rgba(52,211,153,0.50)');
+      } else {
+        // e014-T2: stronger light mode glow values for visibility
+        root.style.setProperty('--glow-fresh-lo', 'rgba(192,138,32,0.30)');
+        root.style.setProperty('--glow-fresh-hi', 'rgba(192,138,32,0.50)');
+        root.style.setProperty('--glow-fresh-ring-lo', 'rgba(192,138,32,0.35)');
+        root.style.setProperty('--glow-fresh-ring-hi', 'rgba(192,138,32,0.55)');
+        root.style.setProperty('--glow-fresh-inset-lo', 'rgba(192,138,32,0.06)');
+        root.style.setProperty('--glow-fresh-inset-hi', 'rgba(192,138,32,0.12)');
+        root.style.setProperty('--glow-work-lo', 'rgba(34,185,138,0.25)');
+        root.style.setProperty('--glow-work-hi', 'rgba(34,185,138,0.45)');
+        root.style.setProperty('--glow-work-ring-lo', 'rgba(34,185,138,0.30)');
+        root.style.setProperty('--glow-work-ring-hi', 'rgba(34,185,138,0.55)');
+      }
+
+      // Re-render if we have data
+      if (lastSSEData) render(lastSSEData);
+    }
+
+    // T5: Toggle handler
+    document.getElementById('btn-theme').addEventListener('click', () => {
+      const newTheme = isDark() ? 'light' : 'dark';
+      localStorage.setItem(THEME_KEY, newTheme);
+      applyTheme();
+    });
+
+    // =============================================
+    // LocalStorage — Quadrant-based pin system
+    // =============================================
+    const PIN_KEY = 'ctb_pinned_sessions';
+    const QUAD_KEY = 'ctb_quadrants';
+    const PIN_VER_KEY = 'ctb_pin_version';
+    const QUAD_LABELS = {
+      Q1: '긴급+중요', Q2: '중요', Q3: '긴급', Q4: '일반'
+    };
+
+    function migrateIfNeeded() {
+      try {
+        if (localStorage.getItem(PIN_VER_KEY) === '2') return;
+        const old = JSON.parse(localStorage.getItem(PIN_KEY) || '[]');
+        const quads = { Q1: [], Q2: Array.isArray(old) ? old : [], Q3: [], Q4: [] };
+        localStorage.setItem(QUAD_KEY, JSON.stringify(quads));
+        localStorage.setItem(PIN_VER_KEY, '2');
+      } catch {
+        // Try to rescue old pins before resetting
+        try {
+          const rescue = JSON.parse(localStorage.getItem(PIN_KEY) || '[]');
+          if (Array.isArray(rescue) && rescue.length > 0) {
+            localStorage.setItem(QUAD_KEY, JSON.stringify({ Q1: [], Q2: rescue, Q3: [], Q4: [] }));
+          } else {
+            localStorage.setItem(QUAD_KEY, JSON.stringify({ Q1: [], Q2: [], Q3: [], Q4: [] }));
+          }
+        } catch {
+          localStorage.setItem(QUAD_KEY, JSON.stringify({ Q1: [], Q2: [], Q3: [], Q4: [] }));
+        }
+        localStorage.setItem(PIN_VER_KEY, '2');
+      }
+    }
+    migrateIfNeeded();
+
+    function getQuadrants() {
+      try {
+        const q = JSON.parse(localStorage.getItem(QUAD_KEY));
+        if (q && q.Q1 && q.Q2 && q.Q3 && q.Q4) return q;
+      } catch {}
+      return { Q1: [], Q2: [], Q3: [], Q4: [] };
+    }
+
+    function saveQuadrants(q) {
+      try { localStorage.setItem(QUAD_KEY, JSON.stringify(q)); } catch {}
+    }
+
+    function getPinned() {
+      const q = getQuadrants();
+      return new Set([...q.Q1, ...q.Q2, ...q.Q3, ...q.Q4]);
+    }
+
+    function getSessionQuadrant(name) {
+      const q = getQuadrants();
+      for (const [qid, names] of Object.entries(q)) {
+        if (names.includes(name)) return qid;
+      }
+      return null;
+    }
+
+    function togglePin(name) {
+      const q = getQuadrants();
+      for (const qid of Object.keys(q)) {
+        const idx = q[qid].indexOf(name);
+        if (idx !== -1) { q[qid].splice(idx, 1); saveQuadrants(q); return; }
+      }
+      q.Q2.push(name);
+      saveQuadrants(q);
+    }
+
+    function moveToQuadrant(name, targetQ) {
+      const q = getQuadrants();
+      for (const qid of Object.keys(q)) {
+        const idx = q[qid].indexOf(name);
+        if (idx !== -1) q[qid].splice(idx, 1);
+      }
+      if (!q[targetQ]) q[targetQ] = [];
+      q[targetQ].push(name);
+      saveQuadrants(q);
+    }
+
+    // --- Notification system ---
+    const NOTIF_KEY = 'ctb_notif_enabled';
+    const NOTIF_COOLDOWN_KEY = 'ctb_notif_cooldown';
+    const NOTIF_COOLDOWN = 300;
+    function getNotifCooldowns() {
+      try { return JSON.parse(localStorage.getItem(NOTIF_COOLDOWN_KEY) || '{}'); } catch { return {}; }
+    }
+    function saveNotifCooldowns(m) {
+      try { localStorage.setItem(NOTIF_COOLDOWN_KEY, JSON.stringify(m)); } catch {}
+    }
+    let notifEnabled = localStorage.getItem(NOTIF_KEY) === 'true';
+    let audioCtx = null;
+
+    const btnNotif = document.getElementById('btn-notif');
+    function updateNotifBtn() {
+      btnNotif.textContent = notifEnabled ? 'ON' : 'OFF';
+      btnNotif.title = notifEnabled ? 'Alerts ON (click to disable)' : 'Alerts OFF (click to enable)';
+    }
+    updateNotifBtn();
+
+    btnNotif.addEventListener('click', async () => {
+      if (!notifEnabled) {
+        if ('Notification' in window && Notification.permission === 'default') {
+          await Notification.requestPermission();
+        }
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        notifEnabled = true;
+      } else {
+        notifEnabled = false;
+      }
+      localStorage.setItem(NOTIF_KEY, notifEnabled);
+      updateNotifBtn();
+    });
+
+    function playBeep() {
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.frequency.value = 880;
+        gain.gain.value = 0.3;
+        osc.start();
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        osc.stop(audioCtx.currentTime + 0.3);
+      } catch (_) {}
+    }
+
+    function notifyCompletion(sessionName) {
+      const display = shortName(sessionName);
+      playBeep();
+      if ('Notification' in window && Notification.permission === 'granted') {
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+          navigator.serviceWorker.ready.then(reg => {
+            reg.showNotification('Claude task complete', {
+              body: `${display} session completed`,
+              icon: '/static/icon-192.png',
+              tag: `ctb-done-${sessionName}-${Date.now()}`,
+              vibrate: [200, 100, 200],
+            });
+          });
+        } else {
+          new Notification('Claude task complete', {
+            body: `${display} session completed`,
+            icon: '/static/icon-192.png',
+            tag: `ctb-done-${sessionName}-${Date.now()}`,
+          });
+        }
+      }
+    }
+
+    function checkFreshPinned(sessions) {
+      if (!notifEnabled) return;
+      const pinned = getPinned();
+      const cooldowns = getNotifCooldowns();
+      const now = Date.now() / 1000;
+      let changed = false;
+      for (const s of sessions) {
+        if (!pinned.has(s.name)) continue;
+        const fresh = getFreshInfo(s);
+        if (!fresh) continue;
+        const lastNotif = cooldowns[s.name] || 0;
+        if (now - lastNotif < NOTIF_COOLDOWN) continue;
+        cooldowns[s.name] = now;
+        changed = true;
+        notifyCompletion(s.name);
+      }
+      if (changed) saveNotifCooldowns(cooldowns);
+    }
+
+    // --- DOM refs ---
+    const grid = document.getElementById('grid');
+    const emptyState = document.getElementById('empty-state');
+    const badgeCount = document.getElementById('badge-count');
+    const btnCopyNames = document.getElementById('btn-copy-names');
+    const connDot = document.getElementById('conn-dot');
+    const connStatus = document.getElementById('conn-status');
+    const lastUpdateEl = document.getElementById('last-update');
+
+    let sortedSessionNames = [];
+    const _prevStates = {};
+    const _sparkleUntil = {};
+
+    function formatAge(ts) {
+      if (!ts || ts === 0) return '--';
+      const diff = Math.floor(Date.now() / 1000 - ts);
+      if (diff < 0) return 'just now';
+      if (diff < 60) return `${diff}s ago`;
+      if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+      if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+      return `${Math.floor(diff / 86400)}d ago`;
+    }
+
+    function formatDuration(secs) {
+      if (!secs || secs < 0) return '--';
+      if (secs < 60) return `${Math.floor(secs)}s`;
+      if (secs < 3600) return `${Math.floor(secs / 60)}m`;
+      const h = Math.floor(secs / 3600);
+      const m = Math.floor((secs % 3600) / 60);
+      return m > 0 ? `${h}h ${m}m` : `${h}h`;
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function shortName(name) {
+      return name.replace(/^claude[_-]/, '');
+    }
+
+    function parseSessionName(name) {
+      const stripped = name.replace(/^claude[_-]/, '');
+      const wtIdx = stripped.indexOf('_wt_');
+      if (wtIdx === -1) return { display: stripped, isWorktree: false, parent: null, branch: null };
+      return {
+        display: stripped.slice(0, wtIdx),
+        isWorktree: true,
+        parent: stripped.slice(0, wtIdx),
+        branch: stripped.slice(wtIdx + 4),
+      };
+    }
+
+    const FRESH_TTL = 300;
+    const STALE_FLOOR = 0.4;
+    const STALE_DURATION = 3600;
+    const STALE_START = 300;
+
+    function getStaleOpacity(session, fresh) {
+      if (fresh) return 1;
+      if (session.state !== 'idle') return 1;
+      if (!session.updated_at) return 1;
+      const age = Date.now() / 1000 - session.updated_at;
+      if (age <= STALE_START) return 1;
+      if (age >= STALE_DURATION) return STALE_FLOOR;
+      return 1 - (1 - STALE_FLOOR) * ((age - STALE_START) / (STALE_DURATION - STALE_START));
+    }
+
+    function getFreshInfo(session) {
+      if (!session.completed_at) return null;
+      if (session.state !== 'idle' && session.state !== 'waiting') return null;
+      const age = Date.now() / 1000 - session.completed_at;
+      if (age < 0 || age >= FRESH_TTL) return null;
+      const remaining = FRESH_TTL - age;
+      const pct = (remaining / FRESH_TTL) * 100;
+      const mins = Math.floor(age / 60);
+      const secs = Math.floor(age % 60);
+      const label = mins > 0 ? `Done ${mins}m ${secs}s ago` : `Done ${secs}s ago`;
+      return { pct, label };
+    }
+
+    // Context indicator: small dot + number (no progress bar)
+    function renderContextGauge(session, t) {
+      const pct = session.context_percent;
+      if (pct == null) return `<span style="display:inline-flex;align-items:center;gap:3px;margin-left:4px;visibility:hidden;" aria-hidden="true"><span style="opacity:0.35;font-size:10px;">|</span><span style="width:5px;height:5px;display:inline-block;"></span><span class="font-mono" style="font-size:10px;">ctx 00%</span></span>`;
+
+      let color;
+      if (pct >= 80) {
+        color = '#ef4444';
+      } else if (pct >= 60) {
+        color = '#f97316';
+      } else if (pct >= 40) {
+        color = '#fbbf24';
+      } else {
+        color = '#34d399';
+      }
+
+      const critical = pct >= 80
+        ? `<span style="font-size:9px;color:${color};margin-left:2px;">!</span>`
+        : '';
+
+      return `<span style="display:inline-flex;align-items:center;gap:3px;margin-left:4px;">
+        <span style="opacity:0.35;font-size:10px;">|</span>
+        <span style="width:5px;height:5px;border-radius:50%;background:${color};flex-shrink:0;display:inline-block;"></span>
+        <span class="font-mono" style="font-size:10px;color:${color};font-weight:500;">ctx ${pct}%</span>${critical}
+      </span>`;
+    }
+
+    // Work context: what the session is currently doing (from OMC state/notepad/MANIFEST)
+    function renderWorkContext(session, t) {
+      if (!session.work_context) return `<div style="font-size:13px;color:${t.textMuted};margin-top:3px;font-style:italic;opacity:0.5;">목표 미설정</div>`;
+
+      const text = escapeHtml(session.work_context);
+      // Extract mode tag like [autopilot] or [e012] for accent coloring
+      const tagMatch = session.work_context.match(/^\[([^\]]+)\]/);
+      const tag = tagMatch ? tagMatch[1] : null;
+      const body = tag ? text.replace(`[${escapeHtml(tag)}]`, '').trim() : text;
+
+      const tagColors = {
+        autopilot: '#a78bfa', ralph: '#f472b6', team: '#60a5fa',
+        ultrawork: '#34d399', pipeline: '#fbbf24',
+        ca: '#f97316', cc: '#fb923c', ralplan: '#c084fc', 'office-hours': '#38bdf8',
+      };
+      const tagColor = (tag && tagColors[tag.toLowerCase()]) || (isDark() ? '#94a3b8' : '#64748b');
+
+      const tagHtml = tag
+        ? `<span style="color:${tagColor};font-weight:700;margin-right:3px;font-size:11px;letter-spacing:0.03em;text-transform:uppercase;">${escapeHtml(tag)}</span>`
+        : '';
+
+      return `
+        <div style="font-size:13px;color:${t.textMuted};margin-top:3px;display:flex;align-items:baseline;gap:2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;" title="${text}">
+          ${tagHtml}<span style="opacity:0.8;overflow:hidden;text-overflow:ellipsis;">${body || ''}</span>
+        </div>`;
+    }
+
+    // Last prompt: truncated with hover tooltip
+    function renderLastPrompt(session, t) {
+      if (!session.last_prompt) return `<div style="font-size:12px;color:${t.textMuted};margin-top:3px;font-style:italic;opacity:0.5;"><span style="opacity:0.6;">&#10095;</span> 프롬프트 대기 중</div>`;
+
+      const text = escapeHtml(session.last_prompt);
+      const tooltipBg = isDark() ? '#2a2440' : '#fffcf7';
+      const tooltipBorder = isDark() ? 'rgba(255,255,255,0.1)' : 'rgba(180,150,110,0.2)';
+
+      return `
+        <div class="last-prompt" style="font-size:12px;color:${t.textMuted};margin-top:3px;max-width:100%;" title="">
+          <span style="opacity:0.6;">&#10095;</span> ${text}
+          <div class="prompt-tooltip" style="background:${tooltipBg};border:1px solid ${tooltipBorder};color:${t.textPrimary};">
+            <span style="opacity:0.5;font-size:9px;display:block;margin-bottom:3px;">Last prompt</span>
+            ${text}
+          </div>
+        </div>`;
+    }
+
+    // Stall badge: shown when session has been WORKING beyond threshold
+    function renderStallBadge(session) {
+      if (!session.working_since) return '';
+      const elapsed = Date.now() / 1000 - session.working_since;
+      const STALL_THRESHOLD = 600;   // 10min — nudge phase starts
+      const ALERT_THRESHOLD = 1200;  // 20min — nudge exhausted, manual needed
+      if (elapsed < STALL_THRESHOLD) return '';
+      if (elapsed >= ALERT_THRESHOLD) {
+        const mins = Math.floor(elapsed / 60);
+        return `<div style="margin-top:5px;"><span style="font-size:11px;font-weight:700;background:rgba(239,68,68,0.18);border:1px solid rgba(239,68,68,0.6);color:#ef4444;padding:2px 8px;border-radius:99px;letter-spacing:0.02em;display:inline-block;animation:pulse 1.5s infinite;">🚨 ${mins}분째 무응답 — 수동 확인 필요</span></div>`;
+      }
+      const mins = Math.floor(elapsed / 60);
+      return `<div style="margin-top:5px;"><span style="font-size:11px;font-weight:600;background:rgba(251,191,36,0.15);border:1px solid rgba(251,191,36,0.5);color:#fbbf24;padding:2px 8px;border-radius:99px;letter-spacing:0.02em;display:inline-block;">⚠️ ${mins}분째 작업 중 — stall 의심</span></div>`;
+    }
+
+    // Workflow phase badge: shown on ALL cards when a phase is detected
+    function renderWorkflowPhase(session, t) {
+      const phase = session.workflow_phase;
+      if (!phase) return '';
+      const badges = {
+        // waiting/error phases
+        awaiting_approval:    { text: '⏳ 승인 필요', bg: 'rgba(240,165,0,0.15)',    border: 'rgba(240,165,0,0.45)',    color: '#f0a500' },
+        reporting_completion: { text: '✅ 완료 보고', bg: 'rgba(52,211,153,0.15)',   border: 'rgba(52,211,153,0.45)',   color: '#34d399' },
+        error:                { text: '⚠️ 확인 필요', bg: 'rgba(251,113,133,0.15)',  border: 'rgba(251,113,133,0.45)', color: '#fb7185' },
+        idle_wait:            { text: '⏸ 대기 중',   bg: 'rgba(148,163,184,0.12)',  border: 'rgba(148,163,184,0.35)', color: '#94a3b8' },
+        // working lifecycle phases
+        exploring:   { text: '🔍 탐색 중',   bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.4)',  color: '#60a5fa' },
+        planning:    { text: '📋 계획 수립', bg: 'rgba(167,139,250,0.12)', border: 'rgba(167,139,250,0.4)', color: '#a78bfa' },
+        plan_review: { text: '👁 계획 검토', bg: 'rgba(251,191,36,0.12)',  border: 'rgba(251,191,36,0.4)',  color: '#fbbf24' },
+        executing:   { text: '⚡ 작업 중',   bg: 'rgba(52,211,153,0.12)',  border: 'rgba(52,211,153,0.4)',  color: '#34d399' },
+        committing:  { text: '📦 커밋 중',   bg: 'rgba(251,146,60,0.12)',  border: 'rgba(251,146,60,0.4)',  color: '#fb923c' },
+        reporting:   { text: '📊 보고서',    bg: 'rgba(52,211,153,0.12)',  border: 'rgba(52,211,153,0.4)',  color: '#34d399' },
+      };
+      const badge = badges[phase];
+      if (!badge) return '';
+      return `<div style="margin-top:5px;"><span style="font-size:11px;font-weight:600;background:${badge.bg};border:1px solid ${badge.border};color:${badge.color};padding:2px 8px;border-radius:99px;letter-spacing:0.02em;display:inline-block;">${badge.text}</span></div>`;
+    }
+
+    // T4: Theme-aware card rendering
+    function renderCard(session, isPinned) {
+      const STATE_CONFIG = getStateConfig();
+      const t = getThemeColors();
+      const cfg = STATE_CONFIG[session.state] || STATE_CONFIG.unknown;
+      const name = escapeHtml(session.name);
+      const parsed = parseSessionName(session.name);
+      const display = escapeHtml(parsed.display);
+      const fresh = getFreshInfo(session);
+      const opacity = getStaleOpacity(session, fresh);
+
+      const sparkle = _sparkleUntil[session.name] && Date.now() < _sparkleUntil[session.name];
+      const isStuck = session.state === 'stuck_after_agent';
+      const freshClass = fresh ? ' card-fresh' : isStuck ? ' card-stuck' : sparkle ? ' card-work-sparkle' : '';
+      const staleOpacity = opacity < 1 ? `opacity:${opacity.toFixed(2)};` : '';
+
+      const freshBar = fresh
+        ? `<div style="position:absolute;top:0;left:50%;transform:translateX(-50%);height:3px;width:calc(${fresh.pct.toFixed(1)}% - 24px);border-radius:99px;background:${t.freshBarGrad};box-shadow:0 0 8px rgba(240,165,0,0.5);transition:width 1s ease;"></div>`
+        : '';
+      const freshBadge = fresh
+        ? `<span style="font-size:10px;font-weight:700;background:${t.freshBadgeBg};color:${t.freshBadgeText};padding:1px 8px;border-radius:99px;letter-spacing:0.05em;margin-left:6px;white-space:nowrap;" role="status">NEW</span>`
+        : '';
+      const updatedText = fresh
+        ? `<span style="color:${t.freshTextColor};font-weight:500;">${fresh.label}</span>`
+        : (() => {
+            if (!session.updated_at) return `<span style="color:${t.textMuted};">--</span>`;
+            const secs = Math.floor(Date.now() / 1000 - session.updated_at);
+            const dur = formatDuration(secs);
+            const st = session.state;
+            let color = t.textMuted;
+            if (st === 'working') {
+              color = secs < 1800 ? '#34d399' : secs < 5400 ? '#f97316' : '#ef4444';
+            } else if (st === 'waiting') {
+              color = secs < 600 ? '#fbbf24' : '#f97316';
+            } else if (st === 'stuck_after_agent') {
+              color = '#fb923c';
+            }
+            const stateLabel = { working: '작업중', waiting: '대기', idle: '유휴', stuck_after_agent: '멈춤', context_limit: '컨텍스트', error: '오류' }[st] || st;
+            return `<span style="color:${color};font-weight:500;">${stateLabel} ${dur}</span>`;
+          })();
+
+      const pinIcon = isPinned ? '📌' : '📍';
+      const pinOpacity = isPinned ? '1' : '0.3';
+
+      // e014-T2: apply borderColor emphasis in light mode
+      const borderStyle = cfg.borderColor
+        ? `border-color:${cfg.borderColor};border-bottom:4px solid ${cfg.borderColor};`
+        : '';
+
+      // Worktree visual treatment
+      const wtCardBg = parsed.isWorktree
+        ? `linear-gradient(to right,${t.wtBg} 0%,transparent 55%),${t.cardBg}`
+        : t.cardBg;
+      const wtStripe = parsed.isWorktree
+        ? `border-left:3px solid ${t.wtStripe};padding-left:41px;`
+        : '';
+      const wtBranchDisplay = parsed.isWorktree ? escapeHtml(parsed.branch.replace(/_/g, '/')) : '';
+      const wtBranchLabel = parsed.isWorktree
+        ? `<div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:${t.wtBranch};margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;letter-spacing:-0.02em;" title="worktree: ${escapeHtml(parsed.branch)}">⎇ ${wtBranchDisplay}</div>`
+        : '';
+
+      // T3: compact view for working (non-fresh) cards — name + dot + elapsed only
+      const isCompact = session.state === 'working' && !fresh;
+      const cardPadding = isCompact ? '8px 12px 8px 38px' : '12px 12px 10px 38px';
+
+      const stuckBadge = isStuck
+        ? `<div style="margin-top:5px;"><span style="font-size:11px;font-weight:700;background:rgba(251,146,60,0.18);border:1px solid rgba(251,146,60,0.6);color:#fb923c;padding:2px 8px;border-radius:99px;letter-spacing:0.02em;display:inline-block;">⚠️ 에이전트 멈춤 의심</span></div>`
+        : '';
+      const stallBadge = renderStallBadge(session);
+
+      const pc = session.pending_count;
+      const pendingBadge = pc == null ? ''
+        : pc === 0
+          ? `<div style="margin-top:4px;"><span style="font-size:11px;background:rgba(52,211,153,0.10);border:1px solid rgba(52,211,153,0.35);color:#34d399;padding:2px 8px;border-radius:99px;display:inline-block;">✅ 할 일 완료</span></div>`
+          : `<div style="margin-top:4px;"><span style="font-size:11px;font-weight:600;background:rgba(251,191,36,0.12);border:1px solid rgba(251,191,36,0.45);color:#fbbf24;padding:2px 8px;border-radius:99px;display:inline-block;">⏳ 대기 ${pc}개</span></div>`;
+
+      return `
+        <div class="group relative overflow-hidden ${cfg.border} draggable-card${freshClass}"
+             data-session-name="${name}"
+             style="border-radius:20px 20px 16px 20px;background:${wtCardBg};border:1px solid;padding:${cardPadding};box-shadow:${cfg.glow},${t.cardShadowBase};${borderStyle}${wtStripe}${staleOpacity}transition:all 0.3s ease;">
+          ${freshBar}
+          <div class="long-press-ring"></div>
+          <button data-pin-session="${name}" style="position:absolute;top:8px;left:6px;width:26px;height:26px;border-radius:9px;background:${t.pinBtnBg};display:flex;align-items:center;justify-content:center;font-size:12px;opacity:${pinOpacity};border:1px solid ${t.pinBtnBorder};cursor:pointer;transition:opacity 0.2s;touch-action:manipulation;" title="${isPinned ? 'Unpin session' : 'Pin session'}" aria-label="${isPinned ? 'Unpin session' : 'Pin session'}">${pinIcon}</button>
+          <div class="flex items-center justify-between">
+            <div style="flex:1;min-width:0;">
+              <span class="font-mono text-sm font-medium truncate" style="color:${t.textPrimary};letter-spacing:-0.01em;display:block;" title="${name}">${display}</span>
+              ${wtBranchLabel}
+            </div>
+            <span class="flex items-center gap-1.5 text-xs" style="color:${t.textSecondary};flex-shrink:0;margin-left:auto;min-width:9rem;justify-content:flex-end;">
+              <span class="inline-block w-2 h-2 rounded-full ${cfg.dot}" style="box-shadow:${t.dotGlowColor};flex-shrink:0;"></span>
+              ${cfg.label}${renderContextGauge(session, t)}${freshBadge}
+            </span>
+          </div>
+          ${renderWorkflowPhase(session, t)}
+          ${pendingBadge}
+          ${isCompact ? '' : renderWorkContext(session, t)}
+          ${isCompact ? '' : renderLastPrompt(session, t)}
+          ${stuckBadge}
+          ${stallBadge}
+          <div style="font-size:11px;color:${t.textMuted};margin-top:4px;">
+            ${updatedText}
+          </div>
+        </div>
+      `;
+    }
+
+    // =============================================
+    // Drag-and-drop state
+    // =============================================
+    let isDragging = false;
+    let _dragState = null;
+    let _pressTimer = null;
+    let _ghostEl = null;
+    let _dragTimeout = null;
+    let _dragConfirmed = false; // e014-T1: click suppression flag
+    let lastSSEData = null;
+
+    // T3: render() with (isDragging || _pressTimer) guard + inline SSE caching
+    function render(data) {
+      lastSSEData = data; // T3: cache inline (no wrapper needed)
+      if (isDragging || _pressTimer) return; // T3: block during drag AND long-press hold
+
+      const sessions = data.sessions || [];
+      if (sessions.length > 0 && data.sessions) checkFreshPinned(sessions);
+
+      badgeCount.textContent = `${sessions.length} session${sessions.length !== 1 ? 's' : ''}`;
+
+      if (sessions.length === 0) {
+        emptyState.classList.remove('hidden');
+        btnCopyNames.classList.add('hidden');
+        sortedSessionNames = [];
+        Array.from(grid.children).forEach(el => {
+          if (el !== emptyState) el.remove();
+        });
+        return;
+      }
+
+      emptyState.classList.add('hidden');
+
+      const now = Date.now();
+      for (const s of sessions) {
+        const prev = _prevStates[s.name];
+        if (prev && prev !== 'working' && s.state === 'working') {
+          _sparkleUntil[s.name] = now + 10000;
+        }
+        _prevStates[s.name] = s.state;
+      }
+
+      const pinned = getPinned();
+      const activeNames = new Set(sessions.map(s => s.name));
+
+      const quads = getQuadrants();
+      let pruned = false;
+      for (const qid of Object.keys(quads)) {
+        const before = quads[qid].length;
+        quads[qid] = quads[qid].filter(n => activeNames.has(n));
+        if (quads[qid].length !== before) pruned = true;
+      }
+      if (pruned) saveQuadrants(quads);
+
+      const order = { working: 0, stuck_after_agent: 1, waiting: 2, context_limit: 3, error: 4, idle: 5, unknown: 6 };
+      sessions.sort((a, b) => {
+        const tierDiff = (pinned.has(a.name) ? 0 : 1) - (pinned.has(b.name) ? 0 : 1);
+        if (tierDiff !== 0) return tierDiff;
+        const stateDiff = (order[a.state] ?? 9) - (order[b.state] ?? 9);
+        if (stateDiff !== 0) return stateDiff;
+        return (b.updated_at || 0) - (a.updated_at || 0);
+      });
+
+      sortedSessionNames = sessions.map(s => s.name);
+      btnCopyNames.classList.remove('hidden');
+
+      const pinnedSessions = sessions.filter(s => pinned.has(s.name));
+      const normalSessions = sessions.filter(s => !pinned.has(s.name));
+      const hasPinned = pinnedSessions.length > 0;
+      const hasBothGroups = hasPinned && normalSessions.length > 0;
+
+      const t = getThemeColors();
+      const QUAD_CONFIG = getQuadConfig();
+      let html = '';
+
+      if (hasPinned) {
+        const freshQuads = getQuadrants();
+        const sessionMap = {};
+        for (const s of sessions) sessionMap[s.name] = s;
+
+        html += `<div class="col-span-full">`;
+        html += `<div style="display:flex;align-items:center;gap:10px;color:${t.sectionLabelPinned};font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:12px;">
+          <span style="width:6px;height:6px;border-radius:50%;background:${t.sectionLabelPinned};opacity:0.6;flex-shrink:0;"></span>
+          Pinned
+          <div style="flex:1;height:1px;background:linear-gradient(90deg,${t.sectionLabelPinned}33,transparent);"></div>
+        </div>`;
+
+        html += `<div class="matrix-grid">`;
+        for (const qid of ['Q1', 'Q2', 'Q3', 'Q4']) {
+          const qcfg = QUAD_CONFIG[qid];
+          // e014-T3: stable sort within quadrant by state priority, then recency (newer first)
+          const _qOrd = { working: 0, stuck_after_agent: 1, waiting: 2, error: 3, context_limit: 4, idle: 5, unknown: 6 };
+          const qRaw = (freshQuads[qid] || []).filter(n => sessionMap[n]);
+          const qSessions = qRaw.map((n, i) => ({ s: sessionMap[n], i }));
+          qSessions.sort((a, b) => {
+            const sd = (_qOrd[a.s.state] ?? 5) - (_qOrd[b.s.state] ?? 5);
+            if (sd !== 0) return sd;
+            // Newer (higher updated_at) floats up, older sinks down
+            return (b.s.updated_at || 0) - (a.s.updated_at || 0);
+          });
+
+          html += `<div class="quadrant" data-quadrant="${qid}" style="background:${qcfg.tint};border:1px solid ${qcfg.border};">`;
+          html += `<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${t.quadLabelColor};margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+            <span style="font-size:12px;opacity:0.6;">${qid === 'Q1' ? '🔴' : qid === 'Q2' ? '🟡' : qid === 'Q3' ? '🔵' : '⚪'}</span>
+            ${QUAD_LABELS[qid]}
+          </div>`;
+
+          if (qSessions.length > 0) {
+            html += `<div class="quadrant-cards">`;
+            html += qSessions.map(({ s }) => renderCard(s, true)).join('');
+            html += `</div>`;
+          } else {
+            html += `<div style="text-align:center;padding:12px;color:${t.emptyText};font-size:11px;border:1px dashed ${t.emptyBorder};border-radius:12px;">드래그하여 추가</div>`;
+          }
+          html += `</div>`;
+        }
+        html += `</div></div>`;
+      }
+
+      if (hasBothGroups) {
+        html += `<div class="col-span-full" style="display:flex;align-items:center;gap:10px;color:${t.sectionLabelOthers};font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;margin-top:8px;">
+          <span style="width:6px;height:6px;border-radius:50%;background:${t.sectionLabelOthers};opacity:0.4;flex-shrink:0;"></span>
+          Others
+          <div style="flex:1;height:1px;background:linear-gradient(90deg,${t.sectionLabelOthers}33,transparent);"></div>
+        </div>`;
+      }
+      if (normalSessions.length > 0) {
+        html += normalSessions.map(s => renderCard(s, false)).join('');
+      }
+
+      Array.from(grid.children).forEach(el => {
+        if (el !== emptyState) el.remove();
+      });
+      grid.insertAdjacentHTML('afterbegin', html);
+
+      if (data.updated_at) {
+        lastUpdateEl.classList.remove('hidden');
+        lastUpdateEl.querySelector('time').textContent = formatAge(data.updated_at);
+      }
+    }
+
+    // --- Pin button event delegation ---
+    grid.addEventListener('click', (e) => {
+      if (isDragging) return;
+      const btn = e.target.closest('[data-pin-session]');
+      if (!btn) return;
+      e.stopPropagation();
+      togglePin(btn.dataset.pinSession);
+      if (lastSSEData) render(lastSSEData);
+    });
+
+    // =============================================
+    // Pointer Events — e014-T1: pointerType-aware DnD
+    // =============================================
+
+    // e014-T1: Click suppression for mouse/pen drag
+    function _addClickGuard() {
+      document.removeEventListener('click', _clickGuardHandler, true);
+      document.addEventListener('click', _clickGuardHandler, true);
+    }
+    function _removeClickGuard() {
+      document.removeEventListener('click', _clickGuardHandler, true);
+    }
+    function _clickGuardHandler(e) {
+      if (_dragConfirmed) {
+        e.preventDefault();
+        e.stopPropagation();
+        setTimeout(() => { _dragConfirmed = false; }, 0);
+      }
+    }
+
+    function initDrag(e) {
+      const card = e.target.closest('[data-session-name]');
+      if (!card) return;
+      if (e.target.closest('[data-pin-session]')) return;
+
+      const sessionName = card.dataset.sessionName;
+      if (!getPinned().has(sessionName)) return;
+
+      const rect = card.getBoundingClientRect();
+      const ptype = e.pointerType; // 'mouse', 'pen', or 'touch'
+
+      _dragState = {
+        sessionName,
+        startX: e.clientX,
+        startY: e.clientY,
+        lastX: e.clientX,
+        lastY: e.clientY,
+        offsetX: e.clientX - rect.left,
+        offsetY: e.clientY - rect.top,
+        pointerId: e.pointerId,
+        pointerType: ptype,
+        downTime: Date.now(),
+        card
+      };
+
+      if (ptype === 'touch') {
+        // Touch: long-press mode (500ms + 10px deadzone)
+        card.setPointerCapture(e.pointerId);
+        const ring = card.querySelector('.long-press-ring');
+        if (ring) ring.classList.add('active');
+        _pressTimer = setTimeout(() => {
+          _pressTimer = null;
+          activateDrag();
+        }, 500);
+      } else {
+        // Mouse/Pen: immediate drag mode (5px threshold)
+        // pen: 50ms minimum contact guard (palm rejection)
+        _addClickGuard();
+        // No setPointerCapture for mouse/pen — document-level listeners suffice
+      }
+    }
+
+    function activateDrag() {
+      if (!_dragState) return;
+      isDragging = true;
+      _dragConfirmed = true; // suppress upcoming click event
+
+      const card = _dragState.card;
+      const ring = card.querySelector('.long-press-ring');
+      if (ring) ring.classList.remove('active');
+
+      if (navigator.vibrate) navigator.vibrate(50);
+
+      _ghostEl = card.cloneNode(true);
+      _ghostEl.classList.add('drag-ghost');
+      _ghostEl.style.width = card.offsetWidth + 'px';
+      _ghostEl.style.left = (_dragState.lastX - _dragState.offsetX) + 'px';
+      _ghostEl.style.top = (_dragState.lastY - _dragState.offsetY) + 'px';
+      document.body.appendChild(_ghostEl);
+
+      card.style.opacity = '0.3';
+      resetDragTimeout();
+    }
+
+    function onPointerMove(e) {
+      if (!_dragState) return;
+
+      _dragState.lastX = e.clientX;
+      _dragState.lastY = e.clientY;
+      const dx = e.clientX - _dragState.startX;
+      const dy = e.clientY - _dragState.startY;
+      const moved = Math.hypot(dx, dy);
+
+      if (_dragState.pointerType === 'touch') {
+        // Touch: long-press pending
+        if (_pressTimer) {
+          // Scroll detection: vertical-dominant movement > 10px → cancel drag, allow scroll
+          if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 10) {
+            clearTimeout(_pressTimer); _pressTimer = null;
+            const ring = _dragState.card.querySelector('.long-press-ring');
+            if (ring) ring.classList.remove('active');
+            try { _dragState.card.releasePointerCapture(_dragState.pointerId); } catch {}
+            _dragState = null;
+            return;
+          }
+          if (moved > 10) {
+            clearTimeout(_pressTimer); _pressTimer = null;
+            const ring = _dragState.card.querySelector('.long-press-ring');
+            if (ring) ring.classList.remove('active');
+            try { _dragState.card.releasePointerCapture(_dragState.pointerId); } catch {}
+            _dragState = null;
+            return;
+          }
+        }
+      } else {
+        // Mouse/Pen: immediate drag — 5px threshold to confirm
+        if (!isDragging && moved >= 5) {
+          // Pen: 50ms minimum contact guard
+          if (_dragState.pointerType === 'pen' && (Date.now() - _dragState.downTime) < 50) {
+            // Too fast for pen — treat as palm, cancel
+            _dragConfirmed = false;
+            _removeClickGuard();
+            _dragState = null;
+            return;
+          }
+          activateDrag();
+        }
+      }
+
+      if (!isDragging || !_ghostEl) return;
+
+      _ghostEl.style.left = (e.clientX - _dragState.offsetX) + 'px';
+      _ghostEl.style.top = (e.clientY - _dragState.offsetY) + 'px';
+
+      _ghostEl.style.display = 'none';
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      _ghostEl.style.display = '';
+
+      document.querySelectorAll('.quadrant').forEach(q => q.classList.remove('drag-over'));
+      if (el) {
+        const quad = el.closest('.quadrant');
+        if (quad) quad.classList.add('drag-over');
+      }
+      resetDragTimeout();
+    }
+
+    function onPointerUp(e) {
+      // Touch: long-press pending → was a tap
+      if (_pressTimer) {
+        clearTimeout(_pressTimer); _pressTimer = null;
+        if (_dragState) {
+          const ring = _dragState.card.querySelector('.long-press-ring');
+          if (ring) ring.classList.remove('active');
+          if (_dragState.pointerType === 'touch') {
+            try { _dragState.card.releasePointerCapture(_dragState.pointerId); } catch {}
+          }
+        }
+        _dragState = null;
+        return;
+      }
+
+      // Mouse/Pen: not dragging → was a click, let it through
+      if (!isDragging) {
+        if (_dragState) {
+          // Pen: 50ms guard — release without drag
+          if (_dragState.pointerType === 'pen' && (Date.now() - _dragState.downTime) < 50) {
+            _dragConfirmed = false;
+          }
+          _dragState = null;
+          _removeClickGuard();
+        }
+        return;
+      }
+
+      finalizeDrop(e.clientX, e.clientY);
+    }
+
+    function finalizeDrop(x, y) {
+      if (_ghostEl) {
+        _ghostEl.style.display = 'none';
+        const el = document.elementFromPoint(x, y);
+        _ghostEl.remove();
+        _ghostEl = null;
+
+        if (el && _dragState) {
+          const quad = el.closest('[data-quadrant]');
+          if (quad) {
+            moveToQuadrant(_dragState.sessionName, quad.dataset.quadrant);
+          }
+        }
+      }
+
+      if (_dragState && _dragState.card) {
+        _dragState.card.style.opacity = '';
+        if (_dragState.pointerType === 'touch') {
+          try { _dragState.card.releasePointerCapture(_dragState.pointerId); } catch {}
+        }
+      }
+
+      document.querySelectorAll('.quadrant').forEach(q => q.classList.remove('drag-over'));
+      isDragging = false;
+      _dragConfirmed = false;
+      _dragState = null;
+      clearDragTimeout();
+      _removeClickGuard();
+
+      if (lastSSEData) render(lastSSEData);
+    }
+
+    function cancelDrag() {
+      if (_ghostEl) { _ghostEl.remove(); _ghostEl = null; }
+      if (_dragState && _dragState.card) {
+        _dragState.card.style.opacity = '';
+        if (_dragState.pointerType === 'touch') {
+          try { _dragState.card.releasePointerCapture(_dragState.pointerId); } catch {}
+        }
+      }
+      document.querySelectorAll('.quadrant').forEach(q => q.classList.remove('drag-over'));
+      isDragging = false;
+      _dragConfirmed = false;
+      _dragState = null;
+      if (_pressTimer) { clearTimeout(_pressTimer); _pressTimer = null; }
+      clearDragTimeout();
+      _removeClickGuard();
+      if (lastSSEData) render(lastSSEData);
+    }
+
+    function resetDragTimeout() {
+      clearDragTimeout();
+      _dragTimeout = setTimeout(() => { cancelDrag(); }, 10000);
+    }
+    function clearDragTimeout() {
+      if (_dragTimeout) { clearTimeout(_dragTimeout); _dragTimeout = null; }
+    }
+
+    // Window blur: clean up drag state (prevent ghost drag after tab switch)
+    window.addEventListener('blur', () => {
+      if (isDragging || _dragState) cancelDrag();
+    });
+
+    document.addEventListener('contextmenu', (e) => {
+      if (isDragging || _pressTimer) e.preventDefault();
+    });
+
+    grid.addEventListener('pointerdown', initDrag);
+    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerup', onPointerUp);
+    document.addEventListener('pointercancel', () => { cancelDrag(); });
+
+    // --- SSE Connection ---
+    let evtSource = null;
+    let reconnectTimer = null;
+
+    function setConnected(ok) {
+      const t = getThemeColors();
+      connDot.className = `inline-block w-2 h-2 rounded-full ${ok ? t.connDotOk : t.connDotFail}`;
+      connStatus.lastChild.textContent = ok ? ' Connected' : ' Disconnected';
+    }
+
+    function connect() {
+      if (evtSource) evtSource.close();
+
+      fetch('/api/sessions')
+        .then(r => r.json())
+        .then(render)
+        .catch(() => {});
+
+      evtSource = new EventSource('/api/sessions/stream');
+
+      evtSource.addEventListener('sessions', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          render(data);
+        } catch (err) {
+          console.error('Failed to parse SSE data:', err);
+        }
+      });
+
+      evtSource.onopen = () => {
+        setConnected(true);
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      };
+
+      evtSource.onerror = () => {
+        setConnected(false);
+        evtSource.close();
+        // Clear any existing reconnect timer before scheduling a new one.
+        // Without this, rapid onerror events (e.g. WebView panel hidden/shown)
+        // accumulate stale timers that each call connect(), creating multiple
+        // overlapping EventSource instances and exhausting HTTP connections.
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        reconnectTimer = setTimeout(connect, 3000);
+      };
+    }
+
+    // T3: No wrapper needed — lastSSEData is set inline in render()
+    function refreshRender() {
+      if (lastSSEData) render(lastSSEData);
+    }
+    setInterval(refreshRender, 10000);
+    setInterval(() => {
+      fetch('/api/sessions')
+        .then(r => r.json())
+        .then(render)
+        .catch(() => {});
+    }, 30000);
+
+    // --- Clipboard helper ---
+    function _execCopy(text) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      try { document.execCommand('copy'); } catch (_) {}
+      document.body.removeChild(ta);
+    }
+    function copyToClipboard(text, onSuccess) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(onSuccess).catch(() => { _execCopy(text); onSuccess(); });
+      } else {
+        _execCopy(text);
+        onSuccess();
+      }
+    }
+
+    // --- Copy session names ---
+    btnCopyNames.addEventListener('click', () => {
+      const text = sortedSessionNames.join('\n');
+      copyToClipboard(text, () => {
+        const orig = btnCopyNames.textContent;
+        btnCopyNames.textContent = 'Copied!';
+        setTimeout(() => { btnCopyNames.textContent = orig; }, 1500);
+      });
+    });
+
+    // --- Device detection: mobile = touch-only + narrow screen ---
+    function isMobile() {
+      return window.matchMedia('(pointer: coarse)').matches && window.innerWidth < 768;
+    }
+
+    // --- Card toast helper ---
+    function showCardToast(card, text, color) {
+      const old = card.querySelector('.copy-toast');
+      if (old) old.remove();
+      const toast = document.createElement('div');
+      toast.className = 'copy-toast';
+      const dark = isDark();
+      const isGreen = color === 'green';
+      const fg = isGreen ? '#34d399' : '#fb923c';
+      const bg = isGreen
+        ? (dark ? 'rgba(52,211,153,0.15)' : 'rgba(52,211,153,0.1)')
+        : (dark ? 'rgba(251,146,60,0.15)' : 'rgba(251,146,60,0.1)');
+      toast.style.cssText = `position:absolute;bottom:4px;left:12px;right:12px;text-align:center;font-size:11px;font-weight:600;color:${fg};background:${bg};border-radius:8px;padding:3px 8px;z-index:10;`;
+      toast.textContent = text;
+      card.appendChild(toast);
+      setTimeout(() => toast.remove(), 1600);
+    }
+
+    // --- Card border flash helper ---
+    function flashCard(card, color) {
+      const isGreen = color === 'green';
+      const rgba1 = isGreen ? 'rgba(52,211,153,0.6)' : 'rgba(251,146,60,0.6)';
+      const rgba2 = isGreen ? 'rgba(52,211,153,0.3)' : 'rgba(251,146,60,0.3)';
+      card.style.transition = 'box-shadow 0.15s ease';
+      card.style.boxShadow = `0 0 0 2px ${rgba1}, 0 0 12px ${rgba2}`;
+      setTimeout(() => { card.style.boxShadow = ''; card.style.transition = ''; }, 600);
+    }
+
+    // --- Copy fallback with toast ---
+    function copyFallback(card, cmd, message) {
+      copyToClipboard(cmd, () => {
+        flashCard(card, 'orange');
+        showCardToast(card, message, 'orange');
+      });
+    }
+
+    // --- Focus session (desktop) ---
+    // Detect VSCode webview: acquireVsCodeApi is available only inside webview
+    const _vscodeApi = (typeof acquireVsCodeApi === 'function') ? acquireVsCodeApi() : null;
+
+    function focusSession(card, name) {
+      const cmd = `/sessions ${name}`;
+
+      if (_vscodeApi) {
+        // Inside VSCode webview: postMessage directly to extension
+        // VSCode already has window focus → terminal switch + keyboard focus works instantly
+        _vscodeApi.postMessage({ type: 'focusSession', session: name });
+        flashCard(card, 'green');
+        showCardToast(card, `Focused ${name.replace(/^claude[_-]/, '')}`, 'green');
+        return;
+      }
+
+      // Browser: REST API for tmux switch-client + signal file for VSCode extension
+      fetch('/api/focus-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: name }),
+      })
+        .then(res => res.json().then(data => ({ ok: res.ok, data })))
+        .then(({ ok, data }) => {
+          if (ok && data.status === 'focused') {
+            flashCard(card, 'green');
+            showCardToast(card, `Focused ${name.replace(/^claude[_-]/, '')}`, 'green');
+          } else if (data.error === 'no_attached_client') {
+            copyFallback(card, cmd, '터미널 미연결 — copied');
+          } else {
+            copyFallback(card, cmd, 'Focus failed — copied');
+          }
+        })
+        .catch(() => {
+          copyFallback(card, cmd, 'Network error — copied');
+        });
+    }
+
+    // --- Card tap handler: mobile=copy, desktop=focus ---
+    grid.addEventListener('click', (e) => {
+      if (_dragConfirmed) return;
+      if (e.target.closest('[data-pin-session]')) return;
+      const card = e.target.closest('[data-session-name]');
+      if (!card) return;
+      const name = card.dataset.sessionName;
+      if (isMobile()) {
+        const cmd = `/sessions ${name}`;
+        copyToClipboard(cmd, () => {
+          flashCard(card, 'green');
+          showCardToast(card, `Copied ${cmd}`, 'green');
+        });
+      } else {
+        focusSession(card, name);
+      }
+    });
+
+    // Start — apply theme first, then connect
+    applyTheme();
+    connect();
+
+    // Register service worker for PWA
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+    }
+
+  </script>
+</body>
+</html>

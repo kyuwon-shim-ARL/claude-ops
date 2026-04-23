@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import time
@@ -18,10 +19,10 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Dict, Any
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -291,19 +292,31 @@ static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+_templates_dir = os.path.join(os.path.dirname(__file__), "templates")
+templates = Jinja2Templates(directory=_templates_dir)
+
 # Project-status integration (Phase C)
 app.mount("/pstatus-static", pstatus_static_app, name="pstatus-static")
 app.include_router(projects_router, prefix="/projects")
 
 
 @app.get("/")
-async def root():
-    """Serve dashboard HTML."""
-    index_path = os.path.join(static_dir, "index.html")
-    if os.path.isfile(index_path):
-        with open(index_path, "r") as f:
-            return HTMLResponse(content=f.read())
-    return HTMLResponse(content="<h1>Dashboard not found. Place index.html in static/</h1>")
+async def root(request: Request):
+    """Serve dashboard HTML via Jinja2 template with CSP nonce."""
+    nonce = secrets.token_hex(16)
+    # Allow existing inline scripts (tailwind config, main app JS) via 'unsafe-inline'.
+    # Alpine uses @alpinejs/csp (eval-free build) so no 'unsafe-eval' needed.
+    csp = (
+        f"script-src 'self' 'unsafe-inline' 'nonce-{nonce}' "
+        "https://cdn.tailwindcss.com https://cdn.jsdelivr.net "
+        "https://fonts.googleapis.com; object-src 'none'"
+    )
+    response = templates.TemplateResponse(
+        "index.html",
+        {"request": request, "csp_nonce": nonce},
+    )
+    response.headers["Content-Security-Policy"] = csp
+    return response
 
 
 @app.get("/api/sessions")
