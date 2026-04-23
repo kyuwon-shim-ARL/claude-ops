@@ -158,10 +158,10 @@ class SessionTreeProvider implements vscode.TreeDataProvider<SessionItem> {
 class DashboardPanel {
   private static panel: vscode.WebviewPanel | undefined;
 
-  static show(context: vscode.ExtensionContext): void {
+  static async show(context: vscode.ExtensionContext): Promise<void> {
     if (DashboardPanel.panel) {
-      // Always refresh HTML so file changes take effect without closing the panel
-      DashboardPanel.panel.webview.html = getWebviewContent(context);
+      // Always refresh HTML so server-side changes are picked up without reopening
+      DashboardPanel.panel.webview.html = await getWebviewContent(context);
       DashboardPanel.panel.reveal();
       return;
     }
@@ -173,7 +173,7 @@ class DashboardPanel {
       { enableScripts: true, retainContextWhenHidden: true }
     );
 
-    DashboardPanel.panel.webview.html = getWebviewContent(context);
+    DashboardPanel.panel.webview.html = await getWebviewContent(context);
 
     // Handle messages from webview (card click → terminal focus)
     DashboardPanel.panel.webview.onDidReceiveMessage((message: { type: string; session?: string; url?: string }) => {
@@ -195,26 +195,70 @@ class DashboardPanel {
   }
 }
 
-function getWebviewContent(context: vscode.ExtensionContext): string {
-  // Try to load the static HTML from the extension's bundled files
+/** Fetch the dashboard HTML directly from the running server. */
+function fetchServerHtml(): Promise<string | null> {
+  return new Promise((resolve) => {
+    const req = http.get(DASHBOARD_URL, { timeout: 2000 }, (res) => {
+      let data = '';
+      res.on('data', (chunk: string) => { data += chunk; });
+      res.on('end', () => { resolve(data); });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+  });
+}
+
+/** Rewrite relative /api URLs so they reach the CTB server from inside the webview. */
+function applyUrlRewrites(html: string): string {
+  html = html.replace(/fetch\('\/api/g, `fetch('${DASHBOARD_URL}/api`);
+  html = html.replace(/EventSource\('\/api/g, `EventSource('${DASHBOARD_URL}/api`);
+  return html;
+}
+
+/**
+ * Patch server HTML nav links for the webview context:
+ *  - Replace real hrefs with '#' (navigation must go through postMessage)
+ *  - Inject nav-projects click handler
+ * NOTE: _vscodeApi is already declared in the server HTML — do NOT re-declare it here.
+ */
+function applyNavPatches(html: string): string {
+  html = html.replace('<a href="/" style=', '<a href="#" style=');
+  html = html.replace('<a href="/projects" style=', '<a id="nav-projects" href="#" style=');
+  // Inject click handler before </body>; references _vscodeApi from the main script tag
+  html = html.replace('</body>', `<script>
+document.getElementById('nav-projects')?.addEventListener('click', function(e) {
+  e.preventDefault();
+  if (typeof _vscodeApi !== 'undefined' && _vscodeApi) {
+    _vscodeApi.postMessage({ type: 'openUrl', url: '${DASHBOARD_URL}/projects' });
+  }
+});
+</script>
+</body>`);
+  return html;
+}
+
+async function getWebviewContent(context: vscode.ExtensionContext): Promise<string> {
+  // 1. Prefer live server HTML — always up-to-date, no manual sync needed
+  const serverHtml = await fetchServerHtml();
+  if (serverHtml) {
+    return applyNavPatches(applyUrlRewrites(serverHtml));
+  }
+
+  // 2. Fall back to bundled static file when server is offline
+  //    Static file already has nav patches baked in; only rewrite URLs.
   const possiblePaths = [
     path.join(context.extensionPath, 'static', 'index.html'),
     path.join(context.extensionPath, '..', 'static', 'index.html'),
   ];
-
   for (const htmlPath of possiblePaths) {
     try {
       if (fs.existsSync(htmlPath)) {
-        let html = fs.readFileSync(htmlPath, 'utf-8');
-        // Rewrite API URLs to point at the local server
-        html = html.replace(/fetch\('\/api/g, `fetch('${DASHBOARD_URL}/api`);
-        html = html.replace(/EventSource\('\/api/g, `EventSource('${DASHBOARD_URL}/api`);
-        return html;
+        return applyUrlRewrites(fs.readFileSync(htmlPath, 'utf-8'));
       }
     } catch { /* fall through */ }
   }
 
-  // Fallback: iframe to the running server
+  // 3. Last resort: iframe
   return `<!DOCTYPE html>
 <html><head><style>body{margin:0;overflow:hidden}iframe{width:100%;height:100vh;border:none}</style></head>
 <body><iframe src="${DASHBOARD_URL}"></iframe></body></html>`;
