@@ -48,12 +48,17 @@ logger = logging.getLogger(__name__)
 
 
 class SessionState(Enum):
-    """Session state definitions with clear priorities"""
+    """Session state definitions with clear priorities.
+
+    Canonical source of truth. ctb-dashboard's state_detector.py imports from
+    here when available (with graceful local-fallback for isolated installs).
+    """
     CONTEXT_LIMIT = "context_limit"  # Highest priority - context window exhausted
     ERROR = "error"               # System errors
     OVERLOADED = "overloaded"     # API 529 overloaded — retry with backoff
     WAITING_INPUT = "waiting"     # User response required
     WORKING = "working"           # Active work in progress
+    STUCK_AFTER_AGENT = "stuck_after_agent"  # Agent returned result, no follow-up prompt
     IDLE = "idle"                 # No activity, ready for commands
     SCHEDULED = "scheduled"       # Idle but cron job is scheduled
     UNKNOWN = "unknown"           # Cannot determine state
@@ -89,6 +94,7 @@ class SessionStateAnalyzer:
         SessionState.OVERLOADED: 2,
         SessionState.WAITING_INPUT: 3,
         SessionState.WORKING: 4,
+        SessionState.STUCK_AFTER_AGENT: 45,  # Between WORKING(4) and IDLE(5), scaled x10 for ordering
         SessionState.IDLE: 5,
         SessionState.SCHEDULED: 6,
         SessionState.UNKNOWN: 7,

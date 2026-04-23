@@ -10,6 +10,7 @@ Extracted from claude_ctb.utils.session_state (core detection subset).
 import json
 import os
 import subprocess
+import sys
 import logging
 import re
 from enum import Enum
@@ -20,15 +21,44 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
-class SessionState(Enum):
-    """Session state definitions with clear priorities"""
-    CONTEXT_LIMIT = "context_limit"      # Highest priority - context window exhausted
-    ERROR = "error"                      # System errors
-    WAITING_INPUT = "waiting"            # User response required
-    WORKING = "working"                  # Active work in progress
-    STUCK_AFTER_AGENT = "stuck_after_agent"  # Agent returned result, no follow-up
-    IDLE = "idle"                        # No activity, ready for commands
-    UNKNOWN = "unknown"                  # Cannot determine state
+# ---------------------------------------------------------------------------
+# SessionState: import canonical from claude_ctb when available, otherwise
+# fall back to a local definition. P1 S0 enum consolidation (was TODOS.md
+# 2026-04-16 silent divergence item). The canonical module lives at
+# {repo_root}/claude_ctb/utils/session_state.py.
+# ---------------------------------------------------------------------------
+try:
+    from claude_ctb.utils.session_state import SessionState as SessionState  # type: ignore
+except ImportError:
+    # Attempt repo-root sys.path discovery (dev-layout where claude_ctb/
+    # sits at a parent of this package). Walk up until we find the module.
+    _this = Path(__file__).resolve()
+    _found = False
+    for _ancestor in _this.parents:
+        _candidate = _ancestor / "claude_ctb" / "utils" / "session_state.py"
+        if _candidate.is_file():
+            if str(_ancestor) not in sys.path:
+                sys.path.insert(0, str(_ancestor))
+            try:
+                from claude_ctb.utils.session_state import SessionState as SessionState  # type: ignore # noqa: F401
+                _found = True
+            except ImportError:
+                pass
+            break
+    if not _found:
+        # Fallback: local definition. Kept in sync with canonical via
+        # tests/test_session_state_parity.py.
+        class SessionState(Enum):  # type: ignore[no-redef]
+            """Local fallback — used only when claude_ctb is not importable."""
+            CONTEXT_LIMIT = "context_limit"
+            ERROR = "error"
+            OVERLOADED = "overloaded"
+            WAITING_INPUT = "waiting"
+            WORKING = "working"
+            STUCK_AFTER_AGENT = "stuck_after_agent"
+            IDLE = "idle"
+            SCHEDULED = "scheduled"
+            UNKNOWN = "unknown"
 
 
 class StateTransition:
