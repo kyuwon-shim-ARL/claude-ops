@@ -56,8 +56,8 @@ class TestCompletionTimeRecording:
         mock_tracker = Mock(spec=ImprovedWaitTimeTracker)
         self.monitor.tracker = mock_tracker
         
-        # Mock notifier to fail
-        with patch('claude_ctb.telegram.notifier.SmartNotifier') as mock_notifier_class:
+        # Mock notifier to fail (patch where it's used, not where it's defined)
+        with patch('claude_ctb.monitoring.multi_monitor.SmartNotifier') as mock_notifier_class:
             mock_notifier = Mock()
             mock_notifier.send_work_completion_notification.return_value = False  # Notification fails
             mock_notifier_class.return_value = mock_notifier
