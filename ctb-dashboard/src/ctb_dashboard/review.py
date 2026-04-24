@@ -177,6 +177,7 @@ class ReviewController:
                     f"{ticket_id}: cannot mark_needs_review from {current!r}"
                 )
             ticket["review_state"] = "needs_pi_review"
+            ticket["needs_review_since"] = _now_iso()
             if reviewer_ids:
                 ticket.setdefault("reviewer_ids", reviewer_ids)
             history = ticket.get("review_history", [])

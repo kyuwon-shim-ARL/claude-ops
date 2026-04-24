@@ -38,7 +38,7 @@ import sys as _sys
 _PSTATUS_DIR = "/home/kyuwon/projects/project-status"
 if _PSTATUS_DIR not in _sys.path:
     _sys.path.insert(0, _PSTATUS_DIR)
-import projects_router as _pstatus_module
+import projects_router as _pstatus_module  # noqa: E402
 _pstatus_scan_loop = _pstatus_module.scan_loop
 projects_router = _pstatus_module.router
 pstatus_static_app = _pstatus_module.pstatus_static_app
@@ -627,7 +627,8 @@ async def focus_session(
     # The extension watches this file and calls terminal.show() + focus to switch tabs
     _FOCUS_SIGNAL_PATH = "/tmp/ctb-focus-signal.json"
     try:
-        import json as _json, time as _time
+        import json as _json
+        import time as _time
         with open(_FOCUS_SIGNAL_PATH, "w") as f:
             _json.dump({"session": req.session, "ts": _time.time()}, f)
     except Exception as e:
@@ -688,10 +689,29 @@ async def review_gate(
         if not _write_consumed_links(consumed_path, cl_data):
             raise HTTPException(status_code=503, detail="Service unavailable")
 
+        # M14: reject links issued before the current review cycle started
+        if card:
+            try:
+                with open(overlay_path) as _f:
+                    _ov = json.load(_f)
+                _since = _ov.get("tickets", {}).get(card, {}).get("needs_review_since")
+                if _since:
+                    _since_ts = datetime.fromisoformat(_since)
+                    if _since_ts.tzinfo is None:
+                        _since_ts = _since_ts.replace(tzinfo=timezone.utc)
+                    _link_iat = datetime.fromtimestamp(exp_int - 72 * 3600, tz=timezone.utc)
+                    if _link_iat < _since_ts:
+                        raise HTTPException(status_code=403, detail="Link predates current review cycle")
+            except HTTPException:
+                raise
+            except Exception:
+                pass  # overlay unreadable — allow through
+
         if card and not _write_overlay_link_access(card, rv, overlay_path):
             # Rollback: mark as write-failed so next attempt can retry
             links[sig]["status"] = "write-failed"
-            _write_consumed_links(consumed_path, cl_data)
+            if not _write_consumed_links(consumed_path, cl_data):
+                logger.error("Rollback write failed for sig %s — link permanently consumed", sig[:8])
             raise HTTPException(status_code=503, detail="Overlay write failed")
 
     request.session["reviewer_id"] = rv

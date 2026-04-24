@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import time
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -104,6 +105,53 @@ def test_review_secret_not_set_returns_403(monkeypatch):
     client = TestClient(app)
     r = client.get("/review", params={"rv": "x", "exp": "9999999999", "sig": "abc"})
     assert r.status_code == 403
+
+
+def test_link_predating_review_cycle_returns_403(tmp_path):
+    """M14: link issued before current review cycle (needs_review_since) → 403."""
+    # needs_review_since = now → any link with iat_approx (exp - 72h) before now is stale
+    now_iso = datetime.now(timezone.utc).isoformat()
+    overlay = tmp_path / "ticket-overlay.json"
+    overlay.write_text(json.dumps({
+        "version": 1,
+        "tickets": {
+            "gh-1": {
+                "review_state": "needs_pi_review",
+                "needs_review_since": now_iso,
+                "updated_at": now_iso,
+            }
+        },
+    }))
+    # exp = now + 1h → link_iat_approx = now - 71h → predates needs_review_since
+    exp = int(time.time()) + 3600
+    sig = _make_sig("gh-1", "", "kyuwon-shim", exp)
+    client = TestClient(app)
+    r = client.get("/review", params={"card": "gh-1", "rv": "kyuwon-shim", "exp": str(exp), "sig": sig})
+    assert r.status_code == 403
+    assert "predates" in r.json().get("detail", "").lower()
+
+
+def test_link_after_review_cycle_returns_200(tmp_path):
+    """M14: link issued after needs_review_since passes cycle check → 200."""
+    # needs_review_since = 73h ago → link_iat_approx (exp - 72h = now - 71h) is after it
+    since_ts = datetime.fromtimestamp(time.time() - 73 * 3600, tz=timezone.utc).isoformat()
+    overlay = tmp_path / "ticket-overlay.json"
+    overlay.write_text(json.dumps({
+        "version": 1,
+        "tickets": {
+            "gh-1": {
+                "review_state": "needs_pi_review",
+                "needs_review_since": since_ts,
+                "updated_at": since_ts,
+            }
+        },
+    }))
+    # exp = now + 1h → link_iat_approx = now - 71h → after needs_review_since (73h ago)
+    exp = int(time.time()) + 3600
+    sig = _make_sig("gh-1", "", "kyuwon-shim", exp)
+    client = TestClient(app)
+    r = client.get("/review", params={"card": "gh-1", "rv": "kyuwon-shim", "exp": str(exp), "sig": sig})
+    assert r.status_code == 200
 
 
 def test_review_lists_needs_pi_review_tickets(tmp_path):
