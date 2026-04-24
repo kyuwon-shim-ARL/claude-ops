@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Card Component Preview — CTB Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            warm: { 950: '#0f0d14', 900: '#16121f', 800: '#1c1628' }
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    body { font-family: 'Nunito', sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+  </style>
+  <!-- Alpine.js CSP build (eval-free) -->
+  <script nonce="{{ csp_nonce }}"
+          src="https://cdn.jsdelivr.net/npm/@alpinejs/csp@3/dist/cdn.min.js"
+          defer
+          onerror="this.onerror=null;this.src='/static/vendor/alpine.csp.min.js'"></script>
+</head>
+<body class="min-h-screen px-6 py-10" style="background: radial-gradient(ellipse 80% 50% at 50% 0%, #1a1530 0%, #0f0d14 60%), #0f0d14; color: #e2dff0;">
+
+  <header class="mb-8">
+    <nav class="mb-4 text-sm" style="color:#8b85a0;">
+      <a href="/" style="color:#c9d1d9;text-decoration:none;">Sessions</a>
+      <span class="mx-2 opacity-40">/</span>
+      <span>Card Preview</span>
+    </nav>
+    <h1 class="text-2xl font-bold tracking-tight">Card Component Preview</h1>
+    <p class="mt-1 text-sm" style="color:#8b85a0;">
+      3-level progressive disclosure: L0 header → L1 context/choices/signals → L2 evidence
+    </p>
+  </header>
+
+  <div class="max-w-2xl space-y-4">
+
+    <!-- Card 1: e023 실험 — basic with l2 absent, green badge -->
+    <div
+      x-data="{
+        title: 'e023 실험',
+        l1_context: 'SessionState enum 통합 완료',
+        l1_choices: 'Alpine UI 통합 진행중',
+        l1_signals: '커밋 02acbb1 존재',
+        l2_evidence: '',
+        actions: [],
+        badges: [{ text: 'final', color: 'green' }],
+        variant: '',
+        l1Open: false,
+        l2Open: false,
+        toggleL1() { this.l1Open = !this.l1Open; if (!this.l1Open) this.l2Open = false; },
+        toggleL2() { this.l2Open = !this.l2Open; }
+      }"
+      :class="{ 'border-amber-500/60': variant === 'notification-failed' }"
+      class="relative overflow-hidden rounded-2xl border border-white/10"
+      style="background: linear-gradient(145deg, rgba(255,255,255,0.035) 0%, transparent 60%), #1c1628; box-shadow: 0 4px 24px rgba(0,0,0,0.35), 0 1px 0 rgba(255,255,255,0.04) inset;"
+    >
+      <div x-show="variant === 'notification-failed'" class="absolute left-0 top-0 bottom-0 w-1 bg-amber-500/70 rounded-l-2xl" aria-hidden="true"></div>
+
+      <button @click="toggleL1()" class="w-full text-left px-4 py-3 flex items-start justify-between gap-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 rounded-2xl" :aria-expanded="l1Open" aria-controls="c1-l1">
+        <span class="flex items-center gap-2 flex-wrap min-w-0">
+          <span x-show="variant === 'notification-failed'" class="text-amber-400 text-sm flex-shrink-0" aria-label="notification failed">&#9888;</span>
+          <span class="font-mono text-sm font-medium text-white/90 truncate" x-text="title"></span>
+          <template x-for="(badge, i) in badges" :key="i">
+            <span :class="{ 'bg-blue-500/20 border-blue-400/40 text-blue-300': badge.color === 'blue', 'bg-amber-500/20 border-amber-400/40 text-amber-300': badge.color === 'amber', 'bg-red-500/20 border-red-400/40 text-red-300': badge.color === 'red', 'bg-green-500/20 border-green-400/40 text-green-300': badge.color === 'green' }" class="inline-flex items-center px-2 py-0.5 rounded-full border text-xs font-semibold flex-shrink-0" x-text="badge.text"></span>
+          </template>
+        </span>
+        <span class="text-white/40 text-xs flex-shrink-0 transition-transform duration-200 mt-0.5" :class="{ 'rotate-180': l1Open }" aria-hidden="true">&#9660;</span>
+      </button>
+
+      <div x-show="l1Open" x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0 -translate-y-1" x-transition:enter-end="opacity-100 translate-y-0" x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100 translate-y-0" x-transition:leave-end="opacity-0 -translate-y-1" id="c1-l1" class="px-4 pb-3 space-y-2 border-t border-white/5">
+        <div x-show="l1_context" class="pt-2">
+          <p class="text-xs font-semibold text-white/40 uppercase tracking-widest mb-1">Context</p>
+          <p class="text-sm text-white/75 leading-snug" x-text="l1_context"></p>
+        </div>
+        <div x-show="l1_choices">
+          <p class="text-xs font-semibold text-white/40 uppercase tracking-widest mb-1">Choices</p>
+          <p class="text-sm text-white/75 leading-snug" x-text="l1_choices"></p>
+        </div>
+        <div x-show="l1_signals">
+          <p class="text-xs font-semibold text-white/40 uppercase tracking-widest mb-1">Signals</p>
+          <p class="text-sm text-white/75 leading-snug" x-text="l1_signals"></p>
+        </div>
+        <div x-show="l2_evidence" class="pt-1">
+          <button @click.stop="toggleL2()" class="text-xs text-white/40 hover:text-white/70 underline underline-offset-2 transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 rounded" :aria-expanded="l2Open" aria-controls="c1-l2" x-text="l2Open ? '▲ Hide evidence' : '▼ Show evidence'"></button>
+        </div>
+        <div x-show="l2Open && l2_evidence" x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0" id="c1-l2" class="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+          <p class="text-xs font-semibold text-white/40 uppercase tracking-widest mb-1">Evidence</p>
+          <p class="text-xs text-white/60 leading-relaxed font-mono whitespace-pre-wrap" x-text="l2_evidence"></p>
+        </div>
+        <div x-show="actions && actions.length > 0" class="flex flex-wrap gap-2 pt-1">
+          <template x-for="(action, i) in actions" :key="i">
+            <button @click.stop="action.handler && action.handler()" :class="{ 'bg-indigo-600 hover:bg-indigo-500 text-white border-transparent': action.variant !== 'secondary', 'bg-white/5 hover:bg-white/10 text-white/70 border-white/15': action.variant === 'secondary' }" class="px-3 py-1 rounded-lg border text-xs font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30" x-text="action.label"></button>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card 2: review 대기 — notification-failed variant, amber badge, no l1 slots -->
+    <div
+      x-data="{
+        title: 'review 대기',
+        l1_context: '',
+        l1_choices: '',
+        l1_signals: '',
+        l2_evidence: '',
+        actions: [{ label: 'Open PR', variant: 'primary' }, { label: 'Dismiss', variant: 'secondary' }],
+        badges: [{ text: 'needs_pi_review', color: 'amber' }],
+        variant: 'notification-failed',
+        l1Open: false,
+        l2Open: false,
+        toggleL1() { this.l1Open = !this.l1Open; if (!this.l1Open) this.l2Open = false; },
+        toggleL2() { this.l2Open = !this.l2Open; }
+      }"
+      :class="{ 'border-amber-500/60': variant === 'notification-failed' }"
+      class="relative overflow-hidden rounded-2xl border border-white/10"
+      style="background: linear-gradient(145deg, rgba(255,255,255,0.035) 0%, transparent 60%), #1c1628; box-shadow: 0 4px 24px rgba(0,0,0,0.35), 0 1px 0 rgba(255,255,255,0.04) inset;"
+    >
+      <div x-show="variant === 'notification-failed'" class="absolute left-0 top-0 bottom-0 w-1 bg-amber-500/70 rounded-l-2xl" aria-hidden="true"></div>
+
+      <button @click="toggleL1()" class="w-full text-left px-4 py-3 flex items-start justify-between gap-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 rounded-2xl" :aria-expanded="l1Open" aria-controls="c2-l1">
+        <span class="flex items-center gap-2 flex-wrap min-w-0">
+          <span x-show="variant === 'notification-failed'" class="text-amber-400 text-sm flex-shrink-0" aria-label="notification failed">&#9888;</span>
+          <span class="font-mono text-sm font-medium text-white/90 truncate" x-text="title"></span>
+          <template x-for="(badge, i) in badges" :key="i">
+            <span :class="{ 'bg-blue-500/20 border-blue-400/40 text-blue-300': badge.color === 'blue', 'bg-amber-500/20 border-amber-400/40 text-amber-300': badge.color === 'amber', 'bg-red-500/20 border-red-400/40 text-red-300': badge.color === 'red', 'bg-green-500/20 border-green-400/40 text-green-300': badge.color === 'green' }" class="inline-flex items-center px-2 py-0.5 rounded-full border text-xs font-semibold flex-shrink-0" x-text="badge.text"></span>
+          </template>
+        </span>
+        <span class="text-white/40 text-xs flex-shrink-0 transition-transform duration-200 mt-0.5" :class="{ 'rotate-180': l1Open }" aria-hidden="true">&#9660;</span>
+      </button>
+
+      <div x-show="l1Open" x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0 -translate-y-1" x-transition:enter-end="opacity-100 translate-y-0" x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100 translate-y-0" x-transition:leave-end="opacity-0 -translate-y-1" id="c2-l1" class="px-4 pb-3 space-y-2 border-t border-white/5">
+        <div x-show="l1_context" class="pt-2">
+          <p class="text-xs font-semibold text-white/40 uppercase tracking-widest mb-1">Context</p>
+          <p class="text-sm text-white/75 leading-snug" x-text="l1_context"></p>
+        </div>
+        <div x-show="l1_choices">
+          <p class="text-xs font-semibold text-white/40 uppercase tracking-widest mb-1">Choices</p>
+          <p class="text-sm text-white/75 leading-snug" x-text="l1_choices"></p>
+        </div>
+        <div x-show="l1_signals">
+          <p class="text-xs font-semibold text-white/40 uppercase tracking-widest mb-1">Signals</p>
+          <p class="text-sm text-white/75 leading-snug" x-text="l1_signals"></p>
+        </div>
+        <div x-show="l2_evidence" class="pt-1">
+          <button @click.stop="toggleL2()" class="text-xs text-white/40 hover:text-white/70 underline underline-offset-2 transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 rounded" :aria-expanded="l2Open" aria-controls="c2-l2" x-text="l2Open ? '▲ Hide evidence' : '▼ Show evidence'"></button>
+        </div>
+        <div x-show="l2Open && l2_evidence" x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0" id="c2-l2" class="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+          <p class="text-xs font-semibold text-white/40 uppercase tracking-widest mb-1">Evidence</p>
+          <p class="text-xs text-white/60 leading-relaxed font-mono whitespace-pre-wrap" x-text="l2_evidence"></p>
+        </div>
+        <div x-show="actions && actions.length > 0" class="flex flex-wrap gap-2 pt-1">
+          <template x-for="(action, i) in actions" :key="i">
+            <button @click.stop="action.handler && action.handler()" :class="{ 'bg-indigo-600 hover:bg-indigo-500 text-white border-transparent': action.variant !== 'secondary', 'bg-white/5 hover:bg-white/10 text-white/70 border-white/15': action.variant === 'secondary' }" class="px-3 py-1 rounded-lg border text-xs font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30" x-text="action.label"></button>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card 3: L2 evidence 포함 -->
+    <div
+      x-data="{
+        title: 'T2 구현 검증',
+        l1_context: 'card.html 컴포넌트 작성 완료',
+        l1_choices: 'dev_cards.html 독립 HTML로 구현',
+        l1_signals: 'pytest 3/3 통과, ruff clean',
+        l2_evidence: 'tests/test_card_component.py\n  test_dev_cards_renders       PASSED\n  test_root_has_alpine         PASSED\n  test_root_has_csp_nonce      PASSED\n\nruff check src/ctb_dashboard/server.py\n  All checks passed.',
+        actions: [{ label: 'View Tests', variant: 'primary' }, { label: 'View Source', variant: 'secondary' }],
+        badges: [{ text: 'T2', color: 'blue' }, { text: 'passing', color: 'green' }],
+        variant: '',
+        l1Open: false,
+        l2Open: false,
+        toggleL1() { this.l1Open = !this.l1Open; if (!this.l1Open) this.l2Open = false; },
+        toggleL2() { this.l2Open = !this.l2Open; }
+      }"
+      :class="{ 'border-amber-500/60': variant === 'notification-failed' }"
+      class="relative overflow-hidden rounded-2xl border border-white/10"
+      style="background: linear-gradient(145deg, rgba(255,255,255,0.035) 0%, transparent 60%), #1c1628; box-shadow: 0 4px 24px rgba(0,0,0,0.35), 0 1px 0 rgba(255,255,255,0.04) inset;"
+    >
+      <div x-show="variant === 'notification-failed'" class="absolute left-0 top-0 bottom-0 w-1 bg-amber-500/70 rounded-l-2xl" aria-hidden="true"></div>
+
+      <button @click="toggleL1()" class="w-full text-left px-4 py-3 flex items-start justify-between gap-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 rounded-2xl" :aria-expanded="l1Open" aria-controls="c3-l1">
+        <span class="flex items-center gap-2 flex-wrap min-w-0">
+          <span x-show="variant === 'notification-failed'" class="text-amber-400 text-sm flex-shrink-0" aria-label="notification failed">&#9888;</span>
+          <span class="font-mono text-sm font-medium text-white/90 truncate" x-text="title"></span>
+          <template x-for="(badge, i) in badges" :key="i">
+            <span :class="{ 'bg-blue-500/20 border-blue-400/40 text-blue-300': badge.color === 'blue', 'bg-amber-500/20 border-amber-400/40 text-amber-300': badge.color === 'amber', 'bg-red-500/20 border-red-400/40 text-red-300': badge.color === 'red', 'bg-green-500/20 border-green-400/40 text-green-300': badge.color === 'green' }" class="inline-flex items-center px-2 py-0.5 rounded-full border text-xs font-semibold flex-shrink-0" x-text="badge.text"></span>
+          </template>
+        </span>
+        <span class="text-white/40 text-xs flex-shrink-0 transition-transform duration-200 mt-0.5" :class="{ 'rotate-180': l1Open }" aria-hidden="true">&#9660;</span>
+      </button>
+
+      <div x-show="l1Open" x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0 -translate-y-1" x-transition:enter-end="opacity-100 translate-y-0" x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100 translate-y-0" x-transition:leave-end="opacity-0 -translate-y-1" id="c3-l1" class="px-4 pb-3 space-y-2 border-t border-white/5">
+        <div x-show="l1_context" class="pt-2">
+          <p class="text-xs font-semibold text-white/40 uppercase tracking-widest mb-1">Context</p>
+          <p class="text-sm text-white/75 leading-snug" x-text="l1_context"></p>
+        </div>
+        <div x-show="l1_choices">
+          <p class="text-xs font-semibold text-white/40 uppercase tracking-widest mb-1">Choices</p>
+          <p class="text-sm text-white/75 leading-snug" x-text="l1_choices"></p>
+        </div>
+        <div x-show="l1_signals">
+          <p class="text-xs font-semibold text-white/40 uppercase tracking-widest mb-1">Signals</p>
+          <p class="text-sm text-white/75 leading-snug" x-text="l1_signals"></p>
+        </div>
+        <div x-show="l2_evidence" class="pt-1">
+          <button @click.stop="toggleL2()" class="text-xs text-white/40 hover:text-white/70 underline underline-offset-2 transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 rounded" :aria-expanded="l2Open" aria-controls="c3-l2" x-text="l2Open ? '▲ Hide evidence' : '▼ Show evidence'"></button>
+        </div>
+        <div x-show="l2Open && l2_evidence" x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0" id="c3-l2" class="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+          <p class="text-xs font-semibold text-white/40 uppercase tracking-widest mb-1">Evidence</p>
+          <p class="text-xs text-white/60 leading-relaxed font-mono whitespace-pre-wrap" x-text="l2_evidence"></p>
+        </div>
+        <div x-show="actions && actions.length > 0" class="flex flex-wrap gap-2 pt-1">
+          <template x-for="(action, i) in actions" :key="i">
+            <button @click.stop="action.handler && action.handler()" :class="{ 'bg-indigo-600 hover:bg-indigo-500 text-white border-transparent': action.variant !== 'secondary', 'bg-white/5 hover:bg-white/10 text-white/70 border-white/15': action.variant === 'secondary' }" class="px-3 py-1 rounded-lg border text-xs font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30" x-text="action.label"></button>
+          </template>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /.max-w-2xl -->
+</body>
+</html>

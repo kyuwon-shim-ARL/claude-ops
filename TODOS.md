@@ -1,14 +1,38 @@
 
-## [TODO] state_detector.py ↔ session_state.py 상태 열거 통일
+## [DONE 2026-04-23] state_detector.py ↔ session_state.py 상태 열거 통일
 
-**What:** `ctb-dashboard/src/ctb_dashboard/state_detector.py`와 `claude_ctb/utils/session_state.py`의 SessionState enum을 단일 소스로 통합하거나, 적어도 둘의 상태 목록을 동기화.
+Resolved by P1 S0 of CTB Dashboard UX Overhaul plan
+(`.omc/plans/20260423-ctb-dashboard-ux-overhaul.md`).
 
-**Why:** 대시보드 `state_detector.py`에 `STUCK_AFTER_AGENT` 상태가 있지만 `session_state.py`에는 없음. 현재 각자 독립적으로 진화 중. 미래에 한쪽에만 새 상태를 추가하면 조용한 동작 차이가 발생.
+- `claude_ctb/utils/session_state.py` now canonical. Added `STUCK_AFTER_AGENT`
+  to the enum + STATE_PRIORITY map.
+- `ctb-dashboard/src/ctb_dashboard/state_detector.py` imports `SessionState`
+  from canonical with graceful sys.path discovery + local fallback (for
+  isolated pip-install scenarios).
+- Added `ctb-dashboard/tests/test_session_state_parity.py` — asserts
+  `state_detector.SessionState IS claude_ctb.utils.session_state.SessionState`
+  whenever both are importable, blocking silent divergence regression.
 
-**Pros:** 상태 불일치 버그 원천 차단. 하나의 파일만 수정하면 됨.
+---
 
-**Cons:** 두 패키지(`claude_ctb`와 `ctb_dashboard`) 간 의존성 추가 또는 공유 패키지 생성 필요.
+## [TODO] P2 — 5-level hierarchy drilldown (L1-L5 navigation)
 
-**Context:** 2026-04-16 eng review에서 발견. 현재 `ctb-dashboard`는 별도 패키지로 pip 설치되므로 직접 import가 어려울 수 있음. 가장 간단한 방법은 `state_detector.py`가 `session_state.py`를 import하도록 변경.
+Tracked in plan §5.
 
-**Depends on:** ctb-dashboard 패키지 빌드 파이프라인 확인
+## [TODO] P2 — Living Milestone UX
+
+Builds on `{project}/.omc/milestones.yaml` created in P1.
+Tracked in plan §5.
+
+## [TODO] P2 — Foundation derived view
+
+Tracked in plan §5.
+
+## [TODO] P2 — Migrate index.html session grid to Alpine templates
+
+Complete the strangler migration started in P1.
+
+## [TODO] P3 — Unified rpt viewer + inline feedback loop
+
+Reuse existing `projects_router._structure_feedback` Haiku pipeline.
+Tracked in plan §6.

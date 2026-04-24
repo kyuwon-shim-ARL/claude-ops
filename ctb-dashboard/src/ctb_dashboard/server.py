@@ -7,23 +7,29 @@ Works in both hook-only mode and polling mode.
 
 import asyncio
 import hashlib
+import hmac as _hmac_mod
 import json
 import logging
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import time
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from typing import AsyncGenerator, Dict, Any
 
-from fastapi import FastAPI, Header, HTTPException
+import filelock as _filelock
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
+from starlette.middleware.sessions import SessionMiddleware
 
 from .state_detector import SessionStateAnalyzer, SessionState
 from .sessions import get_all_claude_sessions, get_session_path
@@ -32,7 +38,7 @@ import sys as _sys
 _PSTATUS_DIR = "/home/kyuwon/projects/project-status"
 if _PSTATUS_DIR not in _sys.path:
     _sys.path.insert(0, _PSTATUS_DIR)
-import projects_router as _pstatus_module
+import projects_router as _pstatus_module  # noqa: E402
 _pstatus_scan_loop = _pstatus_module.scan_loop
 projects_router = _pstatus_module.router
 pstatus_static_app = _pstatus_module.pstatus_static_app
@@ -44,6 +50,15 @@ BIND_HOST = "0.0.0.0"  # accessible via Tailscale network
 BIND_PORT = 8420
 _FOCUS_SECRET = os.environ.get("CTB_FOCUS_SECRET", "")
 _SESSION_NAME_RE = re.compile(r'^[a-zA-Z0-9_\-:.]{1,64}$')
+
+# PI Review Gate
+_REVIEW_SECRET = os.environ.get("CTB_REVIEW_SECRET", "")
+_REVIEW_OVERLAY_DIR = os.path.expanduser(
+    os.environ.get("CTB_REVIEW_OVERLAY_DIR", "~/.claude-ops")
+)
+_REVIEW_LOCK_TIMEOUT = int(os.environ.get("CTB_REVIEW_OVERLAY_LOCK_TIMEOUT", "10"))
+if not _REVIEW_SECRET:
+    logger.warning("CTB_REVIEW_SECRET not set — /review route will return 403")
 
 
 class FocusRequest(BaseModel):
@@ -238,6 +253,107 @@ def _poll_sessions() -> Dict[str, Any]:
     }
 
 
+# --- PI Review Gate helpers ---
+
+def _atomic_json_write(path: str, data: dict) -> bool:
+    """Write JSON to path atomically via write-then-rename. Returns False on error."""
+    dir_ = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=dir_, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        return False
+
+
+def _verify_review_sig(card: str, focus: str, rv: str, exp: str, sig: str) -> bool:
+    msg = f"{card}|{focus}|{rv}|{exp}".encode()
+    expected = _hmac_mod.new(_REVIEW_SECRET.encode(), msg, hashlib.sha256).hexdigest()
+    return secrets.compare_digest(expected, sig)
+
+
+def _read_consumed_links(path: str) -> dict:
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return {"links": {}}
+
+
+def _write_consumed_links(path: str, data: dict) -> bool:
+    return _atomic_json_write(path, data)
+
+
+def _write_overlay_link_access(card: str, rv: str, overlay_path: str) -> bool:
+    """Append link_accessed entry to ticket review_history. Returns False if write fails."""
+    try:
+        with open(overlay_path) as f:
+            data = json.load(f)
+    except Exception:
+        return True  # no overlay to update — not a write failure
+
+    tickets = data.get("tickets", {})
+    ticket = tickets.get(card)
+    if ticket is None:
+        return True  # unknown ticket — not a write failure
+
+    history = ticket.setdefault("review_history", [])
+    history.append({"action": "link_accessed", "reviewer": rv, "ts": datetime.now(timezone.utc).isoformat()})
+    ticket["review_history"] = history[-50:]
+    tickets[card] = ticket
+    data["tickets"] = tickets
+
+    return _atomic_json_write(overlay_path, data)
+
+
+def _get_review_tickets() -> list:
+    overlay_path = os.path.join(_REVIEW_OVERLAY_DIR, "ticket-overlay.json")
+    try:
+        with open(overlay_path) as f:
+            data = json.load(f)
+    except Exception:
+        return []
+    return [
+        {"id": tid, "review_state": t.get("review_state", ""), "updated_at": t.get("updated_at", "")}
+        for tid, t in data.get("tickets", {}).items()
+        if t.get("review_state") == "needs_pi_review"
+    ]
+
+
+async def _purge_consumed_loop() -> None:
+    """Hourly purge of consumed-links.json entries older than 7 days."""
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            consumed_path = os.path.join(_REVIEW_OVERLAY_DIR, "consumed-links.json")
+            lock_path = os.path.join(_REVIEW_OVERLAY_DIR, "overlay.lock")
+            cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+            with _filelock.FileLock(lock_path, timeout=_REVIEW_LOCK_TIMEOUT):
+                data = _read_consumed_links(consumed_path)
+                links = data.get("links", {})
+                pruned = {}
+                for k, entry in links.items():
+                    try:
+                        ts = datetime.fromisoformat(entry.get("consumed_at", ""))
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=timezone.utc)
+                        if ts >= cutoff:
+                            pruned[k] = entry
+                    except Exception:
+                        pass
+                if len(pruned) < len(links):
+                    data["links"] = pruned
+                    _write_consumed_links(consumed_path, data)
+        except Exception as e:
+            logger.warning("purge_consumed_loop error: %s", e)
+
+
 async def _background_poller():
     """Background task that polls sessions every POLL_INTERVAL seconds."""
     global _cached_state
@@ -260,12 +376,40 @@ async def lifespan(app: FastAPI):
     logger.info(f"Dashboard server starting on {BIND_HOST}:{BIND_PORT}")
     if not _FOCUS_SECRET:
         logger.warning("CTB_FOCUS_SECRET not set, focus endpoint is unauthenticated")
+
+    # Haiku rate-limiting semaphore: max 5 concurrent calls
+    app.state.haiku_semaphore = asyncio.Semaphore(5)
+    app.state.startup_ready = asyncio.Event()
+    app.state.degraded = False
+
+    # OAuth2 startup check (graceful)
+    try:
+        import google.auth.transport.requests as _gtr  # noqa: PLC0415
+        import google.oauth2.credentials as _gcreds  # noqa: PLC0415
+        _token_path = os.path.expanduser("~/.config/gcloud/application_default_credentials.json")
+        if os.path.exists(_token_path):
+            with open(_token_path) as _f:
+                _cred_data = json.load(_f)
+            _creds = _gcreds.Credentials(token=None, **{k: _cred_data[k] for k in ("client_id","client_secret","refresh_token","token_uri") if k in _cred_data})
+            _creds.refresh(_gtr.Request())
+            logger.info("OAuth2 startup check PASSED")
+        else:
+            logger.info("OAuth2 credentials not found, skipping startup check")
+    except Exception as _e:
+        logger.warning("OAuth2 startup check FAILED: %s — dashboard continues in degraded mode", _e)
+        app.state.degraded = True
+
+    app.state.startup_ready.set()
+
     task = asyncio.create_task(_background_poller())
     pstatus_task = asyncio.create_task(_pstatus_scan_loop())
+    purge_task = asyncio.create_task(_purge_consumed_loop())
+    app.state.purge_consumed_task = purge_task
     yield
     task.cancel()
     pstatus_task.cancel()
-    for t in (task, pstatus_task):
+    purge_task.cancel()
+    for t in (task, pstatus_task, purge_task):
         try:
             await t
         except asyncio.CancelledError:
@@ -285,25 +429,48 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+_SESSION_SECRET_KEY = os.environ.get("SESSION_SECRET_KEY") or secrets.token_hex(32)
+app.add_middleware(SessionMiddleware, secret_key=_SESSION_SECRET_KEY, max_age=72 * 3600)
 
 # Serve static files (HTML frontend)
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+_templates_dir = os.path.join(os.path.dirname(__file__), "templates")
+templates = Jinja2Templates(directory=_templates_dir)
+
 # Project-status integration (Phase C)
 app.mount("/pstatus-static", pstatus_static_app, name="pstatus-static")
 app.include_router(projects_router, prefix="/projects")
 
 
+@app.get("/dev/cards")
+async def dev_cards(request: Request):
+    return templates.TemplateResponse("dev_cards.html", {"request": request, "csp_nonce": secrets.token_hex(16)})
+
+
 @app.get("/")
-async def root():
-    """Serve dashboard HTML."""
-    index_path = os.path.join(static_dir, "index.html")
-    if os.path.isfile(index_path):
-        with open(index_path, "r") as f:
-            return HTMLResponse(content=f.read())
-    return HTMLResponse(content="<h1>Dashboard not found. Place index.html in static/</h1>")
+async def root(request: Request):
+    """Serve dashboard HTML via Jinja2 template with CSP nonce."""
+    nonce = secrets.token_hex(16)
+    # Allow existing inline scripts (tailwind config, main app JS) via 'unsafe-inline'.
+    # Alpine uses @alpinejs/csp (eval-free build) so no 'unsafe-eval' needed.
+    csp = (
+        f"script-src 'self' 'unsafe-inline' 'nonce-{nonce}' "
+        "https://cdn.tailwindcss.com https://cdn.jsdelivr.net "
+        "https://fonts.googleapis.com; object-src 'none'"
+    )
+    response = templates.TemplateResponse(
+        "index.html",
+        {"request": request, "csp_nonce": nonce},
+    )
+    response.headers["Content-Security-Policy"] = csp
+    return response
+
+
+async def get_haiku_semaphore(request: Request) -> asyncio.Semaphore:
+    return request.app.state.haiku_semaphore
 
 
 @app.get("/api/sessions")
@@ -346,11 +513,30 @@ async def get_session_log(name: str, lines: int = 50):
         raise HTTPException(status_code=504, detail="tmux timeout")
 
 
+_TICKET_LINKS_PATH = os.path.expanduser("~/.claude-ops/session-ticket-links.json")
+_BADGE_TTL = 30  # seconds
+
+
+@app.get("/api/session-ticket-links")
+async def session_ticket_links(response: Response):
+    """Return session→ticket mapping for badge overlay on session grid."""
+    try:
+        with open(_TICKET_LINKS_PATH) as f:
+            links = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        links = {}
+    response.headers["X-Server-Time"] = str(int(time.time()))
+    response.headers["X-Badge-TTL"] = str(_BADGE_TTL)
+    return {"links": links, "ttl": _BADGE_TTL}
+
+
 @app.get("/api/health")
-async def health():
+async def health(request: Request):
     """Health check endpoint."""
+    degraded = getattr(request.app.state, "degraded", False)
     return {
-        "status": "ok",
+        "status": "degraded" if degraded else "ok",
+        "degraded": degraded,
         "sessions_count": len(_cached_state.get("sessions", [])),
         "last_updated": _cached_state.get("updated_at", 0),
     }
@@ -441,13 +627,99 @@ async def focus_session(
     # The extension watches this file and calls terminal.show() + focus to switch tabs
     _FOCUS_SIGNAL_PATH = "/tmp/ctb-focus-signal.json"
     try:
-        import json as _json, time as _time
+        import json as _json
+        import time as _time
         with open(_FOCUS_SIGNAL_PATH, "w") as f:
             _json.dump({"session": req.session, "ts": _time.time()}, f)
     except Exception as e:
         logger.warning(f"Failed to write focus signal: {e}")
 
     return {"status": "focused", "session": req.session, "tmux_switched": tmux_ok, "window_activated": window_ok}
+
+
+@app.get("/review")
+async def review_gate(
+    request: Request,
+    card: str = "",
+    focus: str = "",
+    rv: str = "",
+    exp: str = "",
+    sig: str = "",
+):
+    """PI Review Gate — HMAC deep-link or session-cookie auth."""
+    if not _REVIEW_SECRET:
+        raise HTTPException(status_code=403, detail="Review gate not configured")
+
+    # Session bypass: already authenticated reviewer
+    if not sig and request.session.get("reviewer_id"):
+        tickets = _get_review_tickets()
+        return templates.TemplateResponse(
+            "review.html",
+            {"request": request, "tickets": tickets, "reviewer_id": request.session["reviewer_id"]},
+        )
+
+    if not (rv and exp and sig):
+        raise HTTPException(status_code=403, detail="Missing required parameters")
+
+    try:
+        exp_int = int(exp)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Invalid expiry")
+
+    if time.time() > exp_int:
+        raise HTTPException(status_code=403, detail="Link expired")
+
+    if not _verify_review_sig(card, focus, rv, exp, sig):
+        raise HTTPException(status_code=403, detail="Invalid signature")
+
+    consumed_path = os.path.join(_REVIEW_OVERLAY_DIR, "consumed-links.json")
+    overlay_path = os.path.join(_REVIEW_OVERLAY_DIR, "ticket-overlay.json")
+    lock_path = os.path.join(_REVIEW_OVERLAY_DIR, "overlay.lock")
+
+    with _filelock.FileLock(lock_path, timeout=_REVIEW_LOCK_TIMEOUT):
+        cl_data = _read_consumed_links(consumed_path)
+        links = cl_data.setdefault("links", {})
+        link_status = links.get(sig, {}).get("status")
+
+        if link_status == "consumed":
+            raise HTTPException(status_code=403, detail="Link already used")
+        # "write-failed" → allow one retry (fall through)
+
+        links[sig] = {"status": "consumed", "consumed_at": datetime.now(timezone.utc).isoformat()}
+        if not _write_consumed_links(consumed_path, cl_data):
+            raise HTTPException(status_code=503, detail="Service unavailable")
+
+        # M14: reject links issued before the current review cycle started
+        if card:
+            try:
+                with open(overlay_path) as _f:
+                    _ov = json.load(_f)
+                _since = _ov.get("tickets", {}).get(card, {}).get("needs_review_since")
+                if _since:
+                    _since_ts = datetime.fromisoformat(_since)
+                    if _since_ts.tzinfo is None:
+                        _since_ts = _since_ts.replace(tzinfo=timezone.utc)
+                    _link_iat = datetime.fromtimestamp(exp_int - 72 * 3600, tz=timezone.utc)
+                    if _link_iat < _since_ts:
+                        raise HTTPException(status_code=403, detail="Link predates current review cycle")
+            except HTTPException:
+                raise
+            except Exception:
+                pass  # overlay unreadable — allow through
+
+        if card and not _write_overlay_link_access(card, rv, overlay_path):
+            # Rollback: mark as write-failed so next attempt can retry
+            links[sig]["status"] = "write-failed"
+            if not _write_consumed_links(consumed_path, cl_data):
+                logger.error("Rollback write failed for sig %s — link permanently consumed", sig[:8])
+            raise HTTPException(status_code=503, detail="Overlay write failed")
+
+    request.session["reviewer_id"] = rv
+    tickets = _get_review_tickets()
+    return templates.TemplateResponse(
+        "review.html",
+        {"request": request, "tickets": tickets, "reviewer_id": rv},
+    )
 
 
 def _kill_previous_on_port(port: int):
