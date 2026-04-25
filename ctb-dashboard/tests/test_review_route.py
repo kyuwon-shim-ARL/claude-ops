@@ -4,6 +4,7 @@ import hmac
 import json
 import time
 from datetime import datetime, timezone
+from unittest.mock import patch, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,17 +15,17 @@ from ctb_dashboard.server import app
 _SECRET = "test-review-secret-xyz"
 
 
-def _make_sig(card: str, focus: str, rv: str, exp: int, secret: str = _SECRET) -> str:
-    msg = f"{card}|{focus}|{rv}|{exp}".encode()
+def _make_sig(card: str, focus: str, rv: str, exp: int, project: str = "", secret: str = _SECRET) -> str:
+    msg = "|".join([card, focus, rv, str(exp), project]).encode()
     return hmac.new(secret.encode(), msg, hashlib.sha256).hexdigest()
 
 
-def _valid_params(tmp_path, rv="kyuwon-shim", exp_offset=3600):
+def _valid_params(tmp_path, rv="kyuwon-shim", exp_offset=3600, project="claude-ops"):
     exp = int(time.time()) + exp_offset
     card = "gh-1"
     focus = ""
-    sig = _make_sig(card, focus, rv, exp)
-    return {"card": card, "focus": focus, "rv": rv, "exp": str(exp), "sig": sig}
+    sig = _make_sig(card, focus, rv, exp, project)
+    return {"card": card, "focus": focus, "rv": rv, "exp": str(exp), "project": project, "sig": sig}
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +33,7 @@ def _patch_review(tmp_path, monkeypatch):
     monkeypatch.setattr(_srv, "_REVIEW_SECRET", _SECRET)
     monkeypatch.setattr(_srv, "_REVIEW_OVERLAY_DIR", str(tmp_path))
     monkeypatch.setattr(_srv, "_REVIEW_LOCK_TIMEOUT", 5)
+    monkeypatch.setattr(_srv, "_CTB_PROJECTS_ROOT", str(tmp_path))
     yield
 
 
@@ -51,7 +53,7 @@ def test_missing_sig_returns_403():
 def test_expired_returns_403(tmp_path):
     client = TestClient(app)
     exp = int(time.time()) - 1  # already expired
-    sig = _make_sig("gh-1", "", "kyuwon-shim", exp)
+    sig = _make_sig("gh-1", "", "kyuwon-shim", exp, "")
     r = client.get("/review", params={"card": "gh-1", "rv": "kyuwon-shim", "exp": str(exp), "sig": sig})
     assert r.status_code == 403
 
@@ -85,9 +87,8 @@ def test_replayed_returns_403(tmp_path):
 
 def test_write_failed_sig_can_retry(tmp_path):
     """A sig stored as write-failed is allowed one more attempt."""
-    # Pre-seed consumed-links.json with write-failed status
     exp = int(time.time()) + 3600
-    sig = _make_sig("gh-1", "", "kyuwon-shim", exp)
+    sig = _make_sig("gh-1", "", "kyuwon-shim", exp, "")
     consumed_path = tmp_path / "consumed-links.json"
     consumed_path.write_text(json.dumps({
         "links": {sig: {"status": "write-failed", "consumed_at": "2026-01-01T00:00:00+00:00"}}
@@ -109,7 +110,6 @@ def test_review_secret_not_set_returns_403(monkeypatch):
 
 def test_link_predating_review_cycle_returns_403(tmp_path):
     """M14: link issued before current review cycle (needs_review_since) → 403."""
-    # needs_review_since = now → any link with iat_approx (exp - 72h) before now is stale
     now_iso = datetime.now(timezone.utc).isoformat()
     overlay = tmp_path / "ticket-overlay.json"
     overlay.write_text(json.dumps({
@@ -122,9 +122,8 @@ def test_link_predating_review_cycle_returns_403(tmp_path):
             }
         },
     }))
-    # exp = now + 1h → link_iat_approx = now - 71h → predates needs_review_since
     exp = int(time.time()) + 3600
-    sig = _make_sig("gh-1", "", "kyuwon-shim", exp)
+    sig = _make_sig("gh-1", "", "kyuwon-shim", exp, "")
     client = TestClient(app)
     r = client.get("/review", params={"card": "gh-1", "rv": "kyuwon-shim", "exp": str(exp), "sig": sig})
     assert r.status_code == 403
@@ -133,7 +132,6 @@ def test_link_predating_review_cycle_returns_403(tmp_path):
 
 def test_link_after_review_cycle_returns_200(tmp_path):
     """M14: link issued after needs_review_since passes cycle check → 200."""
-    # needs_review_since = 73h ago → link_iat_approx (exp - 72h = now - 71h) is after it
     since_ts = datetime.fromtimestamp(time.time() - 73 * 3600, tz=timezone.utc).isoformat()
     overlay = tmp_path / "ticket-overlay.json"
     overlay.write_text(json.dumps({
@@ -146,9 +144,8 @@ def test_link_after_review_cycle_returns_200(tmp_path):
             }
         },
     }))
-    # exp = now + 1h → link_iat_approx = now - 71h → after needs_review_since (73h ago)
     exp = int(time.time()) + 3600
-    sig = _make_sig("gh-1", "", "kyuwon-shim", exp)
+    sig = _make_sig("gh-1", "", "kyuwon-shim", exp, "")
     client = TestClient(app)
     r = client.get("/review", params={"card": "gh-1", "rv": "kyuwon-shim", "exp": str(exp), "sig": sig})
     assert r.status_code == 200
@@ -169,3 +166,100 @@ def test_review_lists_needs_pi_review_tickets(tmp_path):
     assert r.status_code == 200
     assert "gh-42" in r.text
     assert "gh-99" not in r.text
+
+
+# --- plan / rpt content ---
+
+def test_review_shows_plan_when_plan_exists(tmp_path):
+    """Plan file in .omc/plans/ is rendered in the review page."""
+    project_dir = tmp_path / "claude-ops"
+    plans_dir = project_dir / ".omc" / "plans"
+    plans_dir.mkdir(parents=True)
+    (plans_dir / "2026-04-25-plan.md").write_text("# My Plan\nStep 1: do the thing")
+
+    client = TestClient(app)
+    params = _valid_params(tmp_path, project="claude-ops")
+    r = client.get("/review", params=params)
+    assert r.status_code == 200
+    assert "My Plan" in r.text
+
+
+def test_review_shows_placeholder_when_no_plan(tmp_path):
+    """No plan file → placeholder text shown."""
+    (tmp_path / "claude-ops").mkdir()
+    client = TestClient(app)
+    params = _valid_params(tmp_path, project="claude-ops")
+    r = client.get("/review", params=params)
+    assert r.status_code == 200
+    assert "아직 실행 계획이 없습니다" in r.text
+
+
+def test_review_shows_rpt_when_rpt_exists(tmp_path):
+    """RPT artifact found → rendered in review page."""
+    rpt_mock = MagicMock()
+    rpt_mock.read_text.return_value = "# Report\nResult: success"
+
+    with patch.object(_srv, "_find_rpt_artifact", return_value=rpt_mock):
+        (tmp_path / "claude-ops").mkdir()
+        client = TestClient(app)
+        params = _valid_params(tmp_path, project="claude-ops")
+        r = client.get("/review", params=params)
+    assert r.status_code == 200
+    assert "Result" in r.text
+
+
+def test_review_shows_placeholder_when_no_rpt(tmp_path):
+    """No RPT artifact → placeholder text shown."""
+    with patch.object(_srv, "_find_rpt_artifact", return_value=None):
+        (tmp_path / "claude-ops").mkdir()
+        client = TestClient(app)
+        params = _valid_params(tmp_path, project="claude-ops")
+        r = client.get("/review", params=params)
+    assert r.status_code == 200
+    assert "아직 실행 결과가 없습니다" in r.text
+
+
+def test_review_link_endpoint_returns_signed_url(tmp_path, monkeypatch):
+    """GET /api/project/{name}/review-link returns a signed URL."""
+    monkeypatch.setattr(_srv, "_CTB_DEFAULT_REVIEWER_ID", "test-reviewer")
+    (tmp_path / "claude-ops").mkdir()
+    client = TestClient(app)
+    r = client.get(
+        "/api/project/claude-ops/review-link",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert "url" in data
+    assert "project=claude-ops" in data["url"]
+    assert "sig=" in data["url"]
+
+
+def test_review_link_unknown_project_returns_404(tmp_path):
+    """Unknown project name → 404."""
+    client = TestClient(app)
+    r = client.get(
+        "/api/project/nonexistent-xyz/review-link",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.parametrize("bad_project", ["../secret", "/etc/passwd", ""])
+def test_review_traversal_project_returns_400(bad_project, tmp_path):
+    """Malformed project names → 400."""
+    client = TestClient(app)
+    r = client.get(
+        f"/api/project/{bad_project}/review-link",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+    assert r.status_code in (400, 404, 422)
+
+
+def test_plan_load_exception_shows_placeholder(tmp_path):
+    """If _load_latest_plan raises, placeholder is shown (no 500)."""
+    with patch.object(_srv, "_load_latest_plan", side_effect=Exception("disk error")):
+        client = TestClient(app)
+        params = _valid_params(tmp_path, project="claude-ops")
+        r = client.get("/review", params=params)
+    assert r.status_code == 200

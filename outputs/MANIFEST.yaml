@@ -271,3 +271,13 @@ experiments:
       - "T5: gather_tickets GitHub Issues TTL + OMC plans + git커밋"
       - "T6: 프론트엔드 수렴 타임라인 + 가독성 렌더링"
       - "T7: 테스트"
+  e025:
+    path: outputs/e025/
+    script: null
+    params: {}
+    outputs: []
+    status: experimental
+    description: "PI Review Link — /review에 plan + report 표시"
+    issue: 19
+    branch: feature-19
+    stale: false

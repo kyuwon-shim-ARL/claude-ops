@@ -30,6 +30,7 @@ dependencies = [
     "starlette>=0.27",
     "filelock>=3.29.0",
     "itsdangerous>=2.2.0",
+    "bleach==6.1.0",
 ]
 
 [project.urls]

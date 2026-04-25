@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import re as _re
 import secrets
 import shutil
 import subprocess
@@ -21,6 +22,9 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import AsyncGenerator, Dict, Any
+from pathlib import Path
+import markdown as _markdown
+import bleach as _bleach
 
 import filelock as _filelock
 from fastapi import FastAPI, Header, HTTPException, Request, Response
@@ -42,6 +46,8 @@ import projects_router as _pstatus_module  # noqa: E402
 _pstatus_scan_loop = _pstatus_module.scan_loop
 projects_router = _pstatus_module.router
 pstatus_static_app = _pstatus_module.pstatus_static_app
+from scanner import PROJECTS_ROOT as _SCANNER_PROJECTS_ROOT  # noqa: E402
+from scanner import find_rpt_artifact as _find_rpt_artifact  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +63,49 @@ _REVIEW_OVERLAY_DIR = os.path.expanduser(
     os.environ.get("CTB_REVIEW_OVERLAY_DIR", "~/.claude-ops")
 )
 _REVIEW_LOCK_TIMEOUT = int(os.environ.get("CTB_REVIEW_OVERLAY_LOCK_TIMEOUT", "10"))
+_CTB_PROJECTS_ROOT = os.environ.get("CTB_PROJECTS_ROOT", _SCANNER_PROJECTS_ROOT)
+_CTB_DEFAULT_REVIEWER_ID = os.environ.get("CTB_DEFAULT_REVIEWER_ID", "")
+
+_REVIEW_ALLOWED_TAGS = frozenset({
+    "p", "h1", "h2", "h3", "h4", "ul", "ol", "li",
+    "strong", "em", "code", "pre", "blockquote", "br", "a",
+})
+_REVIEW_ALLOWED_ATTRS: dict = {"a": ["href", "title"]}
+
+def _load_latest_plan(project: str) -> str | None:
+    try:
+        root = Path(_CTB_PROJECTS_ROOT).resolve()
+        project_path = (root / project).resolve()
+        if not str(project_path).startswith(str(root) + "/"):
+            return None
+        plans = list(project_path.glob(".omc/plans/*.md"))
+        if not plans:
+            return None
+        latest = sorted(plans, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+        content = latest.read_text()
+        html = _markdown.markdown(content, extensions=["fenced_code", "tables"])
+        return _bleach.clean(html, tags=_REVIEW_ALLOWED_TAGS, attributes=_REVIEW_ALLOWED_ATTRS, strip_comments=True)
+    except Exception as e:
+        logger.warning("plan load failed for %s: %s", project, e)
+        return None
+
+
+def _load_rpt(project: str) -> str | None:
+    try:
+        root = Path(_CTB_PROJECTS_ROOT).resolve()
+        project_path = (root / project).resolve()
+        if not str(project_path).startswith(str(root) + "/"):
+            return None
+        rpt_path = _find_rpt_artifact(project_path)
+        if not rpt_path:
+            return None
+        content = rpt_path.read_text()
+        html = _markdown.markdown(content, extensions=["fenced_code", "tables"])
+        return _bleach.clean(html, tags=_REVIEW_ALLOWED_TAGS, attributes=_REVIEW_ALLOWED_ATTRS, strip_comments=True)
+    except Exception as e:
+        logger.warning("rpt load failed for %s: %s", project, e)
+        return None
+
 if not _REVIEW_SECRET:
     logger.warning("CTB_REVIEW_SECRET not set — /review route will return 403")
 
@@ -272,8 +321,8 @@ def _atomic_json_write(path: str, data: dict) -> bool:
         return False
 
 
-def _verify_review_sig(card: str, focus: str, rv: str, exp: str, sig: str) -> bool:
-    msg = f"{card}|{focus}|{rv}|{exp}".encode()
+def _verify_review_sig(card: str, focus: str, rv: str, exp: str, project: str, sig: str) -> bool:
+    msg = "|".join([card, focus, rv, str(exp), project]).encode()
     expected = _hmac_mod.new(_REVIEW_SECRET.encode(), msg, hashlib.sha256).hexdigest()
     return secrets.compare_digest(expected, sig)
 
@@ -637,6 +686,37 @@ async def focus_session(
     return {"status": "focused", "session": req.session, "tmux_switched": tmux_ok, "window_activated": window_ok}
 
 
+@app.get("/api/project/{name}/review-link")
+async def review_link(
+    name: str,
+    request: Request,
+    rv: str = "",
+    ttl: int = 72 * 3600,
+):
+    """Generate a HMAC-signed /review deep-link for a project."""
+    if request.headers.get("X-Requested-With") != "XMLHttpRequest":
+        raise HTTPException(status_code=403, detail="XHR only")
+    if not _REVIEW_SECRET:
+        raise HTTPException(status_code=503, detail="Review gate not configured")
+    if not _re.match(r"^[a-zA-Z0-9_-]+$", name):
+        raise HTTPException(status_code=400, detail="Invalid project name")
+    root = Path(_CTB_PROJECTS_ROOT).resolve()
+    project_path = (root / name).resolve()
+    if not str(project_path).startswith(str(root) + "/") or not project_path.is_dir():
+        raise HTTPException(status_code=404, detail="Project not found")
+    reviewer = rv or _CTB_DEFAULT_REVIEWER_ID
+    if not reviewer:
+        raise HTTPException(status_code=400, detail="Reviewer ID required")
+    exp = int(time.time()) + min(ttl, 7 * 24 * 3600)
+    sig = _hmac_mod.new(
+        _REVIEW_SECRET.encode(),
+        "|".join(["", "", reviewer, str(exp), name]).encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    url = f"/review?card=&focus=&rv={reviewer}&exp={exp}&project={name}&sig={sig}"
+    return {"url": url, "expires_at": exp, "project": name}
+
+
 @app.get("/review")
 async def review_gate(
     request: Request,
@@ -644,6 +724,7 @@ async def review_gate(
     focus: str = "",
     rv: str = "",
     exp: str = "",
+    project: str = "",
     sig: str = "",
 ):
     """PI Review Gate — HMAC deep-link or session-cookie auth."""
@@ -655,7 +736,8 @@ async def review_gate(
         tickets = _get_review_tickets()
         return templates.TemplateResponse(
             "review.html",
-            {"request": request, "tickets": tickets, "reviewer_id": request.session["reviewer_id"]},
+            {"request": request, "tickets": tickets, "reviewer_id": request.session["reviewer_id"],
+             "plan_html": "", "rpt_html": "", "project_name": ""},
         )
 
     if not (rv and exp and sig):
@@ -666,11 +748,11 @@ async def review_gate(
     except ValueError:
         raise HTTPException(status_code=403, detail="Invalid expiry")
 
+    if not _verify_review_sig(card, focus, rv, exp, project, sig):
+        raise HTTPException(status_code=403, detail="Invalid signature")
+
     if time.time() > exp_int:
         raise HTTPException(status_code=403, detail="Link expired")
-
-    if not _verify_review_sig(card, focus, rv, exp, sig):
-        raise HTTPException(status_code=403, detail="Invalid signature")
 
     consumed_path = os.path.join(_REVIEW_OVERLAY_DIR, "consumed-links.json")
     overlay_path = os.path.join(_REVIEW_OVERLAY_DIR, "ticket-overlay.json")
@@ -716,10 +798,21 @@ async def review_gate(
 
     request.session["reviewer_id"] = rv
     tickets = _get_review_tickets()
-    return templates.TemplateResponse(
+    try:
+        plan_html = _load_latest_plan(project) or ""
+    except Exception:
+        plan_html = ""
+    try:
+        rpt_html = _load_rpt(project) or ""
+    except Exception:
+        rpt_html = ""
+    response = templates.TemplateResponse(
         "review.html",
-        {"request": request, "tickets": tickets, "reviewer_id": rv},
+        {"request": request, "tickets": tickets, "reviewer_id": rv,
+         "plan_html": plan_html, "rpt_html": rpt_html, "project_name": project},
     )
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def _kill_previous_on_port(port: int):

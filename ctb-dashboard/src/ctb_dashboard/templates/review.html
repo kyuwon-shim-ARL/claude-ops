@@ -3,14 +3,55 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PI Review Gate</title>
+  <title>PI Review Gate{% if project_name %} — {{ project_name }}{% endif %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .prose h1,.prose h2,.prose h3{font-weight:700;margin:1rem 0 .5rem}
+    .prose h1{font-size:1.5rem}.prose h2{font-size:1.25rem}.prose h3{font-size:1.1rem}
+    .prose p{margin:.5rem 0}.prose ul,.prose ol{margin:.5rem 0;padding-left:1.5rem}
+    .prose ul{list-style:disc}.prose ol{list-style:decimal}
+    .prose code{background:#374151;padding:.1rem .3rem;border-radius:.25rem;font-size:.875rem}
+    .prose pre{background:#1f2937;padding:1rem;border-radius:.5rem;overflow-x:auto;margin:.5rem 0}
+    .prose pre code{background:none;padding:0}
+    .prose blockquote{border-left:3px solid #4b5563;padding-left:1rem;color:#9ca3af;margin:.5rem 0}
+    .prose a{color:#60a5fa;text-decoration:underline}
+    .prose strong{font-weight:700}.prose em{font-style:italic}
+  </style>
 </head>
 <body class="bg-gray-900 text-white min-h-screen p-8">
-  <div class="max-w-2xl mx-auto">
-    <h1 class="text-2xl font-bold mb-2">PI Review Gate</h1>
+  <div class="max-w-3xl mx-auto">
+    <h1 class="text-2xl font-bold mb-1">PI Review Gate{% if project_name %} — <span class="text-blue-400">{{ project_name }}</span>{% endif %}</h1>
     <p class="text-gray-400 mb-8">Reviewer: <span class="font-mono text-blue-400">{{ reviewer_id }}</span></p>
 
+    <!-- Plan Section -->
+    <div class="mb-6">
+      <h2 class="text-lg font-semibold mb-3 flex items-center gap-2">
+        <span>📋</span> 실행 계획 (Plan)
+      </h2>
+      <div class="bg-gray-800 rounded-lg p-5 border border-gray-700">
+        {% if plan_html %}
+          <div class="prose text-gray-200 text-sm">{{ plan_html | safe }}</div>
+        {% else %}
+          <p class="text-gray-500 italic">아직 실행 계획이 없습니다.</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Report Section -->
+    <div class="mb-8">
+      <h2 class="text-lg font-semibold mb-3 flex items-center gap-2">
+        <span>📄</span> 실행 결과 (Report)
+      </h2>
+      <div class="bg-gray-800 rounded-lg p-5 border border-gray-700">
+        {% if rpt_html %}
+          <div class="prose text-gray-200 text-sm">{{ rpt_html | safe }}</div>
+        {% else %}
+          <p class="text-gray-500 italic">아직 실행 결과가 없습니다.</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Ticket Review Section -->
     {% if tickets %}
       <div class="space-y-4">
         {% for ticket in tickets %}
@@ -20,19 +61,21 @@
           {% if ticket.updated_at %}
           <div class="mt-1 text-xs text-gray-500">Updated: {{ ticket.updated_at }}</div>
           {% endif %}
-          <div class="mt-4 flex gap-3">
+          <div class="mt-4 flex gap-3 flex-wrap items-start">
             <form method="post" action="/review/approve">
               <input type="hidden" name="ticket_id" value="{{ ticket.id }}">
               <button type="submit"
                 class="bg-green-700 hover:bg-green-600 px-4 py-2 rounded text-sm font-medium transition-colors">
-                Approve
+                ✅ Approve
               </button>
             </form>
-            <form method="post" action="/review/reject">
+            <form method="post" action="/review/reject" class="flex gap-2 items-start flex-wrap">
               <input type="hidden" name="ticket_id" value="{{ ticket.id }}">
+              <textarea name="feedback" rows="2" placeholder="피드백 (선택사항)..."
+                class="bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm text-white w-64 resize-none focus:outline-none focus:border-blue-500"></textarea>
               <button type="submit"
                 class="bg-red-700 hover:bg-red-600 px-4 py-2 rounded text-sm font-medium transition-colors">
-                Reject
+                ❌ Reject
               </button>
             </form>
           </div>
