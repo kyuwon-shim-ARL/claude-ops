@@ -28,13 +28,23 @@
       <h2 class="text-lg font-semibold mb-3 flex items-center gap-2">
         <span>📋</span> 실행 계획 (Plan)
       </h2>
-      <div class="bg-gray-800 rounded-lg p-5 border border-gray-700">
-        {% if plan_html %}
-          <div class="prose text-gray-200 text-sm">{{ plan_html | safe }}</div>
-        {% else %}
-          <p class="text-gray-500 italic">아직 실행 계획이 없습니다.</p>
-        {% endif %}
-      </div>
+      {% if plan_summary_html %}
+        <div class="bg-gray-800 rounded-lg p-5 border border-blue-700 mb-2">
+          <div class="prose text-gray-200 text-sm">{{ plan_summary_html | safe }}</div>
+        </div>
+      {% endif %}
+      {% if plan_full_html %}
+      <details class="mb-2">
+        <summary class="cursor-pointer text-sm text-gray-400 hover:text-gray-200 mb-2">
+          {% if plan_summary_html %}전체 실행 계획 보기{% else %}실행 계획 (구형 포맷){% endif %}
+        </summary>
+        <div class="bg-gray-800 rounded-lg p-5 border border-gray-700 mt-2">
+          <div class="prose text-gray-200 text-sm">{{ plan_full_html | safe }}</div>
+        </div>
+      </details>
+      {% else %}
+        <p class="text-gray-500 italic">아직 실행 계획이 없습니다.</p>
+      {% endif %}
     </div>
 
     <!-- Report Section -->

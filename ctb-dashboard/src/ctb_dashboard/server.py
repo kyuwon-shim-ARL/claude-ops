@@ -12,7 +12,6 @@ import json
 import logging
 import os
 import re
-import re as _re
 import secrets
 import shutil
 import subprocess
@@ -72,22 +71,48 @@ _REVIEW_ALLOWED_TAGS = frozenset({
 })
 _REVIEW_ALLOWED_ATTRS: dict = {"a": ["href", "title"]}
 
-def _load_latest_plan(project: str) -> str | None:
+
+def _render_plan_html(md: str) -> str:
+    html = _markdown.markdown(md, extensions=["fenced_code", "tables"])
+    return _bleach.clean(html, tags=_REVIEW_ALLOWED_TAGS,
+                         attributes=_REVIEW_ALLOWED_ATTRS, strip_comments=True)
+
+
+def _extract_pi_summary_section(content: str) -> str | None:
+    m = re.search(
+        r'(^## PI Review Summary\s*\n.*?)(?=^##[^#]|\Z)',
+        content,
+        re.MULTILINE | re.DOTALL,
+    )
+    if not m:
+        return None
+    section = m.group(1).strip()
+    if not section:
+        return None
+    # Require at least one content line beyond the heading itself
+    body = re.sub(r'^## PI Review Summary\s*', '', section, flags=re.MULTILINE).strip()
+    return section if body else None
+
+
+def _load_latest_plan(project: str) -> dict[str, str | None]:
     try:
         root = Path(_CTB_PROJECTS_ROOT).resolve()
         project_path = (root / project).resolve()
         if not str(project_path).startswith(str(root) + "/"):
-            return None
+            return {"summary": None, "full": None}
         plans = list(project_path.glob(".omc/plans/*.md"))
         if not plans:
-            return None
+            return {"summary": None, "full": None}
         latest = sorted(plans, key=lambda p: p.stat().st_mtime, reverse=True)[0]
         content = latest.read_text()
-        html = _markdown.markdown(content, extensions=["fenced_code", "tables"])
-        return _bleach.clean(html, tags=_REVIEW_ALLOWED_TAGS, attributes=_REVIEW_ALLOWED_ATTRS, strip_comments=True)
+        summary_md = _extract_pi_summary_section(content)
+        return {
+            "summary": _render_plan_html(summary_md) if summary_md else None,
+            "full": _render_plan_html(content),
+        }
     except Exception as e:
         logger.warning("plan load failed for %s: %s", project, e)
-        return None
+        return {"summary": None, "full": None}
 
 
 def _load_rpt(project: str) -> str | None:
@@ -496,7 +521,7 @@ app.include_router(projects_router, prefix="/projects")
 
 @app.get("/dev/cards")
 async def dev_cards(request: Request):
-    return templates.TemplateResponse("dev_cards.html", {"request": request, "csp_nonce": secrets.token_hex(16)})
+    return templates.TemplateResponse(request, "dev_cards.html", {"csp_nonce": secrets.token_hex(16)})
 
 
 @app.get("/")
@@ -511,8 +536,9 @@ async def root(request: Request):
         "https://fonts.googleapis.com; object-src 'none'"
     )
     response = templates.TemplateResponse(
+        request,
         "index.html",
-        {"request": request, "csp_nonce": nonce},
+        {"csp_nonce": nonce},
     )
     response.headers["Content-Security-Policy"] = csp
     return response
@@ -698,7 +724,7 @@ async def review_link(
         raise HTTPException(status_code=403, detail="XHR only")
     if not _REVIEW_SECRET:
         raise HTTPException(status_code=503, detail="Review gate not configured")
-    if not _re.match(r"^[a-zA-Z0-9_-]+$", name):
+    if not re.match(r"^[a-zA-Z0-9_-]+$", name):
         raise HTTPException(status_code=400, detail="Invalid project name")
     root = Path(_CTB_PROJECTS_ROOT).resolve()
     project_path = (root / name).resolve()
@@ -735,9 +761,10 @@ async def review_gate(
     if not sig and request.session.get("reviewer_id"):
         tickets = _get_review_tickets()
         return templates.TemplateResponse(
+            request,
             "review.html",
-            {"request": request, "tickets": tickets, "reviewer_id": request.session["reviewer_id"],
-             "plan_html": "", "rpt_html": "", "project_name": ""},
+            {"tickets": tickets, "reviewer_id": request.session["reviewer_id"],
+             "plan_summary_html": "", "plan_full_html": "", "rpt_html": "", "project_name": ""},
         )
 
     if not (rv and exp and sig):
@@ -798,18 +825,16 @@ async def review_gate(
 
     request.session["reviewer_id"] = rv
     tickets = _get_review_tickets()
-    try:
-        plan_html = _load_latest_plan(project) or ""
-    except Exception:
-        plan_html = ""
-    try:
-        rpt_html = _load_rpt(project) or ""
-    except Exception:
-        rpt_html = ""
+    plan = _load_latest_plan(project)
+    plan_summary_html = plan["summary"] or ""
+    plan_full_html = plan["full"] or ""
+    rpt_html = _load_rpt(project) or ""
     response = templates.TemplateResponse(
+        request,
         "review.html",
-        {"request": request, "tickets": tickets, "reviewer_id": rv,
-         "plan_html": plan_html, "rpt_html": rpt_html, "project_name": project},
+        {"tickets": tickets, "reviewer_id": rv,
+         "plan_summary_html": plan_summary_html, "plan_full_html": plan_full_html,
+         "rpt_html": rpt_html, "project_name": project},
     )
     response.headers["Cache-Control"] = "no-store"
     return response

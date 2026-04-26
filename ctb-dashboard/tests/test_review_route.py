@@ -257,9 +257,66 @@ def test_review_traversal_project_returns_400(bad_project, tmp_path):
 
 
 def test_plan_load_exception_shows_placeholder(tmp_path):
-    """If _load_latest_plan raises, placeholder is shown (no 500)."""
-    with patch.object(_srv, "_load_latest_plan", side_effect=Exception("disk error")):
+    """If _load_latest_plan returns empty dict, placeholder is shown."""
+    with patch.object(_srv, "_load_latest_plan", return_value={"summary": None, "full": None}):
         client = TestClient(app)
         params = _valid_params(tmp_path, project="claude-ops")
         r = client.get("/review", params=params)
     assert r.status_code == 200
+    assert "아직 실행 계획이 없습니다" in r.text
+
+
+def test_review_shows_plan_summary_prominently(tmp_path):
+    """Plan with ## PI Review Summary section → summary card rendered."""
+    project_dir = tmp_path / "claude-ops"
+    plans_dir = project_dir / ".omc" / "plans"
+    plans_dir.mkdir(parents=True)
+    (plans_dir / "plan.md").write_text(
+        "## PI Review Summary\n\n**What**: Add summary card\n**Why**: PI UX\n\n## Tasks\nT1: do thing"
+    )
+    client = TestClient(app)
+    params = _valid_params(tmp_path, project="claude-ops")
+    r = client.get("/review", params=params)
+    assert r.status_code == 200
+    assert "border-blue-700" in r.text
+    assert "Add summary card" in r.text
+
+
+def test_legacy_plan_no_summary_renders_collapsed(tmp_path):
+    """Plan without ## PI Review Summary → details collapse shown, no summary card."""
+    project_dir = tmp_path / "claude-ops"
+    plans_dir = project_dir / ".omc" / "plans"
+    plans_dir.mkdir(parents=True)
+    (plans_dir / "plan.md").write_text("## Tasks\nT1: do thing\nT2: do other thing")
+    client = TestClient(app)
+    params = _valid_params(tmp_path, project="claude-ops")
+    r = client.get("/review", params=params)
+    assert r.status_code == 200
+    assert "<details" in r.text
+    assert "border-blue-700" not in r.text
+
+
+def test_empty_pi_summary_section_shows_no_card(tmp_path):
+    """## PI Review Summary with no content → summary card not shown."""
+    project_dir = tmp_path / "claude-ops"
+    plans_dir = project_dir / ".omc" / "plans"
+    plans_dir.mkdir(parents=True)
+    (plans_dir / "plan.md").write_text("## PI Review Summary\n\n## Tasks\nT1: do thing")
+    client = TestClient(app)
+    params = _valid_params(tmp_path, project="claude-ops")
+    r = client.get("/review", params=params)
+    assert r.status_code == 200
+    assert "border-blue-700" not in r.text
+    assert "<details" in r.text
+
+
+def test_session_bypass_returns_plan_template_vars(tmp_path):
+    """Session-bypass path (reviewer_id in session cookie) renders without UndefinedError."""
+    client = TestClient(app)
+    # First request via HMAC sets the session cookie
+    params = _valid_params(tmp_path)
+    r1 = client.get("/review", params=params)
+    assert r1.status_code == 200
+    # Second request: session cookie active, no sig → session bypass path
+    r2 = client.get("/review")
+    assert r2.status_code == 200

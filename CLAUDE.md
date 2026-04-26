@@ -379,3 +379,21 @@ SESSION_SCREEN_HISTORY_LINES=200  # Lines to capture
 - 새 파일이 data/ 하위에 생기고 크기가 20MB 이상이면: `dvc add <경로>` 실행 여부를 먼저 물어보세요.
 - `git add` 전에 DVC 추적 여부를 확인하세요.
 - DVC remote: `dvc push` 로 데이터를 원격에 동기화하세요.
+
+## Plan File Requirements
+
+Every `.omc/plans/*.md` file MUST begin with a `## PI Review Summary` section
+before any task or step content:
+
+```markdown
+## PI Review Summary
+
+**What**: [one sentence — what is being built/changed]
+**Why**: [one sentence — the ticket goal or problem]
+**Files changed**: [comma-separated key files]
+**Tests**: [test count and status, or "TBD"]
+**Risk**: Low / Medium / High — [one sentence reason]
+```
+
+This section is shown to the PI reviewer before task details. Write it for a
+human who needs to approve or reject in 30 seconds.
