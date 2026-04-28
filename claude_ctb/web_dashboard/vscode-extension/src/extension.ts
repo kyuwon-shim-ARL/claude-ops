@@ -342,16 +342,24 @@ function createTerminalForSession(sessionName: string): vscode.Terminal {
   // If only a shell is running in the pane (no Claude Code), start it before attaching.
   // The check runs in the new terminal's shell before handing control to tmux.
   const sn = sessionName.replace(/'/g, "'\\''"); // safe single-quote escape
-  // ps --ppid guards against bash-wrapper sessions where pane_cmd="bash" but
-  // claude is already running as a child — without this check "claude -c" would
-  // be typed directly into the live Claude Code prompt.
+  const claudeCmd = 'claude --continue --dangerously-skip-permissions';
+  const wrapper = `bash --login -c '${claudeCmd}; exec bash --login'`;
+  // Handles three pane states:
+  //   pane_dead=1  → respawn-pane with claude wrapper (remain-on-exit killed pane)
+  //   bash/zsh/…   → send claude cmd only when no claude child (ps --ppid guard)
+  //   claude       → just attach, already running
   const cmd =
-    `pane_pid=$(tmux display-message -p -t '${sn}' '#{pane_pid}' 2>/dev/null); ` +
-    `pane_cmd=$(tmux display-message -p -t '${sn}' '#{pane_current_command}' 2>/dev/null); ` +
-    `if [[ "$pane_cmd" =~ ^(bash|zsh|sh|fish|dash|ksh|tcsh)$ ]]; then ` +
-    `if ! ps --ppid "$pane_pid" -o comm --no-headers 2>/dev/null | grep -q claude; then ` +
-    `tmux send-keys -t '${sn}' 'claude -c' Enter; fi; fi; ` +
-    `tmux attach-session -t '${sn}'`;
+    `if ! tmux has-session -t '=${sn}' 2>/dev/null; then ` +
+    `echo "Session not found: ${sn}"; exit 1; fi; ` +
+    `_dead=$(tmux display-message -p -t '=${sn}' '#{pane_dead}' 2>/dev/null); ` +
+    `_pid=$(tmux display-message -p -t '=${sn}' '#{pane_pid}' 2>/dev/null); ` +
+    `_cmd=$(tmux display-message -p -t '=${sn}' '#{pane_current_command}' 2>/dev/null); ` +
+    `if [[ "$_dead" == "1" ]]; then ` +
+    `tmux respawn-pane -k -t '=${sn}' "${wrapper}"; ` +
+    `elif [[ "$_cmd" =~ ^(bash|zsh|sh|fish|dash|ksh|tcsh)$ ]]; then ` +
+    `if ! ps --ppid "$_pid" -o comm --no-headers 2>/dev/null | grep -q claude; then ` +
+    `tmux send-keys -t '=${sn}' '${claudeCmd}' Enter; fi; fi; ` +
+    `tmux attach-session -t '=${sn}'`;
   terminal.sendText(cmd, true);
   return terminal;
 }

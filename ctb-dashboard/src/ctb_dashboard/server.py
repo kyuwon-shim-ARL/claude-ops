@@ -700,17 +700,28 @@ async def focus_session(
 
     # 3. If Claude Code is not running in the session pane, start it
     _SHELL_CMDS = {"bash", "zsh", "sh", "fish", "dash", "ksh", "tcsh"}
+    _CLAUDE_CMD = "claude --continue --dangerously-skip-permissions"
+    _WRAPPER = f"bash --login -c '{_CLAUDE_CMD}; exec bash --login'"
     claude_started = False
     try:
         pane_info_result = subprocess.run(
-            ["tmux", "display-message", "-p", "-t", req.session, "#{pane_current_command} #{pane_pid}"],
+            ["tmux", "display-message", "-p", "-t", req.session,
+             "#{pane_dead} #{pane_current_command} #{pane_pid}"],
             capture_output=True, text=True, timeout=3,
         )
-        parts = pane_info_result.stdout.strip().split()
-        pane_cmd = parts[0] if parts else ""
-        pane_pid = parts[1] if len(parts) > 1 else ""
+        parts = pane_info_result.stdout.strip().split(None, 2)
+        pane_dead = parts[0] if parts else "0"
+        pane_cmd = parts[1] if len(parts) > 1 else ""
+        pane_pid = parts[2] if len(parts) > 2 else ""
 
-        if pane_cmd in _SHELL_CMDS:
+        if pane_dead == "1":
+            # remain-on-exit으로 pane이 죽어있는 경우 → respawn with claude wrapper
+            subprocess.run(
+                ["tmux", "respawn-pane", "-k", "-t", req.session, _WRAPPER],
+                capture_output=True, timeout=5,
+            )
+            claude_started = True
+        elif pane_cmd in _SHELL_CMDS:
             # bash-wrapper 세션은 pane_cmd가 "bash"여도 claude가 자식으로 실행 중일 수 있음.
             # ps --ppid로 실제 claude 자식 프로세스 존재 여부 확인.
             claude_running = False
@@ -725,7 +736,8 @@ async def focus_session(
 
             if not claude_running:
                 subprocess.run(
-                    ["tmux", "send-keys", "-t", req.session, "claude -c", "Enter"],
+                    ["tmux", "send-keys", "-t", req.session,
+                     "claude --continue --dangerously-skip-permissions", "Enter"],
                     capture_output=True, timeout=3,
                 )
                 claude_started = True
