@@ -1479,7 +1479,10 @@
         .then(({ ok, data }) => {
           if (ok && data.status === 'focused') {
             flashCard(card, 'green');
-            showCardToast(card, `Focused ${name.replace(/^claude[_-]/, '')}`, 'green');
+            const label = data.claude_started
+              ? `Starting Claude in ${name.replace(/^claude[_-]/, '')}`
+              : `Focused ${name.replace(/^claude[_-]/, '')}`;
+            showCardToast(card, label, 'green');
           } else if (data.error === 'no_attached_client') {
             copyFallback(card, cmd, '터미널 미연결 — copied');
           } else {

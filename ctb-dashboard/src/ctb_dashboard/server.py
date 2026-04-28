@@ -698,7 +698,25 @@ async def focus_session(
     except Exception:
         pass  # No attached client or tmux not available
 
-    # 3. Write focus signal for VSCode extension (file-based IPC)
+    # 3. If Claude Code is not running in the session pane, start it
+    _SHELL_CMDS = {"bash", "zsh", "sh", "fish", "dash", "ksh", "tcsh"}
+    claude_started = False
+    try:
+        pane_cmd_result = subprocess.run(
+            ["tmux", "display-message", "-p", "-t", req.session, "#{pane_current_command}"],
+            capture_output=True, text=True, timeout=3,
+        )
+        pane_cmd = pane_cmd_result.stdout.strip()
+        if pane_cmd in _SHELL_CMDS:
+            subprocess.run(
+                ["tmux", "send-keys", "-t", req.session, "claude -c", "Enter"],
+                capture_output=True, timeout=3,
+            )
+            claude_started = True
+    except Exception:
+        pass
+
+    # 4. Write focus signal for VSCode extension (file-based IPC)
     # The extension watches this file and calls terminal.show() + focus to switch tabs
     _FOCUS_SIGNAL_PATH = "/tmp/ctb-focus-signal.json"
     try:
@@ -709,7 +727,7 @@ async def focus_session(
     except Exception as e:
         logger.warning(f"Failed to write focus signal: {e}")
 
-    return {"status": "focused", "session": req.session, "tmux_switched": tmux_ok, "window_activated": window_ok}
+    return {"status": "focused", "session": req.session, "tmux_switched": tmux_ok, "window_activated": window_ok, "claude_started": claude_started}
 
 
 @app.get("/api/project/{name}/review-link")
