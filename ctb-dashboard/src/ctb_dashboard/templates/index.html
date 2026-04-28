@@ -11,7 +11,7 @@
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
-  <script>
+  <script nonce="{{ csp_nonce }}">
     tailwind.config = {
       theme: {
         extend: {
@@ -229,7 +229,7 @@
     </div>
   </main>
 
-  <script>
+  <script nonce="{{ csp_nonce }}">
     // =============================================
     // T4/T5: Theme system
     // =============================================

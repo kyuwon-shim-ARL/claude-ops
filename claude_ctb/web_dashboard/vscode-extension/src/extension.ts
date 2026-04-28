@@ -3,7 +3,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as http from 'http';
 
-const DASHBOARD_URL = 'http://127.0.0.1:8420';
+// Use localhost (not 127.0.0.1) so VSCode webview portMapping rewrites to the
+// extension host. Required for Remote SSH: webview runs on local machine,
+// CTB server runs on the remote — without portMapping the webview's localhost
+// resolves to the user's local machine, not the server.
+const DASHBOARD_PORT = 8420;
+const DASHBOARD_URL = `http://localhost:${DASHBOARD_PORT}`;
 const API_SESSIONS_URL = `${DASHBOARD_URL}/api/sessions`;
 const POLL_INTERVAL = 5000; // 5 seconds
 
@@ -170,7 +175,13 @@ class DashboardPanel {
       'claudeCtbDashboard',
       'Claude-CTB Dashboard',
       vscode.ViewColumn.One,
-      { enableScripts: true, retainContextWhenHidden: true }
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        // Remote SSH: route webview's localhost:8420 → extension host's 8420
+        // so the webview can reach the CTB server running on the remote.
+        portMapping: [{ webviewPort: DASHBOARD_PORT, extensionHostPort: DASHBOARD_PORT }],
+      }
     );
 
     DashboardPanel.panel.webview.html = await getWebviewContent(context);
