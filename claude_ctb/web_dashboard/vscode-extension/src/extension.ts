@@ -287,7 +287,10 @@ function focusTerminalForSession(sessionName: string): boolean {
   const terminals = vscode.window.terminals;
   const stripped = sessionName.replace(/^claude[_-]/, '');
 
-  // 1. Exact match (terminal name === session name or stripped name)
+  // Strict exact match only. Substring matching previously caused wrong-terminal
+  // focus regressions: e.g. clicking "claude_research" would match an existing
+  // "omc-research-skills" terminal because the latter contained "research".
+  // If no exact match is found, the caller creates a new terminal.
   const exact = terminals.find(t =>
     t.name === sessionName || t.name === stripped
   );
@@ -296,34 +299,12 @@ function focusTerminalForSession(sessionName: string): boolean {
     return true;
   }
 
-  // 2. Contains match: terminal name includes session name or stripped name
-  const containsFull = terminals.find(t =>
-    t.name.includes(sessionName) || t.name.includes(stripped)
-  );
-  if (containsFull) {
-    activateTerminal(containsFull);
-    return true;
-  }
-
-  // 2.5. Worktree pattern: claude_{project}_wt_{leaf} → match against leaf name only
-  // e.g. "claude_claude-ops_wt_ctb-dashboard" → leaf = "ctb-dashboard"
+  // Worktree pattern: claude_{project}_wt_{leaf} → match against leaf only (exact)
   const wtMatch = sessionName.match(/^claude_.*?_wt_(.+)$/);
   if (wtMatch) {
     const leaf = wtMatch[1];
-    const wt = terminals.find(t =>
-      t.name === leaf || t.name.toLowerCase().includes(leaf.toLowerCase())
-    );
+    const wt = terminals.find(t => t.name === leaf);
     if (wt) { activateTerminal(wt); return true; }
-  }
-
-  // 3. Case-insensitive partial match
-  const lowerStripped = stripped.toLowerCase();
-  const partial = terminals.find(t =>
-    t.name.toLowerCase().includes(lowerStripped)
-  );
-  if (partial) {
-    activateTerminal(partial);
-    return true;
   }
 
   return false;
