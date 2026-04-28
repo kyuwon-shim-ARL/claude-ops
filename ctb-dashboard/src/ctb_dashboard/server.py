@@ -702,17 +702,33 @@ async def focus_session(
     _SHELL_CMDS = {"bash", "zsh", "sh", "fish", "dash", "ksh", "tcsh"}
     claude_started = False
     try:
-        pane_cmd_result = subprocess.run(
-            ["tmux", "display-message", "-p", "-t", req.session, "#{pane_current_command}"],
+        pane_info_result = subprocess.run(
+            ["tmux", "display-message", "-p", "-t", req.session, "#{pane_current_command} #{pane_pid}"],
             capture_output=True, text=True, timeout=3,
         )
-        pane_cmd = pane_cmd_result.stdout.strip()
+        parts = pane_info_result.stdout.strip().split()
+        pane_cmd = parts[0] if parts else ""
+        pane_pid = parts[1] if len(parts) > 1 else ""
+
         if pane_cmd in _SHELL_CMDS:
-            subprocess.run(
-                ["tmux", "send-keys", "-t", req.session, "claude -c", "Enter"],
-                capture_output=True, timeout=3,
-            )
-            claude_started = True
+            # bash-wrapper 세션은 pane_cmd가 "bash"여도 claude가 자식으로 실행 중일 수 있음.
+            # ps --ppid로 실제 claude 자식 프로세스 존재 여부 확인.
+            claude_running = False
+            if pane_pid:
+                ps_result = subprocess.run(
+                    ["ps", "--ppid", pane_pid, "-o", "comm", "--no-headers"],
+                    capture_output=True, text=True, timeout=3,
+                )
+                claude_running = any(
+                    "claude" in line for line in ps_result.stdout.splitlines()
+                )
+
+            if not claude_running:
+                subprocess.run(
+                    ["tmux", "send-keys", "-t", req.session, "claude -c", "Enter"],
+                    capture_output=True, timeout=3,
+                )
+                claude_started = True
     except Exception:
         pass
 
