@@ -342,10 +342,15 @@ function createTerminalForSession(sessionName: string): vscode.Terminal {
   // If only a shell is running in the pane (no Claude Code), start it before attaching.
   // The check runs in the new terminal's shell before handing control to tmux.
   const sn = sessionName.replace(/'/g, "'\\''"); // safe single-quote escape
+  // ps --ppid guards against bash-wrapper sessions where pane_cmd="bash" but
+  // claude is already running as a child — without this check "claude -c" would
+  // be typed directly into the live Claude Code prompt.
   const cmd =
+    `pane_pid=$(tmux display-message -p -t '${sn}' '#{pane_pid}' 2>/dev/null); ` +
     `pane_cmd=$(tmux display-message -p -t '${sn}' '#{pane_current_command}' 2>/dev/null); ` +
     `if [[ "$pane_cmd" =~ ^(bash|zsh|sh|fish|dash|ksh|tcsh)$ ]]; then ` +
-    `tmux send-keys -t '${sn}' 'claude -c' Enter; fi; ` +
+    `if ! ps --ppid "$pane_pid" -o comm --no-headers 2>/dev/null | grep -q claude; then ` +
+    `tmux send-keys -t '${sn}' 'claude -c' Enter; fi; fi; ` +
     `tmux attach-session -t '${sn}'`;
   terminal.sendText(cmd, true);
   return terminal;
