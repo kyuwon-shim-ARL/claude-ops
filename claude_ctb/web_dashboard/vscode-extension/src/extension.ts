@@ -345,8 +345,21 @@ function createTerminalForSession(sessionName: string): vscode.Terminal {
   return terminal;
 }
 
-/** Focus an existing terminal for the session, or create one if none exists. */
-function focusOrCreateTerminalForSession(sessionName: string): void {
+/**
+ * Focus an existing terminal for the session, or create one if none exists.
+ * Before focusing the terminal, reveals the session's project root in the
+ * Explorer sidebar so the folder tree is expanded and visible.
+ */
+async function focusOrCreateTerminalForSession(sessionName: string): Promise<void> {
+  // Expand and focus the project root in Explorer first.
+  // Path comes from the cached API state — no extra tmux call needed.
+  const sessionPath = _cachedState?.sessions.find(s => s.name === sessionName)?.path;
+  if (sessionPath) {
+    try {
+      await vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(sessionPath));
+    } catch { /* ignore if Explorer command unavailable */ }
+  }
+
   const found = focusTerminalForSession(sessionName);
   if (!found) {
     const t = createTerminalForSession(sessionName);
