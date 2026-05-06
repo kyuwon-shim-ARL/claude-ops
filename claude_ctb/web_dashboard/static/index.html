@@ -173,8 +173,9 @@
 
     // --- State color map ---
     const STATE_CONFIG = {
-      working:       { color: 'emerald', label: 'Working',       dot: 'bg-emerald-400 pulse-dot', border: 'border-emerald-500/30', bg: 'bg-emerald-500/5' },
-      waiting:       { color: 'amber',   label: 'Waiting Input', dot: 'bg-amber-400 pulse-dot',   border: 'border-amber-500/30',   bg: 'bg-amber-500/5'   },
+      working:           { color: 'emerald', label: 'Working',           dot: 'bg-emerald-400 pulse-dot', border: 'border-emerald-500/30', bg: 'bg-emerald-500/5' },
+      stuck_after_agent: { color: 'amber',   label: 'Stuck (agent done)', dot: 'bg-amber-400 pulse-dot',   border: 'border-amber-500/30',   bg: 'bg-amber-500/5'   },
+      waiting:           { color: 'amber',   label: 'Waiting Input',      dot: 'bg-amber-400 pulse-dot',   border: 'border-amber-500/30',   bg: 'bg-amber-500/5'   },
       idle:          { color: 'gray',    label: 'Idle',          dot: 'bg-gray-500',               border: 'border-gray-700',       bg: 'bg-gray-500/5'    },
       error:         { color: 'red',     label: 'Error',         dot: 'bg-red-400 pulse-dot',      border: 'border-red-500/30',     bg: 'bg-red-500/5'     },
       context_limit: { color: 'rose',    label: 'Context Limit', dot: 'bg-rose-400 pulse-dot',     border: 'border-rose-500/30',    bg: 'bg-rose-500/5'    },
@@ -325,7 +326,7 @@
       if (prunedPins.size !== pinned.size) savePinned(prunedPins);
 
       // Sort: pinned first, then state priority, then most recently updated
-      const order = { working: 0, waiting: 1, context_limit: 2, error: 3, idle: 4, unknown: 5 };
+      const order = { working: 0, stuck_after_agent: 1, waiting: 2, context_limit: 3, error: 4, idle: 5, unknown: 6 };
       sessions.sort((a, b) => {
         const tierDiff = (prunedPins.has(a.name) ? 0 : 1) - (prunedPins.has(b.name) ? 0 : 1);
         if (tierDiff !== 0) return tierDiff;
