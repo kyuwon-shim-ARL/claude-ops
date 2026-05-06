@@ -5,7 +5,13 @@ These tests verify the resume mechanisms extracted into _check_resume_actions():
 - error auto-resume (state transition trigger, 90s delay, 3-attempt cap)
 - stuck-after-agent guard (WORKING state blocks nudge)
 - _error_detected_at clear on non-ERROR state (T2)
+
+Auto-intervene flag (CTB_AUTO_INTERVENE):
+- These tests force auto_intervene=True so they exercise the historical
+  send-keys behavior. Notify-only path is covered in
+  TestNotifyOnlyMode below.
 """
+import os
 import time
 import pytest
 from unittest.mock import patch
@@ -14,7 +20,16 @@ from claude_ctb.utils.session_state import SessionState
 
 
 @pytest.fixture
-def monitor():
+def monitor(monkeypatch):
+    monkeypatch.setenv("CTB_AUTO_INTERVENE", "true")
+    m = MultiSessionMonitor()
+    m.running = True
+    return m
+
+
+@pytest.fixture
+def monitor_notify_only(monkeypatch):
+    monkeypatch.setenv("CTB_AUTO_INTERVENE", "false")
     m = MultiSessionMonitor()
     m.running = True
     return m
@@ -171,3 +186,71 @@ class TestErrorDetectedAtClear:
 
         assert SESSION not in monitor._error_detected_at
         assert SESSION not in monitor._error_auto_resume_count
+
+
+# ---------------------------------------------------------------------------
+# TestNotifyOnlyMode — verifies CTB_AUTO_INTERVENE=false suppresses send-keys
+# ---------------------------------------------------------------------------
+
+class TestNotifyOnlyMode:
+    """When CTB_AUTO_INTERVENE is false (default), no auto-keystrokes are sent.
+    Telegram notification is sent instead, with the same detection logic preserved.
+    """
+
+    @patch("claude_ctb.monitoring.multi_monitor.subprocess.run")
+    def test_stuck_after_agent_no_send_keys(self, mock_run, monitor_notify_only):
+        """stuck-after-agent: detected but no '마저해줘' keystroke; alert sent instead."""
+        monitor_notify_only._stuck_check_at[SESSION] = 0
+        monitor_notify_only._stuck_nudge_sent_at.pop(SESSION, None)
+        with patch.object(
+            monitor_notify_only.state_analyzer, "detect_stuck_after_agent",
+            return_value=True
+        ), patch(
+            "claude_ctb.monitoring.multi_monitor.session_manager.get_session_path",
+            return_value="/some/path",
+        ), patch.object(monitor_notify_only.notifier, "send_notification_sync") as mock_notify:
+            monitor_notify_only._check_resume_actions(
+                SESSION, SessionState.IDLE, SessionState.IDLE
+            )
+
+        for c in mock_run.call_args_list:
+            assert "마저해줘" not in str(c), \
+                f"send-keys '마저해줘' should NOT fire when auto_intervene=false: {c}"
+        assert mock_notify.called, "Telegram notification expected when auto_intervene=false"
+        notify_msg = str(mock_notify.call_args)
+        assert "stuck after agent" in notify_msg.lower() or "마저해줘" in notify_msg, \
+            f"Notification should describe stuck-after-agent state: {notify_msg}"
+
+    @patch("claude_ctb.monitoring.multi_monitor.subprocess.run")
+    def test_post_ctrlc_no_send_keys(self, mock_run, monitor_notify_only):
+        """post-C-c resume: WAITING_INPUT detected but no '이어서 진행해줘' keystroke."""
+        monitor_notify_only._post_ctrlc_at[SESSION] = time.time() - 5
+        with patch.object(monitor_notify_only.notifier, "send_notification_sync") as mock_notify:
+            monitor_notify_only._check_resume_actions(
+                SESSION, SessionState.WAITING_INPUT, SessionState.WORKING
+            )
+
+        for c in mock_run.call_args_list:
+            assert "이어서 진행해줘" not in str(c), \
+                f"send-keys '이어서 진행해줘' should NOT fire when auto_intervene=false: {c}"
+        assert mock_notify.called, "Telegram notification expected when auto_intervene=false"
+        # _post_ctrlc_at cleared after handling regardless of mode
+        assert SESSION not in monitor_notify_only._post_ctrlc_at
+
+    @patch("claude_ctb.monitoring.multi_monitor.subprocess.run")
+    def test_error_auto_resume_no_send_keys(self, mock_run, monitor_notify_only):
+        """error auto-resume: 90s elapsed but no '이어서 진행해줘' keystroke; alert sent."""
+        monitor_notify_only._error_detected_at[SESSION] = time.time() - 95
+        monitor_notify_only._error_auto_resume_count[SESSION] = 0
+        with patch.object(monitor_notify_only, "session_exists", return_value=True), \
+                patch.object(monitor_notify_only.notifier, "send_notification_sync") as mock_notify:
+            monitor_notify_only._check_resume_actions(
+                SESSION, SessionState.IDLE, SessionState.ERROR
+            )
+
+        for c in mock_run.call_args_list:
+            assert "이어서 진행해줘" not in str(c), \
+                f"send-keys '이어서 진행해줘' should NOT fire when auto_intervene=false: {c}"
+        assert mock_notify.called, "Telegram notification expected when auto_intervene=false"
+        # Counter still increments so escalation cap still works
+        assert monitor_notify_only._error_auto_resume_count[SESSION] == 1

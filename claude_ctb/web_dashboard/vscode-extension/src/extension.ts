@@ -143,8 +143,12 @@ class SessionTreeProvider implements vscode.TreeDataProvider<SessionItem> {
     const state = _cachedState;
     if (!state) { return []; }
 
-    const order: Record<string, number> = { working: 0, waiting: 1, context_limit: 2, error: 3, idle: 4, unknown: 5 };
-    const sorted = [...state.sessions].sort((a, b) => (order[a.state] ?? 9) - (order[b.state] ?? 9));
+    const order: Record<string, number> = { working: 0, stuck_after_agent: 1, waiting: 2, context_limit: 3, error: 4, idle: 5, unknown: 6 };
+    const sorted = [...state.sessions].sort((a, b) => {
+      const stateDiff = (order[a.state] ?? 9) - (order[b.state] ?? 9);
+      if (stateDiff !== 0) { return stateDiff; }
+      return (b.updated_at || 0) - (a.updated_at || 0);
+    });
     return sorted.map(s => new SessionItem(s));
   }
 

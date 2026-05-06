@@ -397,3 +397,7 @@ before any task or step content:
 
 This section is shown to the PI reviewer before task details. Write it for a
 human who needs to approve or reject in 30 seconds.
+
+
+## Mode marker (added by global setup)
+@/home/kyuwon/.claude/templates/code-CLAUDE.md

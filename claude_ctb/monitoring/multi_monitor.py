@@ -990,15 +990,24 @@ class MultiSessionMonitor:
                 return
 
             logger.info(f"🔔 {session_name}: progress stall at {stage_info} — nudge #{nudge_count + 1}/2")
-            try:
-                subprocess.run(
-                    ["tmux", "send-keys", "-t", session_name, "이어서 진행해줘", "Enter"],
-                    timeout=5, check=False,
-                )
-                self._progress_nudge_count[session_name] = nudge_count + 1
-                self._progress_nudge_sent_at[session_name] = now
-            except Exception as e:
-                logger.warning(f"tmux send-keys (progress nudge) failed for {session_name}: {e}")
+            self._progress_nudge_count[session_name] = nudge_count + 1
+            self._progress_nudge_sent_at[session_name] = now
+            if self.config.auto_intervene:
+                try:
+                    subprocess.run(
+                        ["tmux", "send-keys", "-t", session_name, "이어서 진행해줘", "Enter"],
+                        timeout=5, check=False,
+                    )
+                except Exception as e:
+                    logger.warning(f"tmux send-keys (progress nudge) failed for {session_name}: {e}")
+            else:
+                try:
+                    self.notifier.send_notification_sync(
+                        f"⚠️ *{session_name}*: progress stall at {stage_info}\n"
+                        f"Auto-intervene off — manual check needed (`/log` or send '이어서 진행해줘')"
+                    )
+                except Exception as e:
+                    logger.warning(f"alert (progress nudge) failed for {session_name}: {e}")
 
         elif not telegram_sent:
             # Cooldown after last nudge
@@ -1044,15 +1053,25 @@ class MultiSessionMonitor:
                     return  # 티켓 완료 — nudge 억제
                 last_nudge = self._stuck_nudge_sent_at.get(session_name, 0)
                 if time.time() - last_nudge > 300:
-                    logger.info(f"🔔 {session_name}: stuck after agent result — sending nudge '마저해줘'")
-                    try:
-                        subprocess.run(
-                            ["tmux", "send-keys", "-t", session_name, "마저해줘", "Enter"],
-                            timeout=5, check=False,
-                        )
-                        self._stuck_nudge_sent_at[session_name] = time.time()
-                    except Exception as e:
-                        logger.warning(f"tmux send-keys (stuck nudge) failed for {session_name}: {e}")
+                    self._stuck_nudge_sent_at[session_name] = time.time()
+                    if self.config.auto_intervene:
+                        logger.info(f"🔔 {session_name}: stuck after agent result — sending nudge '마저해줘'")
+                        try:
+                            subprocess.run(
+                                ["tmux", "send-keys", "-t", session_name, "마저해줘", "Enter"],
+                                timeout=5, check=False,
+                            )
+                        except Exception as e:
+                            logger.warning(f"tmux send-keys (stuck nudge) failed for {session_name}: {e}")
+                    else:
+                        logger.info(f"🔔 {session_name}: stuck after agent result — alerting (auto-intervene off)")
+                        try:
+                            self.notifier.send_notification_sync(
+                                f"⚠️ *{session_name}*: stuck after agent result detected\n"
+                                f"Auto-intervene off — manual check needed (try '마저해줘' or '/log')"
+                            )
+                        except Exception as e:
+                            logger.warning(f"alert (stuck nudge) failed for {session_name}: {e}")
 
         # --- stuck-ca auto-nudge ---
         if not is_overloaded and _not_active:
@@ -1067,15 +1086,25 @@ class MultiSessionMonitor:
                     return  # 티켓 완료 — nudge 억제
                 last_ca_nudge = self._ca_nudge_sent_at.get(session_name, 0)
                 if time.time() - last_ca_nudge > 300:
-                    logger.info(f"🔔 {session_name}: /ca stuck in EXECUTING — sending resume nudge '/ca'")
-                    try:
-                        subprocess.run(
-                            ["tmux", "send-keys", "-t", session_name, "/ca", "Enter"],
-                            timeout=5, check=False,
-                        )
-                        self._ca_nudge_sent_at[session_name] = time.time()
-                    except Exception as e:
-                        logger.warning(f"tmux send-keys (ca nudge) failed for {session_name}: {e}")
+                    self._ca_nudge_sent_at[session_name] = time.time()
+                    if self.config.auto_intervene:
+                        logger.info(f"🔔 {session_name}: /ca stuck in EXECUTING — sending resume nudge '/ca'")
+                        try:
+                            subprocess.run(
+                                ["tmux", "send-keys", "-t", session_name, "/ca", "Enter"],
+                                timeout=5, check=False,
+                            )
+                        except Exception as e:
+                            logger.warning(f"tmux send-keys (ca nudge) failed for {session_name}: {e}")
+                    else:
+                        logger.info(f"🔔 {session_name}: /ca stuck in EXECUTING — alerting (auto-intervene off)")
+                        try:
+                            self.notifier.send_notification_sync(
+                                f"⚠️ *{session_name}*: /ca stalled in EXECUTING state\n"
+                                f"Auto-intervene off — manual check needed (try '/ca' to resume)"
+                            )
+                        except Exception as e:
+                            logger.warning(f"alert (ca nudge) failed for {session_name}: {e}")
 
         # --- post-C-c resume ---
         # After C-c, if session transitions to WAITING_INPUT, send "이어서 진행해줘".
@@ -1083,22 +1112,36 @@ class MultiSessionMonitor:
             _ctrlc_elapsed = time.time() - self._post_ctrlc_at[session_name]
             if (curr_state == SessionState.WAITING_INPUT
                     and _ctrlc_elapsed < self._stall_ctrlc_resume_timeout):
-                logger.info(
-                    f"⚡ {session_name}: C-c 후 WAITING 전환 감지 ({_ctrlc_elapsed:.0f}s) — 자동 재개 전송"
-                )
-                try:
-                    subprocess.run(
-                        ["tmux", "send-keys", "-t", session_name, "이어서 진행해줘", "Enter"],
-                        timeout=5, check=False,
+                if self.config.auto_intervene:
+                    logger.info(
+                        f"⚡ {session_name}: C-c 후 WAITING 전환 감지 ({_ctrlc_elapsed:.0f}s) — 자동 재개 전송"
                     )
-                    self.notifier.send_notification_sync(
-                        f"✅ *{session_name}* stall 복구 완료\n"
-                        f"C-c 후 WAITING 전환 확인 — 자동 재개 전송"
+                    try:
+                        subprocess.run(
+                            ["tmux", "send-keys", "-t", session_name, "이어서 진행해줘", "Enter"],
+                            timeout=5, check=False,
+                        )
+                        self.notifier.send_notification_sync(
+                            f"✅ *{session_name}* stall 복구 완료\n"
+                            f"C-c 후 WAITING 전환 확인 — 자동 재개 전송"
+                        )
+                    except Exception as e:
+                        logger.warning(f"post-C-c resume failed for {session_name}: {e}")
+                    finally:
+                        self._post_ctrlc_at.pop(session_name, None)
+                else:
+                    logger.info(
+                        f"⚡ {session_name}: C-c 후 WAITING 전환 감지 ({_ctrlc_elapsed:.0f}s) — 알림 전송 (auto-intervene off)"
                     )
-                except Exception as e:
-                    logger.warning(f"post-C-c resume failed for {session_name}: {e}")
-                finally:
-                    self._post_ctrlc_at.pop(session_name, None)
+                    try:
+                        self.notifier.send_notification_sync(
+                            f"⚠️ *{session_name}*: C-c 후 WAITING 입력 대기 중\n"
+                            f"Auto-intervene off — 수동 확인 필요 (재개하려면 '이어서 진행해줘' 전송)"
+                        )
+                    except Exception as e:
+                        logger.warning(f"alert (post-C-c) failed for {session_name}: {e}")
+                    finally:
+                        self._post_ctrlc_at.pop(session_name, None)
             elif (curr_state == SessionState.ERROR
                   or _ctrlc_elapsed >= self._stall_ctrlc_resume_timeout):
                 self._post_ctrlc_at.pop(session_name, None)
@@ -1116,20 +1159,33 @@ class MultiSessionMonitor:
                     and curr_state != SessionState.WORKING
                     and _count < _ERROR_RESUME_MAX
                     and self.session_exists(session_name)):
-                logger.info(
-                    f"⚡ {session_name}: auto-resuming after error "
-                    f"(elapsed {elapsed:.0f}s, attempt #{_count + 1}/{_ERROR_RESUME_MAX})"
-                )
-                try:
-                    subprocess.run(
-                        ["tmux", "send-keys", "-t", session_name, "이어서 진행해줘", "Enter"],
-                        timeout=5, check=False,
+                with self.thread_lock:
+                    self._error_auto_resume_count[session_name] = _count + 1
+                    self._error_detected_at[session_name] = time.time()
+                if self.config.auto_intervene:
+                    logger.info(
+                        f"⚡ {session_name}: auto-resuming after error "
+                        f"(elapsed {elapsed:.0f}s, attempt #{_count + 1}/{_ERROR_RESUME_MAX})"
                     )
-                    with self.thread_lock:
-                        self._error_auto_resume_count[session_name] = _count + 1
-                        self._error_detected_at[session_name] = time.time()
-                except Exception as e:
-                    logger.warning(f"tmux send-keys (error auto-resume) failed for {session_name}: {e}")
+                    try:
+                        subprocess.run(
+                            ["tmux", "send-keys", "-t", session_name, "이어서 진행해줘", "Enter"],
+                            timeout=5, check=False,
+                        )
+                    except Exception as e:
+                        logger.warning(f"tmux send-keys (error auto-resume) failed for {session_name}: {e}")
+                else:
+                    logger.info(
+                        f"⚡ {session_name}: error detected (elapsed {elapsed:.0f}s, alert #{_count + 1}/{_ERROR_RESUME_MAX}) — auto-intervene off"
+                    )
+                    try:
+                        self.notifier.send_notification_sync(
+                            f"⚠️ *{session_name}*: error state for {elapsed:.0f}s "
+                            f"(alert {_count + 1}/{_ERROR_RESUME_MAX})\n"
+                            f"Auto-intervene off — manual check needed"
+                        )
+                    except Exception as e:
+                        logger.warning(f"alert (error auto-resume) failed for {session_name}: {e}")
             elif _count >= _ERROR_RESUME_MAX:
                 logger.warning(
                     f"🛑 {session_name}: error auto-resume exhausted "
@@ -1182,7 +1238,16 @@ class MultiSessionMonitor:
                     logger.warning(f"⚠️ {session_name}: WORKING {stall_elapsed:.0f}s 지속 — stall 의심")
                     self._stall_notified_at[session_name] = time.time()
                     try:
-                        if nudge_count < self._stall_max_nudges:
+                        if not self.config.auto_intervene:
+                            # Notify-only mode: single Telegram alert per cooldown cycle.
+                            self._stall_nudge_count[session_name] = nudge_count + 1
+                            msg = (
+                                f"⚠️ *{session_name}* 작업이 {mins:.1f}분째 WORKING 상태\n"
+                                f"Auto-intervene off — 수동 확인 필요 "
+                                f"(alert #{nudge_count + 1}, /log로 점검)"
+                            )
+                            self.notifier.send_notification_sync(msg)
+                        elif nudge_count < self._stall_max_nudges:
                             subprocess.run(
                                 ["tmux", "send-keys", "-t", session_name, "계속해줘", "Enter"],
                                 timeout=5, check=False,
@@ -1193,6 +1258,7 @@ class MultiSessionMonitor:
                                 f"stall 감지 — 재개 신호 전송 "
                                 f"({nudge_count + 1}/{self._stall_max_nudges}회)"
                             )
+                            logger.info(f"stall action: {msg}")
                         elif escape_count < self._stall_max_escapes:
                             subprocess.run(
                                 ["tmux", "send-keys", "-t", session_name, "Escape"],
@@ -1204,6 +1270,7 @@ class MultiSessionMonitor:
                                 f"nudge {self._stall_max_nudges}회 무효 — "
                                 f"Escape 인터럽트 전송 ({escape_count + 1}/{self._stall_max_escapes}회)"
                             )
+                            logger.info(f"stall action: {msg}")
                         elif ctrlc_count < self._stall_max_ctrlc:
                             subprocess.run(
                                 ["tmux", "send-keys", "-t", session_name, "C-c"],
@@ -1217,6 +1284,7 @@ class MultiSessionMonitor:
                                 f"({ctrlc_count + 1}/{self._stall_max_ctrlc}회)\n"
                                 f"hung 스킬/서브에이전트 강제 중단 시도 중"
                             )
+                            logger.info(f"stall action: {msg}")
                         else:
                             msg = (
                                 f"🚨 *{session_name}* 자동 복구 실패\n"
@@ -1225,7 +1293,7 @@ class MultiSessionMonitor:
                                 f"C-c {self._stall_max_ctrlc}회 모두 무효\n"
                                 f"수동 확인이 필요합니다 (세션 재시작 권장)"
                             )
-                        self.notifier.send_notification_sync(msg)
+                            logger.info(f"stall action: {msg}")
                         self._log_stall_baseline(session_name, bash_child, net_est, curr_state.value, True)
                     except Exception as e:
                         logger.warning(f"stall notify failed for {session_name}: {e}")

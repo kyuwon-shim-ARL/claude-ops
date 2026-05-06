@@ -80,36 +80,42 @@ class TelegramBridge:
         return True, "세션이 활성 상태입니다"
     
     def get_all_claude_sessions(self) -> list[str]:
-        """Get list of all Claude Code sessions (excluding monitoring/management sessions)"""
+        """Get list of all Claude Code sessions (excluding monitoring/management sessions).
+
+        Uses exact-match exclusions identical to ctb_dashboard/sessions.py so that
+        Telegram and the VSCode dashboard always show the same session list.
+        """
+        import subprocess
+        _EXCLUDED = {'claude-multi-monitor', 'claude-monitor', 'claude-telegram-bridge'}
         try:
-            import subprocess
             result = subprocess.run(
                 "tmux list-sessions 2>/dev/null | grep '^claude' | cut -d: -f1",
-                shell=True,
-                capture_output=True,
-                text=True
+                shell=True, capture_output=True, text=True,
             )
-            
-            if result.returncode == 0:
-                all_sessions = [s.strip() for s in result.stdout.split('\n') if s.strip()]
-                
-                # Filter out monitoring and management sessions
-                excluded_patterns = [
-                    'claude-monitor',  # Monitoring sessions
-                    'claude-ops',      # Management sessions  
-                    'claude_monitor',  # Alternative naming
-                    'claude_ops'       # Alternative naming
-                ]
-                
-                claude_code_sessions = []
-                for session in all_sessions:
-                    # Exclude sessions that match monitoring/management patterns
-                    if not any(pattern in session for pattern in excluded_patterns):
-                        claude_code_sessions.append(session)
-                
-                return claude_code_sessions
-            else:
+            if result.returncode != 0:
                 return []
+            sessions = [s.strip() for s in result.stdout.split('\n') if s.strip()]
+            sessions = [s for s in sessions if s not in _EXCLUDED]
+
+            # Sort by last activity time (newest first) — matches dashboard behaviour
+            try:
+                sort_result = subprocess.run(
+                    "tmux list-sessions -F '#{session_name} #{session_activity}'",
+                    shell=True, capture_output=True, text=True, timeout=5,
+                )
+                activity_map = {}
+                for line in sort_result.stdout.strip().split('\n'):
+                    parts = line.strip().split(' ', 1)
+                    if len(parts) == 2:
+                        try:
+                            activity_map[parts[0]] = int(parts[1])
+                        except ValueError:
+                            pass
+                sessions.sort(key=lambda s: activity_map.get(s, 0), reverse=True)
+            except Exception:
+                pass
+
+            return sessions
         except Exception as e:
             logger.error(f"세션 목록 조회 실패: {str(e)}")
             return []

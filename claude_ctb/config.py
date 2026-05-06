@@ -150,6 +150,18 @@ class ClaudeOpsConfig:
         """Enable hook-only notifications (disable polling). Default: False (polling needed for context limit detection)"""
         return os.getenv("HOOK_ONLY_MODE", "false").lower() == "true"
 
+    # Auto-intervene (stuck/stall recovery via tmux send-keys)
+    @property
+    def auto_intervene(self) -> bool:
+        """Send keys to tmux on stuck/stall detection. Default: False (notify only, user decides).
+
+        When False, every detection path (stuck-after-agent, stuck-ca, working-stall,
+        progress-stall, error auto-resume, post-C-c resume) sends a Telegram alert
+        instead of injecting keystrokes. This avoids false-positive interruptions
+        of completed or legitimately-long-running work.
+        """
+        return os.getenv("CTB_AUTO_INTERVENE", "false").lower() == "true"
+
     def _validate_required_vars(self) -> None:
         """Validate required environment variables based on enabled features"""
         # Only validate if features are being used
