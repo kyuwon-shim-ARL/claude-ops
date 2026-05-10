@@ -138,10 +138,33 @@ if not _REVIEW_SECRET:
 class FocusRequest(BaseModel):
     session: str
 
+
+class PinnedRequest(BaseModel):
+    Q1: list[str] = []
+    Q2: list[str] = []
+    Q3: list[str] = []
+    Q4: list[str] = []
+
+
 # --- Session Poller (reuses SessionStateAnalyzer for accurate detection) ---
 
 _cached_state: Dict[str, Any] = {"version": 1, "updated_at": 0, "sessions": [], "_hash": ""}
 _TS_PERSIST_PATH = "/tmp/ctb-session-timestamps.json"
+_PINNED_PERSIST_PATH = "/tmp/ctb-pinned-sessions.json"
+
+
+def _load_pinned() -> Dict[str, Any]:
+    try:
+        with open(_PINNED_PERSIST_PATH) as f:
+            data = json.load(f)
+        if all(k in data for k in ("Q1", "Q2", "Q3", "Q4")):
+            return data
+    except Exception:
+        pass
+    return {"Q1": [], "Q2": [], "Q3": [], "Q4": []}
+
+
+_pinned_state: Dict[str, Any] = _load_pinned()
 
 def _load_timestamps() -> Dict[str, float]:
     """Load persisted session timestamps from disk (survives server restart)."""
@@ -603,6 +626,19 @@ async def session_ticket_links(response: Response):
     response.headers["X-Server-Time"] = str(int(time.time()))
     response.headers["X-Badge-TTL"] = str(_BADGE_TTL)
     return {"links": links, "ttl": _BADGE_TTL}
+
+
+@app.get("/api/pinned")
+async def get_pinned():
+    return _pinned_state
+
+
+@app.post("/api/pinned")
+async def post_pinned(req: PinnedRequest):
+    global _pinned_state
+    _pinned_state = req.model_dump()
+    _atomic_json_write(_PINNED_PERSIST_PATH, _pinned_state)
+    return _pinned_state
 
 
 @app.get("/api/health")

@@ -152,6 +152,16 @@
     @media (min-width: 1024px) {
       .quadrant-cards { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
     }
+    /* Project group: same-repo main + worktrees inside a quadrant */
+    .project-group { grid-column: 1 / -1; }
+    .project-group-cards {
+      display: grid;
+      gap: 6px;
+      grid-template-columns: 1fr;
+    }
+    @media (min-width: 1024px) {
+      .project-group-cards { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+    }
 
     .drag-ghost {
       position: fixed;
@@ -414,66 +424,50 @@
     });
 
     // =============================================
-    // LocalStorage — Quadrant-based pin system
+    // Server-backed pin system (shared across all clients)
     // =============================================
-    const PIN_KEY = 'ctb_pinned_sessions';
-    const QUAD_KEY = 'ctb_quadrants';
-    const PIN_VER_KEY = 'ctb_pin_version';
     const QUAD_LABELS = {
       Q1: '긴급+중요', Q2: '중요', Q3: '긴급', Q4: '일반'
     };
 
-    function migrateIfNeeded() {
-      try {
-        if (localStorage.getItem(PIN_VER_KEY) === '2') return;
-        const old = JSON.parse(localStorage.getItem(PIN_KEY) || '[]');
-        const quads = { Q1: [], Q2: Array.isArray(old) ? old : [], Q3: [], Q4: [] };
-        localStorage.setItem(QUAD_KEY, JSON.stringify(quads));
-        localStorage.setItem(PIN_VER_KEY, '2');
-      } catch {
-        // Try to rescue old pins before resetting
-        try {
-          const rescue = JSON.parse(localStorage.getItem(PIN_KEY) || '[]');
-          if (Array.isArray(rescue) && rescue.length > 0) {
-            localStorage.setItem(QUAD_KEY, JSON.stringify({ Q1: [], Q2: rescue, Q3: [], Q4: [] }));
-          } else {
-            localStorage.setItem(QUAD_KEY, JSON.stringify({ Q1: [], Q2: [], Q3: [], Q4: [] }));
-          }
-        } catch {
-          localStorage.setItem(QUAD_KEY, JSON.stringify({ Q1: [], Q2: [], Q3: [], Q4: [] }));
-        }
-        localStorage.setItem(PIN_VER_KEY, '2');
-      }
+    let _quadsCache = { Q1: [], Q2: [], Q3: [], Q4: [] };
+    let _pinnedLoaded = false;
+
+    function _cloneQuads(q) {
+      return { Q1: [...q.Q1], Q2: [...q.Q2], Q3: [...q.Q3], Q4: [...q.Q4] };
     }
-    migrateIfNeeded();
 
     function getQuadrants() {
-      try {
-        const q = JSON.parse(localStorage.getItem(QUAD_KEY));
-        if (q && q.Q1 && q.Q2 && q.Q3 && q.Q4) return q;
-      } catch {}
-      return { Q1: [], Q2: [], Q3: [], Q4: [] };
+      return _quadsCache;
     }
 
     function saveQuadrants(q) {
-      try { localStorage.setItem(QUAD_KEY, JSON.stringify(q)); } catch {}
+      // Refuse to overwrite server state before initial load completes —
+      // otherwise a render() before /api/pinned resolves would POST an empty
+      // cache and wipe persisted pins for every client.
+      if (!_pinnedLoaded) return;
+      _quadsCache = q;
+      fetch('/api/pinned', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(q)
+      }).catch(() => {});
     }
 
     function getPinned() {
-      const q = getQuadrants();
+      const q = _quadsCache;
       return new Set([...q.Q1, ...q.Q2, ...q.Q3, ...q.Q4]);
     }
 
     function getSessionQuadrant(name) {
-      const q = getQuadrants();
-      for (const [qid, names] of Object.entries(q)) {
+      for (const [qid, names] of Object.entries(_quadsCache)) {
         if (names.includes(name)) return qid;
       }
       return null;
     }
 
     function togglePin(name) {
-      const q = getQuadrants();
+      const q = _cloneQuads(_quadsCache);
       for (const qid of Object.keys(q)) {
         const idx = q[qid].indexOf(name);
         if (idx !== -1) { q[qid].splice(idx, 1); saveQuadrants(q); return; }
@@ -483,7 +477,7 @@
     }
 
     function moveToQuadrant(name, targetQ) {
-      const q = getQuadrants();
+      const q = _cloneQuads(_quadsCache);
       for (const qid of Object.keys(q)) {
         const idx = q[qid].indexOf(name);
         if (idx !== -1) q[qid].splice(idx, 1);
@@ -840,12 +834,10 @@
         ? `border-color:${cfg.borderColor};border-bottom:4px solid ${cfg.borderColor};`
         : '';
 
-      // Worktree visual treatment
-      const wtCardBg = parsed.isWorktree
-        ? `linear-gradient(to right,${t.wtBg} 0%,transparent 55%),${t.cardBg}`
-        : t.cardBg;
+      // Worktree visual treatment — blue ⎇ label is sufficient; no edge/bg tint
+      const wtCardBg = t.cardBg;
       const wtStripe = parsed.isWorktree
-        ? `border-left:3px solid ${t.wtStripe};padding-left:41px;`
+        ? `padding-left:41px;`
         : '';
       const wtBranchDisplay = parsed.isWorktree ? escapeHtml(parsed.branch.replace(/_/g, '/')) : '';
       const wtBranchLabel = parsed.isWorktree
@@ -898,6 +890,59 @@
       `;
     }
 
+    // Group sessions in a quadrant by repo (parseSessionName parent/display).
+    // Returns ordered array of items: {type:'group', repo, sessions} | {type:'card', session}
+    // Singletons (group size 1) render as plain cards. First-occurrence ordering preserved.
+    function groupQuadrantSessions(sessions) {
+      const groupMap = new Map();
+      const order = [];
+      for (const s of sessions) {
+        const parsed = parseSessionName(s.name);
+        const key = parsed.isWorktree ? parsed.parent : parsed.display;
+        if (!groupMap.has(key)) {
+          groupMap.set(key, []);
+          order.push(key);
+        }
+        groupMap.get(key).push(s);
+      }
+      const items = [];
+      for (const key of order) {
+        const list = groupMap.get(key);
+        if (list.length === 1) {
+          items.push({ type: 'card', session: list[0] });
+        } else {
+          // state priority first; main before wt only as tiebreaker
+          const _gOrd = { working: 0, stuck_after_agent: 1, waiting: 2, error: 3, context_limit: 4, idle: 5, unknown: 6 };
+          list.sort((a, b) => {
+            const sd = (_gOrd[a.state] ?? 5) - (_gOrd[b.state] ?? 5);
+            if (sd !== 0) return sd;
+            const aWt = parseSessionName(a.name).isWorktree ? 1 : 0;
+            const bWt = parseSessionName(b.name).isWorktree ? 1 : 0;
+            return aWt - bWt;
+          });
+          items.push({ type: 'group', repo: key, sessions: list });
+        }
+      }
+      return items;
+    }
+
+    function renderProjectGroup(group, t) {
+      const repoLabel = escapeHtml(group.repo);
+      const count = group.sessions.length;
+      const cardsHtml = group.sessions.map(s => renderCard(s, true)).join('');
+      return `
+        <div class="project-group" style="border:1px dashed ${t.cardBorder};border-radius:14px;padding:6px;background:${t.wtBg};">
+          <div style="font-size:10px;font-weight:600;color:${t.wtBranch};padding:2px 4px 6px 4px;display:flex;align-items:center;gap:6px;">
+            <span style="font-size:11px;opacity:0.7;">📁</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-weight:600;">${repoLabel}</span>
+            <span style="opacity:0.55;">·</span>
+            <span style="opacity:0.7;">${count} sessions</span>
+          </div>
+          <div class="project-group-cards">${cardsHtml}</div>
+        </div>
+      `;
+    }
+
     // =============================================
     // Drag-and-drop state
     // =============================================
@@ -944,16 +989,12 @@
       }
 
       const pinned = getPinned();
-      const activeNames = new Set(sessions.map(s => s.name));
-
-      const quads = getQuadrants();
-      let pruned = false;
-      for (const qid of Object.keys(quads)) {
-        const before = quads[qid].length;
-        quads[qid] = quads[qid].filter(n => activeNames.has(n));
-        if (quads[qid].length !== before) pruned = true;
-      }
-      if (pruned) saveQuadrants(quads);
+      // Note: we do NOT auto-prune pinned sessions that are missing from the
+      // current poll. With server-backed shared state, a single transient
+      // missed-detection would wipe pins for every client and persist to disk.
+      // The render below already filters with sessionMap[n], so missing
+      // sessions just don't show up — their pin state survives until the
+      // user explicitly unpins or moves them.
 
       const order = { working: 0, stuck_after_agent: 1, waiting: 2, context_limit: 3, error: 4, idle: 5, unknown: 6 };
       sessions.sort((a, b) => {
@@ -1010,7 +1051,12 @@
 
           if (qSessions.length > 0) {
             html += `<div class="quadrant-cards">`;
-            html += qSessions.map(({ s }) => renderCard(s, true)).join('');
+            const items = groupQuadrantSessions(qSessions.map(({ s }) => s));
+            for (const item of items) {
+              html += item.type === 'group'
+                ? renderProjectGroup(item, t)
+                : renderCard(item.session, true);
+            }
             html += `</div>`;
           } else {
             html += `<div style="text-align:center;padding:12px;color:${t.emptyText};font-size:11px;border:1px dashed ${t.emptyBorder};border-radius:12px;">드래그하여 추가</div>`;
@@ -1311,8 +1357,17 @@
       connStatus.lastChild.textContent = ok ? ' Connected' : ' Disconnected';
     }
 
-    function connect() {
+    async function connect() {
       if (evtSource) evtSource.close();
+
+      try {
+        const r = await fetch('/api/pinned');
+        _quadsCache = await r.json();
+        _pinnedLoaded = true;
+      } catch {
+        // Keep _pinnedLoaded false — refuse to write until we successfully
+        // observe server state at least once.
+      }
 
       fetch('/api/sessions')
         .then(r => r.json())
