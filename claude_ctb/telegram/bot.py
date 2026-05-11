@@ -2547,6 +2547,17 @@ class TelegramBridge:
         # Forward unknown commands to Claude with a prefix explanation
         await self.forward_to_claude(update, context)
 
+    async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Log unhandled exceptions and notify user so they don't silently kill the bot."""
+        import traceback
+        tb = "".join(traceback.format_exception(type(context.error), context.error, context.error.__traceback__))
+        logger.error(f"Unhandled exception:\n{tb}")
+        if update and hasattr(update, "effective_message") and update.effective_message:
+            try:
+                await update.effective_message.reply_text("❌ 내부 오류가 발생했습니다. 다시 시도해주세요.")
+            except Exception:
+                pass
+
     async def handle_file_upload(self, update, context):
         """Handle file uploads from Telegram"""
         user_id = update.effective_user.id
@@ -2639,6 +2650,7 @@ class TelegramBridge:
             filters.COMMAND,
             self.unknown_command_handler
         ))
+        self.app.add_error_handler(self.error_handler)
     
     async def setup_bot_commands(self):
         """Setup bot command menu"""
@@ -4455,29 +4467,25 @@ ARGUMENTS: {args_text}
             # Start bot with conflict handling
             logger.info(f"텔레그램 봇이 시작되었습니다. 세션: {self.config.session_name}")
             
-            # Add some retry logic for conflicts
+            # Auto-restart loop: restarts on any crash, exits cleanly on SIGINT/SIGTERM
             import time
-            max_retries = 3
-            for attempt in range(max_retries):
+            import subprocess
+            while True:
                 try:
-                    if attempt > 0:
-                        logger.info(f"재시도 중... ({attempt + 1}/{max_retries})")
-                        time.sleep(5 * attempt)  # Exponential backoff
-                    
                     self.app.run_polling(drop_pending_updates=True)
-                    break  # Success, exit retry loop
-                    
+                    break  # Clean exit (SIGINT/SIGTERM) — don't restart
                 except Exception as e:
-                    if "terminated by other getUpdates request" in str(e) and attempt < max_retries - 1:
-                        logger.warning(f"getUpdates 충돌 감지 (시도 {attempt + 1}), 잠시 후 재시도...")
-                        # Kill any existing bot python processes (not tmux)
-                        import subprocess
+                    if "terminated by other getUpdates request" in str(e):
+                        logger.warning("getUpdates 충돌 감지, 3초 후 재시도...")
                         subprocess.run("pkill -f 'python.*claude_ctb\\.telegram\\.bot'", shell=True)
                         time.sleep(3)
-                        continue
                     else:
-                        logger.error(f"봇 실행 실패: {str(e)}")
-                        raise
+                        logger.error(f"봇 크래시, 10초 후 재시작: {e}", exc_info=True)
+                        time.sleep(10)
+                    # Rebuild application for clean restart
+                    self.app = Application.builder().token(self.config.telegram_bot_token).build()
+                    self.setup_handlers()
+                    self.app.post_init = post_init
             
         except Exception as e:
             logger.error(f"봇 실행 중 오류 발생: {str(e)}")
