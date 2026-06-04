@@ -1,0 +1,11 @@
+# Busy markers for Claude Code TUI (SoT — consumed by remote_control.py AND
+# claude-session-helpers.sh). One literal substring per line. Lines starting
+# with '#' and blank lines are ignored.
+#
+# If ANY of these appears in the captured pane, Claude is treated as BUSY
+# (actively generating) and /remote-control is NOT sent. Keep this list
+# conservative: a marker that wrongly matches an idle screen would re-introduce
+# the busy-fire race; a missing marker only delays registration (safe).
+esc to interrupt
+esc to cancel
+ tokens)

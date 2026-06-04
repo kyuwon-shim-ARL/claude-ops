@@ -527,6 +527,10 @@ class SessionManager:
                 check=True
             )
 
+            # Auto-register Claude Code's /remote-control once the TUI is ready
+            from .utils.remote_control import send_remote_control_bg
+            send_remote_control_bg(session_name)
+
             # Switch to new session
             self.switch_session(session_name)
 

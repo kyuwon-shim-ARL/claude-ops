@@ -285,7 +285,11 @@ mlruns/
             subprocess.run([
                 "tmux", "send-keys", "-t", self.session_name, "claude --dangerously-skip-permissions", "Enter"
             ], check=True, timeout=5)
-            
+
+            # Auto-register Claude Code's /remote-control once the TUI is ready
+            from .utils.remote_control import send_remote_control_bg
+            send_remote_control_bg(self.session_name)
+
             logger.info(f"🎯 Created tmux session: {self.session_name}")
             self.results["session_created"] = True
             return True

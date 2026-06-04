@@ -128,6 +128,8 @@ class TelegramBridge:
             os.system(f"tmux new-session -d -s {self.config.session_name}")
             os.system(f"tmux send-keys -t {self.config.session_name} -l 'claude --dangerously-skip-permissions'")
             os.system(f"tmux send-keys -t {self.config.session_name} Enter")
+            from ..utils.remote_control import send_remote_control_bg
+            send_remote_control_bg(self.config.session_name)
             return "🆕 Claude 세션을 새로 시작했습니다"
         return None
     
@@ -308,7 +310,9 @@ class TelegramBridge:
                 os.system(f"cd {target_directory} && tmux new-session -d -s {target_session}")
                 os.system(f"tmux send-keys -t {target_session} -l 'claude --dangerously-skip-permissions'")
                 os.system(f"tmux send-keys -t {target_session} Enter")
-                
+                from ..utils.remote_control import send_remote_control_bg
+                send_remote_control_bg(target_session)
+
                 await update.message.reply_text(f"🆕 {target_session} 세션을 새로 시작했습니다")
             else:
                 await update.message.reply_text(f"❌ 세션 {target_session}이 존재하지 않습니다.")
@@ -1153,8 +1157,10 @@ class TelegramBridge:
             # Step 3: Resume with conversation continuity
             logger.info(f"Resuming Claude Code with --continue: {target_session}")
             resume_result = os.system(f"tmux send-keys -t {target_session} 'claude --continue --dangerously-skip-permissions' Enter")
-            
+
             if resume_result == 0:
+                from ..utils.remote_control import send_remote_control_bg
+                send_remote_control_bg(target_session)
                 # Wait a moment for Claude to start
                 await asyncio.sleep(2)
                 
@@ -1172,8 +1178,10 @@ class TelegramBridge:
                 # Fallback to regular restart
                 logger.warning(f"Resume failed, falling back to regular restart: {target_session}")
                 fallback_result = os.system(f"tmux send-keys -t {target_session} 'claude --dangerously-skip-permissions' Enter")
-                
+
                 if fallback_result == 0:
+                    from ..utils.remote_control import send_remote_control_bg
+                    send_remote_control_bg(target_session)
                     await progress_msg.edit_text(
                         f"⚠️ `{session_display}` 세션 재시작 완료 (기본 모드)\n\n"
                         f"🔄 Claude Code가 새로 시작되었습니다\n"
@@ -1236,6 +1244,8 @@ class TelegramBridge:
             result = os.system(f"tmux send-keys -t {target_session} 'claude --dangerously-skip-permissions' Enter")
 
             if result == 0:
+                from ..utils.remote_control import send_remote_control_bg
+                send_remote_control_bg(target_session)
                 await asyncio.sleep(2)
                 await progress_msg.edit_text(
                     f"✅ `{session_display}` 새 세션 시작 완료!\n\n"
@@ -1306,6 +1316,10 @@ class TelegramBridge:
             # Step 4: Start fresh Claude
             os.system(f"tmux send-keys -t {target_session} 'claude --dangerously-skip-permissions' Enter")
             await asyncio.sleep(5)  # Wait for Claude to fully initialize
+
+            # Register /remote-control before handing the session its /sciomc prompt
+            from ..utils.remote_control import send_remote_control
+            send_remote_control(target_session, wait=True, initial_delay=0)
 
             # Step 5: Build and send /sciomc command with context
             if extra_context:
@@ -2229,6 +2243,11 @@ class TelegramBridge:
                         break
                 await asyncio.sleep(1)
 
+            # Claude is at an empty prompt now — register /remote-control before
+            # the handoff prompt sends Claude off to work.
+            from ..utils.remote_control import send_remote_control
+            send_remote_control(session_name, wait=False)
+
             # Step 4: Send handoff prompt with robust Enter delivery
             if handoff:
                 # Truncate if too long (keep under 4000 chars to avoid token waste)
@@ -2852,8 +2871,10 @@ class TelegramBridge:
                 os.system(f"cd {self.config.working_directory} && tmux new-session -d -s {self.config.session_name}")
                 os.system(f"tmux send-keys -t {self.config.session_name} -l 'claude --dangerously-skip-permissions'")
                 os.system(f"tmux send-keys -t {self.config.session_name} Enter")
-                
-                # Initialize session for compatibility  
+                from ..utils.remote_control import send_remote_control_bg
+                send_remote_control_bg(self.config.session_name)
+
+                # Initialize session for compatibility
                 await self._initialize_new_session_callback(self.config.session_name, query)
                 status_msg = "🚀 Claude 세션을 시작했습니다!"
             else:

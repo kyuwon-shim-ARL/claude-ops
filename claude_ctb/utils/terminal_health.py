@@ -217,7 +217,10 @@ class TerminalRecovery:
                 ['tmux', 'send-keys', '-t', session_name, 'claude --dangerously-skip-permissions', 'Enter'],
                 timeout=2
             )
-            
+
+            from .remote_control import send_remote_control_bg
+            send_remote_control_bg(session_name)
+
             logger.info(f"Pane respawned for {session_name}")
             return True
             
@@ -255,7 +258,10 @@ class TerminalRecovery:
                 ['tmux', 'send-keys', '-t', session_name, 'claude --continue --dangerously-skip-permissions', 'Enter'],
                 timeout=2
             )
-            
+
+            from .remote_control import send_remote_control_bg
+            send_remote_control_bg(session_name)
+
             logger.info(f"Safe restart with resume completed for {session_name}")
             return True
             

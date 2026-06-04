@@ -669,6 +669,11 @@ class MultiSessionMonitor:
             if not self._wait_for_prompt(session_name, timeout=30, prompt_chars=('❯ ',)):
                 logger.warning(f"⚠️ {session_name}: Claude prompt not detected after startup, proceeding anyway")
 
+            # Claude is at an empty prompt now — register /remote-control before
+            # the handoff prompt sends Claude off to work.
+            from ..utils.remote_control import send_remote_control
+            send_remote_control(session_name, wait=False)
+
             # Step 5: Send handoff prompt with robust Enter delivery
             if handoff:
                 if len(handoff) > 4000:
