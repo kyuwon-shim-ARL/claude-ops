@@ -218,8 +218,10 @@ class TerminalRecovery:
                 timeout=2
             )
 
+            # Background self-healing — suppress the manual-registration alert
+            # so repeated recovery cycles can't flood Telegram (notify=False).
             from .remote_control import send_remote_control_bg
-            send_remote_control_bg(session_name)
+            send_remote_control_bg(session_name, notify=False)
 
             logger.info(f"Pane respawned for {session_name}")
             return True
@@ -259,8 +261,10 @@ class TerminalRecovery:
                 timeout=2
             )
 
+            # Background self-healing — suppress the manual-registration alert
+            # so repeated recovery cycles can't flood Telegram (notify=False).
             from .remote_control import send_remote_control_bg
-            send_remote_control_bg(session_name)
+            send_remote_control_bg(session_name, notify=False)
 
             logger.info(f"Safe restart with resume completed for {session_name}")
             return True

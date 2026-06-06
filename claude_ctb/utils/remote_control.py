@@ -42,6 +42,13 @@ _TELEMETRY_FILE = os.path.join(
     ".omc", "state", "remote-control-telemetry.json",
 )
 
+# Per-session rate limit for the manual-registration fallback notification.
+# Background self-healing (terminal_health) can retry a permanently-unready
+# session every recovery cycle; without this guard each retry would send a
+# Telegram alert and flood the user. Hard cap: one alert per session per window.
+_FALLBACK_NOTIFY_COOLDOWN = 1800  # seconds (30 min)
+_last_fallback_notify = {}  # session_name -> monotonic timestamp
+
 
 def is_enabled() -> bool:
     """Whether auto /remote-control registration is active (default: on)."""
@@ -192,8 +199,17 @@ def record_telemetry(outcome, session_name=""):
 def _notify_fallback(session_name, reason):
     """Send a Telegram notification asking for manual /remote-control (T3).
 
-    Best-effort: requires bot config; silently degrades to a log warning.
+    Rate-limited per session (``_FALLBACK_NOTIFY_COOLDOWN``) so a looping caller
+    cannot flood the user. Best-effort: requires bot config; silently degrades to
+    a log warning.
     """
+    now = time.monotonic()
+    last = _last_fallback_notify.get(session_name)
+    if last is not None and (now - last) < _FALLBACK_NOTIFY_COOLDOWN:
+        logger.info("[%s] fallback notify suppressed (within %ss cooldown)",
+                    session_name, _FALLBACK_NOTIFY_COOLDOWN)
+        return False
+    _last_fallback_notify[session_name] = now
     try:
         from ..telegram.notifier import SmartNotifier
         SmartNotifier().send_manual_notification(
@@ -266,12 +282,14 @@ def _send_keys(session_name):
 
 
 def send_remote_control(session_name, wait=True, initial_delay=None, timeout=None,
-                        mode="fresh"):
+                        mode="fresh", notify=True):
     """Register /remote-control on a tmux session running Claude Code.
 
     ``wait=True`` waits (mode-dependent) for an idle, empty prompt before sending;
     on timeout it does NOT blind-fire — it notifies for manual registration (T3).
     ``wait=False`` sends immediately (caller guarantees an empty prompt).
+    ``notify=False`` suppresses the manual-registration fallback alert — use it
+    for background self-healing (e.g. terminal recovery) that retries on its own.
 
     Returns True if the command was dispatched. Honors CTB_AUTO_REMOTE_CONTROL.
     """
@@ -282,9 +300,10 @@ def send_remote_control(session_name, wait=True, initial_delay=None, timeout=Non
         ready, reason = wait_until_ready(session_name, mode=mode,
                                          timeout=timeout, initial_delay=initial_delay)
         if not ready:
-            _notify_fallback(session_name, f"idle 윈도우 미확보 ({reason})")
+            if notify:
+                _notify_fallback(session_name, f"idle 윈도우 미확보 ({reason})")
             record_telemetry("fallback_timeout", session_name)
-            logger.warning("[%s] not ready (%s); skipped blind-fire, notified for manual", session_name, reason)
+            logger.warning("[%s] not ready (%s); skipped blind-fire", session_name, reason)
             return False
 
     # Already-registered guard (T6): don't re-fire (would toggle OFF).

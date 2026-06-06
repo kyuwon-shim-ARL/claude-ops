@@ -210,3 +210,50 @@ def test_send_skips_when_already_registered(monkeypatch):
     monkeypatch.setattr(rc, "_send_keys", lambda s: sent.update(called=True))
     assert rc.send_remote_control("sess") is False
     assert sent["called"] is False  # guard prevented re-fire (toggle-off bug)
+
+
+# ── Flood prevention: fallback notify rate-limit + notify=False ────────────────
+def test_fallback_notify_rate_limited(monkeypatch):
+    rc._last_fallback_notify.clear()
+    calls = []
+
+    class FakeNotifier:
+        def send_manual_notification(self, **k):
+            calls.append(k)
+            return True
+
+    monkeypatch.setattr("claude_ctb.telegram.notifier.SmartNotifier", FakeNotifier)
+    rc._notify_fallback("sess", "r1")
+    rc._notify_fallback("sess", "r2")  # within cooldown → suppressed
+    rc._notify_fallback("sess", "r3")  # still suppressed
+    assert len(calls) == 1, "repeated fallbacks for same session must be rate-limited"
+    rc._notify_fallback("other", "r4")  # different session → allowed
+    assert len(calls) == 2
+
+
+def test_fallback_cooldown_expires(monkeypatch):
+    rc._last_fallback_notify.clear()
+    calls = []
+
+    class FakeNotifier:
+        def send_manual_notification(self, **k):
+            calls.append(k)
+            return True
+
+    monkeypatch.setattr("claude_ctb.telegram.notifier.SmartNotifier", FakeNotifier)
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(rc.time, "monotonic", lambda: clock["t"])
+    rc._notify_fallback("sess", "r1")
+    clock["t"] += rc._FALLBACK_NOTIFY_COOLDOWN + 1  # past cooldown
+    rc._notify_fallback("sess", "r2")
+    assert len(calls) == 2
+
+
+def test_notify_false_suppresses_fallback(monkeypatch):
+    monkeypatch.delenv("CTB_AUTO_REMOTE_CONTROL", raising=False)
+    monkeypatch.setattr(rc, "wait_until_ready", lambda *a, **k: (False, "busy"))
+    monkeypatch.setattr(rc, "record_telemetry", lambda *a, **k: None)
+    called = []
+    monkeypatch.setattr(rc, "_notify_fallback", lambda s, r: called.append(s))
+    assert rc.send_remote_control("sess", notify=False) is False
+    assert called == []  # background self-healing must not alert
