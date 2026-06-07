@@ -31,6 +31,7 @@ def monitor(tmp_path):
         cfg.session_screen_history_lines = 200
         cfg.context_limit_auto_restart = True
         cfg.hook_only_mode = False
+        cfg.notification_cooldown = 180
         mon = MultiSessionMonitor(config=cfg)
         # _wait_for_prompt polls real wall-clock (time.time); the per-test
         # time.sleep mock doesn't advance it, so the real poll loop would

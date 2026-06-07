@@ -61,6 +61,15 @@ class ClaudeOpsConfig:
     def check_interval(self) -> int:
         """Monitoring check interval in seconds"""
         return int(os.getenv("CHECK_INTERVAL", "3"))
+
+    @property
+    def notification_cooldown(self) -> int:
+        """Per-session completion-notification cooldown (seconds).
+
+        Minimum gap between completion notifications for the same session, and the
+        re-arm window after a notification. Higher = quieter (fewer pings for a
+        chatty session that completes tasks rapidly). Default 180s (3 min)."""
+        return int(os.getenv("NOTIFICATION_COOLDOWN", "180"))
     
     @property
     def working_directory(self) -> str:

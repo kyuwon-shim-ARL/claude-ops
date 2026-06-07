@@ -307,7 +307,7 @@ class MultiSessionMonitor:
             # By keeping notification_sent=True for 30s after a notification,
             # micro-gaps within that window are suppressed.
             last_notif = self.last_notification_time.get(session_name, 0)
-            if current_time - last_notif > 30:
+            if current_time - last_notif > self.config.notification_cooldown:
                 self.notification_sent[session_name] = False
             if previous_state != SessionState.WORKING:
                 self.tracker.reset_session(session_name)
@@ -360,9 +360,9 @@ class MultiSessionMonitor:
         if self.notification_sent.get(session_name, False):
             return False, None
 
-        # Prevent rapid successive notifications (30-second cooldown)
+        # Prevent rapid successive notifications (configurable cooldown, default 180s)
         last_notification_time = self.last_notification_time.get(session_name, 0)
-        if current_time - last_notification_time < 30:
+        if current_time - last_notification_time < self.config.notification_cooldown:
             logger.debug(f"Notification cooldown active for {session_name}")
             return False, None
 
