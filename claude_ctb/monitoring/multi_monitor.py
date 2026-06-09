@@ -124,6 +124,10 @@ class MultiSessionMonitor:
         self._stall_notify_cooldown: float = 300.0        # Phase 1 쿨다운 (5분)
         self._stall_interrupt_cooldown: float = 60.0      # Phase 2-3 쿨다운 (1분, 빠른 에스컬레이션)
         self._stall_max_nudges: int = 3                   # 최대 텍스트 nudge 횟수
+        # Notify-only mode (auto_intervene=off) cannot fix a stuck session, so it
+        # must not re-alert forever. Cap alerts per WORKING episode; counter resets
+        # when the session leaves WORKING. Tunable via STALL_MAX_NOTIFY (default 2).
+        self._stall_max_notify: int = int(os.getenv("STALL_MAX_NOTIFY", "2"))
         self._stall_max_escapes: int = 1                  # 최대 Escape 횟수
         # C-c는 기본 비활성(0). STALL_ENABLE_CTRLC=1 이면 2회 허용.
         self._stall_max_ctrlc: int = 2 if os.getenv("STALL_ENABLE_CTRLC") == "1" else 0
@@ -1213,7 +1217,12 @@ class MultiSessionMonitor:
                 nudge_count = self._stall_nudge_count.get(session_name, 0)
                 escape_count = self._stall_escape_count.get(session_name, 0)
                 ctrlc_count = self._stall_ctrlc_count.get(session_name, 0)
-                in_interrupt_phase = nudge_count >= self._stall_max_nudges
+                # The fast (60s) interrupt cooldown only makes sense when we are
+                # actually escalating interventions (auto_intervene). In notify-only
+                # mode it would turn into perpetual 60s alert spam, so stay on the
+                # slow 300s cooldown there.
+                in_interrupt_phase = (self.config.auto_intervene
+                                      and nudge_count >= self._stall_max_nudges)
                 cooldown = (self._stall_interrupt_cooldown if in_interrupt_phase
                             else self._stall_notify_cooldown)
                 last_stall = self._stall_notified_at.get(session_name, 0)
@@ -1244,14 +1253,19 @@ class MultiSessionMonitor:
                     self._stall_notified_at[session_name] = time.time()
                     try:
                         if not self.config.auto_intervene:
-                            # Notify-only mode: single Telegram alert per cooldown cycle.
-                            self._stall_nudge_count[session_name] = nudge_count + 1
-                            msg = (
-                                f"⚠️ *{session_name}* 작업이 {mins:.1f}분째 WORKING 상태\n"
-                                f"Auto-intervene off — 수동 확인 필요 "
-                                f"(alert #{nudge_count + 1}, /log로 점검)"
-                            )
-                            self.notifier.send_notification_sync(msg)
+                            # Notify-only mode: alert at most _stall_max_notify times
+                            # per WORKING episode (counter resets when the session
+                            # leaves WORKING). Re-alerting a permanently-stuck/abandoned
+                            # session every cycle is useless noise — stay silent after.
+                            if nudge_count < self._stall_max_notify:
+                                self._stall_nudge_count[session_name] = nudge_count + 1
+                                msg = (
+                                    f"⚠️ *{session_name}* 작업이 {mins:.1f}분째 WORKING 상태\n"
+                                    f"Auto-intervene off — 수동 확인 필요 "
+                                    f"(alert {nudge_count + 1}/{self._stall_max_notify}, /log로 점검)"
+                                )
+                                self.notifier.send_notification_sync(msg)
+                            # else: cap reached — silent until state changes.
                         elif nudge_count < self._stall_max_nudges:
                             subprocess.run(
                                 ["tmux", "send-keys", "-t", session_name, "계속해줘", "Enter"],
