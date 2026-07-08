@@ -555,6 +555,9 @@ async def root(request: Request):
         {"csp_nonce": nonce},
     )
     response.headers["Content-Security-Policy"] = csp
+    # Dashboard HTML embeds its JS inline; never let a browser serve a stale
+    # copy after a deploy (otherwise new client code silently 404s new routes).
+    response.headers["Cache-Control"] = "no-store"
     return response
 
 

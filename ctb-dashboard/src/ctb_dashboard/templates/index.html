@@ -626,6 +626,7 @@
     // Session filters — text search + activity-age window
     // =============================================
     const FILTER_AGE_KEY = 'ctb_filter_age';
+    const FILTER_DIR_KEY = 'ctb_filter_dir';
     const AGE_OPTIONS = [
       { id: 'all', label: '전체', secs: 0 },
       { id: '3d',  label: '3일',  secs: 3 * 86400 },
@@ -635,13 +636,15 @@
     ];
     let _filterSearch = '';
     let _filterAge = localStorage.getItem(FILTER_AGE_KEY) || 'all';
+    // 'within' = 최근 N일 이내, 'older' = N일 이전(오래된 세션만 — 정리용)
+    let _filterDir = localStorage.getItem(FILTER_DIR_KEY) || 'within';
 
     function _ageOption() {
       return AGE_OPTIONS.find(o => o.id === _filterAge) || AGE_OPTIONS[0];
     }
 
-    // Pinned sessions are always shown (staleness filter exempts them); text
-    // search still applies to everything.
+    // Filters apply to ALL sessions including pinned — so stale pinned sessions
+    // can be surfaced/hidden and cleaned up too.
     function applyFilters(sessions, pinned) {
       const q = _filterSearch.trim().toLowerCase();
       const maxAge = _ageOption().secs;
@@ -651,9 +654,19 @@
           const hay = (s.name + ' ' + (s.work_context || '') + ' ' + (s.last_prompt || '')).toLowerCase();
           if (!hay.includes(q)) return false;
         }
-        if (maxAge > 0 && !(pinned && pinned.has(s.name))) {
+        if (maxAge > 0) {
           const ts = s.last_activity || s.updated_at || 0;
-          if (ts > 0 && (now - ts) > maxAge) return false;
+          if (ts > 0) {
+            const age = now - ts;
+            if (_filterDir === 'older') {
+              if (age <= maxAge) return false;   // 오래된 것만: N일 이전
+            } else {
+              if (age > maxAge) return false;    // 최근만: N일 이내
+            }
+          } else if (_filterDir === 'older') {
+            // 활동 시각 미상 → '이내' 필터에선 표시, '이전' 필터에선 제외
+            return false;
+          }
         }
         return true;
       });
@@ -676,6 +689,20 @@
         });
         wrap.appendChild(b);
       }
+
+      // Direction toggle: 이내(within) ↔ 이전(older-than). Hidden when '전체'.
+      const dir = document.createElement('button');
+      const older = _filterDir === 'older';
+      dir.textContent = older ? '이전' : '이내';
+      dir.title = older ? '선택 기간보다 오래된 세션만 표시 (정리용)' : '선택 기간 이내 활동한 세션만 표시';
+      dir.style.cssText = `font-size:12px;padding:5px 11px;border-radius:9px;cursor:pointer;margin-left:4px;border:1px solid ${older ? 'rgba(251,146,60,0.7)' : 'rgba(255,255,255,0.1)'};background:${older ? 'rgba(251,146,60,0.18)' : 'rgba(255,255,255,0.05)'};color:inherit;visibility:${_filterAge === 'all' ? 'hidden' : 'visible'};`;
+      dir.addEventListener('click', () => {
+        _filterDir = older ? 'within' : 'older';
+        localStorage.setItem(FILTER_DIR_KEY, _filterDir);
+        buildAgeButtons();
+        if (lastSSEData) render(lastSSEData);
+      });
+      wrap.appendChild(dir);
     }
 
     document.getElementById('filter-search').addEventListener('input', (e) => {
@@ -1774,12 +1801,23 @@
       _bindConfirm(() => {});
       deleteModal.style.display = 'flex';
       try {
-        const res = await fetch(`/api/sessions/${encodeURIComponent(name)}/delete-check`);
+        const res = await fetch(`/api/sessions/${encodeURIComponent(name)}/delete-check`, { cache: 'no-store' });
+        if (!res.ok) {
+          const hint = res.status === 404
+            ? '서버가 구버전입니다 — 대시보드를 재시작하세요.'
+            : `HTTP ${res.status}`;
+          deleteModalBody.innerHTML = `<div style="color:#ef4444;">안전성 확인 실패 (${escapeHtml(hint)})</div>`;
+          _setConfirmBtn('닫기', false);
+          _bindConfirm(closeDeleteModal);
+          return;
+        }
         const check = await res.json();
         if (check.safe) renderSafeConfirm(name, check);
         else renderBlockedModal(name, check);
       } catch (err) {
-        deleteModalBody.innerHTML = '<div style="color:#ef4444;">안전성 확인에 실패했습니다.</div>';
+        deleteModalBody.innerHTML = `<div style="color:#ef4444;">안전성 확인 실패: ${escapeHtml(String(err && err.message || err))}</div>`;
+        _setConfirmBtn('닫기', false);
+        _bindConfirm(closeDeleteModal);
       }
     }
 
