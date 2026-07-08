@@ -237,7 +237,7 @@
   </header>
 
   <div id="filter-bar" class="px-5 pt-3 flex flex-wrap items-center gap-2">
-    <input id="filter-search" type="text" placeholder="🔎 세션 검색..." autocomplete="off"
+    <input id="filter-search" type="text" placeholder="🔎 세션 검색  (F / Ctrl+F)" autocomplete="off"
            class="font-mono"
            style="flex:1;min-width:180px;max-width:340px;font-size:13px;padding:6px 12px;border-radius:10px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:inherit;outline:none;">
     <div id="filter-age" class="flex items-center gap-1"></div>
@@ -705,9 +705,41 @@
       wrap.appendChild(dir);
     }
 
-    document.getElementById('filter-search').addEventListener('input', (e) => {
+    const _searchInput = document.getElementById('filter-search');
+    _searchInput.addEventListener('input', (e) => {
       _filterSearch = e.target.value;
       if (lastSSEData) render(lastSSEData);
+    });
+    // Esc inside the box clears+blurs the search
+    _searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        _searchInput.value = '';
+        _filterSearch = '';
+        _searchInput.blur();
+        if (lastSSEData) render(lastSSEData);
+      }
+    });
+    // Keyboard shortcut to jump into the search box:
+    //   Ctrl/Cmd+F (overrides browser find), or a bare "f" when not typing.
+    function _isTypingTarget(el) {
+      if (!el) return false;
+      const tag = el.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
+    }
+    document.addEventListener('keydown', (e) => {
+      const focusSearch = () => {
+        e.preventDefault();
+        _searchInput.focus();
+        _searchInput.select();
+      };
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'f' || e.key === 'F')) {
+        focusSearch();
+        return;
+      }
+      if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey
+          && !_isTypingTarget(e.target)) {
+        focusSearch();
+      }
     });
     buildAgeButtons();
 
