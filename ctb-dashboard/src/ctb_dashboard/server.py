@@ -35,7 +35,8 @@ from sse_starlette.sse import EventSourceResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from .state_detector import SessionStateAnalyzer, SessionState
-from .sessions import get_all_claude_sessions, get_session_path
+from .sessions import get_all_claude_sessions, get_session_path, get_sessions_activity
+from .session_delete import check_delete_safety, delete_session
 
 import sys as _sys
 _PSTATUS_DIR = "/home/kyuwon/projects/project-status"
@@ -198,7 +199,6 @@ _last_known_prompt: Dict[str, Dict] = {}
 _PROMPT_TTL = 60  # seconds to keep stale prompt visible
 
 # T3: Persist last known working phase — show on idle cards after work completes
-_last_working_phase: Dict[str, str] = {}
 
 
 def _probe_session(name: str) -> tuple:
@@ -258,13 +258,6 @@ def _probe_session(name: str) -> tuple:
         last_prompt = None
 
     work_context = _state_analyzer.extract_work_context(path)
-    workflow_phase = _state_analyzer.extract_workflow_phase(screen_content, state)
-
-    # T3: Persist last working phase — idle cards show what they were last doing
-    if workflow_phase and state == SessionState.WORKING:
-        _last_working_phase[name] = workflow_phase
-    elif workflow_phase is None and state == SessionState.IDLE:
-        workflow_phase = _last_working_phase.get(name)
 
     pending_count = _state_analyzer.extract_pending_task_count(screen_content)
 
@@ -277,7 +270,7 @@ def _probe_session(name: str) -> tuple:
         _working_since.pop(name, None)
         working_since = None
 
-    return name, state.value, path, context_percent, last_prompt, work_context, workflow_phase, pending_count, working_since
+    return name, state.value, path, context_percent, last_prompt, work_context, pending_count, working_since
 
 
 def _poll_sessions() -> Dict[str, Any]:
@@ -285,13 +278,14 @@ def _poll_sessions() -> Dict[str, Any]:
     global _prev_session_timestamps
     sessions = get_all_claude_sessions()
     now = time.time()
+    activity_map = get_sessions_activity()
 
     # Parallel probe: ~1-2s instead of ~30s for 26 sessions
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(_probe_session, sessions))
 
     session_list = []
-    for name, state_val, path, context_percent, last_prompt, work_context, workflow_phase, pending_count, working_since in results:
+    for name, state_val, path, context_percent, last_prompt, work_context, pending_count, working_since in results:
         # Only update timestamp when state actually changes
         prev_ts = _prev_session_timestamps.get(name, 0)
         prev_state = None
@@ -312,17 +306,16 @@ def _poll_sessions() -> Dict[str, Any]:
             "context_percent": context_percent,  # null when unavailable (frontend hides gauge)
             "last_prompt": last_prompt or "",     # always string (frontend shows placeholder)
             "work_context": work_context or "",   # always string (frontend shows placeholder)
-            "workflow_phase": workflow_phase,     # null or phase string (frontend shows badge)
             "pending_count": pending_count,       # null=no TodoWrite, 0=all done, N=pending tasks
             "working_since": working_since,       # epoch float when WORKING started, null otherwise
+            "last_activity": activity_map.get(name, 0),  # tmux session_activity epoch (staleness filter)
         }
         session_list.append(entry)
 
     # Content hash for SSE change detection (includes dynamic fields for real-time updates)
     content_key = json.dumps([
         (s["name"], s["state"], bool(s.get("completed_at")),
-         s.get("context_percent"), s.get("last_prompt", ""), s.get("work_context", ""),
-         s.get("workflow_phase"))
+         s.get("context_percent"), s.get("last_prompt", ""), s.get("work_context", ""))
         for s in session_list
     ], sort_keys=True)
     content_hash = hashlib.md5(content_key.encode()).hexdigest()[:8]
@@ -332,8 +325,6 @@ def _poll_sessions() -> Dict[str, Any]:
     _prev_session_timestamps = {k: v for k, v in _prev_session_timestamps.items() if k in active_names}
     for gone in set(_last_known_prompt) - active_names:
         del _last_known_prompt[gone]
-    for gone in set(_last_working_phase) - active_names:
-        del _last_working_phase[gone]
 
     # Persist timestamps to disk so they survive server restarts
     try:
@@ -609,6 +600,35 @@ async def get_session_log(name: str, lines: int = 50):
         return {"session": name, "log": result.stdout}
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="tmux timeout")
+
+
+class DeleteRequest(BaseModel):
+    force: bool = False
+
+
+@app.get("/api/sessions/{name}/delete-check")
+async def session_delete_check(name: str):
+    """Report whether a session is safe to delete (git commit/push/merge state)."""
+    if not _SESSION_NAME_RE.match(name):
+        raise HTTPException(status_code=422, detail="Invalid session name")
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, check_delete_safety, name)
+
+
+@app.post("/api/sessions/{name}/delete")
+async def session_delete(name: str, req: DeleteRequest):
+    """Delete a session. Blocks unsafe deletes unless force=True."""
+    if not _SESSION_NAME_RE.match(name):
+        raise HTTPException(status_code=422, detail="Invalid session name")
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, delete_session, name, req.force)
+    if result.get("status") == "blocked":
+        return Response(
+            content=json.dumps(result, ensure_ascii=False),
+            status_code=409,
+            media_type="application/json",
+        )
+    return result
 
 
 _TICKET_LINKS_PATH = os.path.expanduser("~/.claude-ops/session-ticket-links.json")

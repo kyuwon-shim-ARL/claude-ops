@@ -202,6 +202,9 @@
       line-height: 1.6;
     }
     .theme-toggle:hover { background: rgba(255,255,255,0.12); }
+
+    .del-btn { opacity: 0.28; transition: opacity 0.2s, background 0.2s; }
+    .del-btn:hover { opacity: 1; background: rgba(239,68,68,0.22) !important; border-color: rgba(239,68,68,0.55) !important; }
   </style>
   <!-- Alpine.js CSP build (eval-free) — vendored fallback if CDN fails -->
   <script nonce="{{ csp_nonce }}"
@@ -233,11 +236,30 @@
     </div>
   </header>
 
+  <div id="filter-bar" class="px-5 pt-3 flex flex-wrap items-center gap-2">
+    <input id="filter-search" type="text" placeholder="🔎 세션 검색..." autocomplete="off"
+           class="font-mono"
+           style="flex:1;min-width:180px;max-width:340px;font-size:13px;padding:6px 12px;border-radius:10px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:inherit;outline:none;">
+    <div id="filter-age" class="flex items-center gap-1"></div>
+    <span id="filter-count" class="text-xs" style="color:#8b85a0;"></span>
+  </div>
+
   <main id="grid" class="p-5 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
     <div class="col-span-full text-center py-20 text-sm" id="empty-state" style="color: #8b85a0;">
       No sessions detected. Start a Claude session to see it here.
     </div>
   </main>
+
+  <div id="delete-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.55);backdrop-filter:blur(2px);align-items:center;justify-content:center;padding:16px;">
+    <div id="delete-modal-box" style="max-width:420px;width:100%;border-radius:18px;padding:20px;background:#1c1628;border:1px solid rgba(255,255,255,0.1);box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+      <div id="delete-modal-title" style="font-size:15px;font-weight:700;margin-bottom:10px;">세션 삭제</div>
+      <div id="delete-modal-body" style="font-size:13px;line-height:1.6;color:#c9c4dc;"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
+        <button id="delete-modal-cancel" style="font-size:13px;padding:7px 14px;border-radius:10px;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);color:inherit;cursor:pointer;">취소</button>
+        <button id="delete-modal-confirm" style="font-size:13px;font-weight:600;padding:7px 14px;border-radius:10px;border:1px solid transparent;cursor:pointer;"></button>
+      </div>
+    </div>
+  </div>
 
   <script nonce="{{ csp_nonce }}">
     // =============================================
@@ -284,6 +306,10 @@
           wtStripe: 'rgba(56,189,248,0.65)',
           wtBranch: 'rgba(125,211,252,0.80)',
           wtBg: 'rgba(56,189,248,0.03)',
+          groupBorder: 'rgba(125,211,252,0.55)',
+          groupBgTint: 'rgba(56,189,248,0.06)',
+          groupGlow: '0 0 0 1px rgba(56,189,248,0.25), 0 0 16px rgba(56,189,248,0.18)',
+          groupLabel: 'rgba(186,230,253,0.95)',
         };
       }
       return {
@@ -317,6 +343,10 @@
         wtStripe: 'rgba(14,165,233,0.55)',
         wtBranch: 'rgba(2,132,199,0.85)',
         wtBg: 'rgba(14,165,233,0.03)',
+        groupBorder: 'rgba(2,132,199,0.55)',
+        groupBgTint: 'rgba(14,165,233,0.07)',
+        groupGlow: '0 0 0 1px rgba(2,132,199,0.20), 0 0 14px rgba(14,165,233,0.20)',
+        groupLabel: 'rgba(7,89,133,0.95)',
       };
     }
 
@@ -592,6 +622,68 @@
     const _prevStates = {};
     const _sparkleUntil = {};
 
+    // =============================================
+    // Session filters — text search + activity-age window
+    // =============================================
+    const FILTER_AGE_KEY = 'ctb_filter_age';
+    const AGE_OPTIONS = [
+      { id: 'all', label: '전체', secs: 0 },
+      { id: '3d',  label: '3일',  secs: 3 * 86400 },
+      { id: '7d',  label: '7일',  secs: 7 * 86400 },
+      { id: '14d', label: '14일', secs: 14 * 86400 },
+      { id: '30d', label: '한 달', secs: 30 * 86400 },
+    ];
+    let _filterSearch = '';
+    let _filterAge = localStorage.getItem(FILTER_AGE_KEY) || 'all';
+
+    function _ageOption() {
+      return AGE_OPTIONS.find(o => o.id === _filterAge) || AGE_OPTIONS[0];
+    }
+
+    // Pinned sessions are always shown (staleness filter exempts them); text
+    // search still applies to everything.
+    function applyFilters(sessions, pinned) {
+      const q = _filterSearch.trim().toLowerCase();
+      const maxAge = _ageOption().secs;
+      const now = Date.now() / 1000;
+      return sessions.filter(s => {
+        if (q) {
+          const hay = (s.name + ' ' + (s.work_context || '') + ' ' + (s.last_prompt || '')).toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        if (maxAge > 0 && !(pinned && pinned.has(s.name))) {
+          const ts = s.last_activity || s.updated_at || 0;
+          if (ts > 0 && (now - ts) > maxAge) return false;
+        }
+        return true;
+      });
+    }
+
+    function buildAgeButtons() {
+      const wrap = document.getElementById('filter-age');
+      wrap.innerHTML = '';
+      for (const o of AGE_OPTIONS) {
+        const b = document.createElement('button');
+        b.textContent = o.label;
+        b.dataset.age = o.id;
+        const active = o.id === _filterAge;
+        b.style.cssText = `font-size:12px;padding:5px 11px;border-radius:9px;cursor:pointer;border:1px solid ${active ? 'rgba(129,140,248,0.7)' : 'rgba(255,255,255,0.1)'};background:${active ? 'rgba(129,140,248,0.18)' : 'rgba(255,255,255,0.05)'};color:inherit;`;
+        b.addEventListener('click', () => {
+          _filterAge = o.id;
+          localStorage.setItem(FILTER_AGE_KEY, o.id);
+          buildAgeButtons();
+          if (lastSSEData) render(lastSSEData);
+        });
+        wrap.appendChild(b);
+      }
+    }
+
+    document.getElementById('filter-search').addEventListener('input', (e) => {
+      _filterSearch = e.target.value;
+      if (lastSSEData) render(lastSSEData);
+    });
+    buildAgeButtons();
+
     function formatAge(ts) {
       if (!ts || ts === 0) return '--';
       const diff = Math.floor(Date.now() / 1000 - ts);
@@ -762,28 +854,6 @@
       return `<div style="margin-top:5px;"><span style="font-size:11px;font-weight:600;background:rgba(251,191,36,0.15);border:1px solid rgba(251,191,36,0.5);color:#fbbf24;padding:2px 8px;border-radius:99px;letter-spacing:0.02em;display:inline-block;">⚠️ ${mins}분째 작업 중 — stall 의심</span></div>`;
     }
 
-    // Workflow phase badge: shown on ALL cards when a phase is detected
-    function renderWorkflowPhase(session, t) {
-      const phase = session.workflow_phase;
-      if (!phase) return '';
-      const badges = {
-        // waiting/error phases
-        awaiting_approval:    { text: '⏳ 승인 필요', bg: 'rgba(240,165,0,0.15)',    border: 'rgba(240,165,0,0.45)',    color: '#f0a500' },
-        reporting_completion: { text: '✅ 완료 보고', bg: 'rgba(52,211,153,0.15)',   border: 'rgba(52,211,153,0.45)',   color: '#34d399' },
-        error:                { text: '⚠️ 확인 필요', bg: 'rgba(251,113,133,0.15)',  border: 'rgba(251,113,133,0.45)', color: '#fb7185' },
-        idle_wait:            { text: '⏸ 대기 중',   bg: 'rgba(148,163,184,0.12)',  border: 'rgba(148,163,184,0.35)', color: '#94a3b8' },
-        // working lifecycle phases
-        exploring:   { text: '🔍 탐색 중',   bg: 'rgba(96,165,250,0.12)',  border: 'rgba(96,165,250,0.4)',  color: '#60a5fa' },
-        planning:    { text: '📋 계획 수립', bg: 'rgba(167,139,250,0.12)', border: 'rgba(167,139,250,0.4)', color: '#a78bfa' },
-        plan_review: { text: '👁 계획 검토', bg: 'rgba(251,191,36,0.12)',  border: 'rgba(251,191,36,0.4)',  color: '#fbbf24' },
-        executing:   { text: '⚡ 작업 중',   bg: 'rgba(52,211,153,0.12)',  border: 'rgba(52,211,153,0.4)',  color: '#34d399' },
-        committing:  { text: '📦 커밋 중',   bg: 'rgba(251,146,60,0.12)',  border: 'rgba(251,146,60,0.4)',  color: '#fb923c' },
-        reporting:   { text: '📊 보고서',    bg: 'rgba(52,211,153,0.12)',  border: 'rgba(52,211,153,0.4)',  color: '#34d399' },
-      };
-      const badge = badges[phase];
-      if (!badge) return '';
-      return `<div style="margin-top:5px;"><span style="font-size:11px;font-weight:600;background:${badge.bg};border:1px solid ${badge.border};color:${badge.color};padding:2px 8px;border-radius:99px;letter-spacing:0.02em;display:inline-block;">${badge.text}</span></div>`;
-    }
 
     // T4: Theme-aware card rendering
     function renderCard(session, isPinned) {
@@ -866,6 +936,7 @@
           ${freshBar}
           <div class="long-press-ring"></div>
           <button data-pin-session="${name}" style="position:absolute;top:8px;left:6px;width:26px;height:26px;border-radius:9px;background:${t.pinBtnBg};display:flex;align-items:center;justify-content:center;font-size:12px;opacity:${pinOpacity};border:1px solid ${t.pinBtnBorder};cursor:pointer;transition:opacity 0.2s;touch-action:manipulation;" title="${isPinned ? 'Unpin session' : 'Pin session'}" aria-label="${isPinned ? 'Unpin session' : 'Pin session'}">${pinIcon}</button>
+          <button data-delete-session="${name}" class="del-btn" style="position:absolute;bottom:6px;right:6px;width:24px;height:24px;border-radius:8px;background:${t.pinBtnBg};display:flex;align-items:center;justify-content:center;font-size:12px;border:1px solid ${t.pinBtnBorder};cursor:pointer;touch-action:manipulation;z-index:6;" title="세션 삭제" aria-label="세션 삭제">🗑</button>
           <div class="flex items-center justify-between">
             <div style="flex:1;min-width:0;">
               <span class="font-mono text-sm font-medium truncate" style="color:${t.textPrimary};letter-spacing:-0.01em;display:block;" title="${name}">${display}</span>
@@ -876,7 +947,6 @@
               ${cfg.label}${renderContextGauge(session, t)}${freshBadge}
             </span>
           </div>
-          ${renderWorkflowPhase(session, t)}
           ${pendingBadge}
           ${isCompact ? '' : renderWorkContext(session, t)}
           ${isCompact ? '' : renderLastPrompt(session, t)}
@@ -931,12 +1001,12 @@
       const count = group.sessions.length;
       const cardsHtml = group.sessions.map(s => renderCard(s, true)).join('');
       return `
-        <div class="project-group" style="border:1px dashed ${t.cardBorder};border-radius:14px;padding:6px;background:${t.wtBg};">
-          <div style="font-size:10px;font-weight:600;color:${t.wtBranch};padding:2px 4px 6px 4px;display:flex;align-items:center;gap:6px;">
-            <span style="font-size:11px;opacity:0.7;">📁</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-weight:600;">${repoLabel}</span>
+        <div class="project-group" style="border:1.5px solid ${t.groupBorder};border-radius:14px;padding:8px;background:${t.groupBgTint};box-shadow:${t.groupGlow};">
+          <div style="font-size:10px;font-weight:700;color:${t.groupLabel};padding:2px 4px 8px 4px;display:flex;align-items:center;gap:6px;letter-spacing:0.02em;">
+            <span style="font-size:11px;opacity:0.85;">📁</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-weight:700;">${repoLabel}</span>
             <span style="opacity:0.55;">·</span>
-            <span style="opacity:0.7;">${count} sessions</span>
+            <span style="opacity:0.75;">${count} sessions</span>
           </div>
           <div class="project-group-cards">${cardsHtml}</div>
         </div>
@@ -996,8 +1066,23 @@
       // sessions just don't show up — their pin state survives until the
       // user explicitly unpins or moves them.
 
+      const visible = applyFilters(sessions, pinned);
+      const filterActive = _filterSearch.trim() !== '' || _filterAge !== 'all';
+      const filterCountEl = document.getElementById('filter-count');
+      filterCountEl.textContent = filterActive ? `${visible.length} / ${sessions.length} 표시` : '';
+
+      if (visible.length === 0) {
+        Array.from(grid.children).forEach(el => { if (el !== emptyState) el.remove(); });
+        emptyState.classList.remove('hidden');
+        emptyState.textContent = '필터와 일치하는 세션이 없습니다.';
+        sortedSessionNames = [];
+        btnCopyNames.classList.add('hidden');
+        return;
+      }
+      emptyState.textContent = 'No sessions detected. Start a Claude session to see it here.';
+
       const order = { working: 0, stuck_after_agent: 1, waiting: 2, context_limit: 3, error: 4, idle: 5, unknown: 6 };
-      sessions.sort((a, b) => {
+      visible.sort((a, b) => {
         const tierDiff = (pinned.has(a.name) ? 0 : 1) - (pinned.has(b.name) ? 0 : 1);
         if (tierDiff !== 0) return tierDiff;
         const stateDiff = (order[a.state] ?? 9) - (order[b.state] ?? 9);
@@ -1005,11 +1090,11 @@
         return (b.updated_at || 0) - (a.updated_at || 0);
       });
 
-      sortedSessionNames = sessions.map(s => s.name);
+      sortedSessionNames = visible.map(s => s.name);
       btnCopyNames.classList.remove('hidden');
 
-      const pinnedSessions = sessions.filter(s => pinned.has(s.name));
-      const normalSessions = sessions.filter(s => !pinned.has(s.name));
+      const pinnedSessions = visible.filter(s => pinned.has(s.name));
+      const normalSessions = visible.filter(s => !pinned.has(s.name));
       const hasPinned = pinnedSessions.length > 0;
       const hasBothGroups = hasPinned && normalSessions.length > 0;
 
@@ -1020,7 +1105,7 @@
       if (hasPinned) {
         const freshQuads = getQuadrants();
         const sessionMap = {};
-        for (const s of sessions) sessionMap[s.name] = s;
+        for (const s of visible) sessionMap[s.name] = s;
 
         html += `<div class="col-span-full">`;
         html += `<div style="display:flex;align-items:center;gap:10px;color:${t.sectionLabelPinned};font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:12px;">
@@ -1122,6 +1207,7 @@
       const card = e.target.closest('[data-session-name]');
       if (!card) return;
       if (e.target.closest('[data-pin-session]')) return;
+      if (e.target.closest('[data-delete-session]')) return;
 
       const sessionName = card.dataset.sessionName;
       if (!getPinned().has(sessionName)) return;
@@ -1553,6 +1639,7 @@
     grid.addEventListener('click', (e) => {
       if (_dragConfirmed) return;
       if (e.target.closest('[data-pin-session]')) return;
+      if (e.target.closest('[data-delete-session]')) return;
       const card = e.target.closest('[data-session-name]');
       if (!card) return;
       const name = card.dataset.sessionName;
@@ -1565,6 +1652,144 @@
       } else {
         focusSession(card, name);
       }
+    });
+
+    // =============================================
+    // Session deletion — safety check + guarded modal
+    // =============================================
+    const deleteModal = document.getElementById('delete-modal');
+    const deleteModalTitle = document.getElementById('delete-modal-title');
+    const deleteModalBody = document.getElementById('delete-modal-body');
+    const deleteModalConfirm = document.getElementById('delete-modal-confirm');
+    const deleteModalCancel = document.getElementById('delete-modal-cancel');
+    const deleteModalBox = document.getElementById('delete-modal-box');
+    let _deleteConfirmHandler = null;
+
+    function closeDeleteModal() {
+      deleteModal.style.display = 'none';
+      if (_deleteConfirmHandler) {
+        deleteModalConfirm.removeEventListener('click', _deleteConfirmHandler);
+        _deleteConfirmHandler = null;
+      }
+    }
+    deleteModalCancel.addEventListener('click', closeDeleteModal);
+    deleteModal.addEventListener('click', (e) => { if (e.target === deleteModal) closeDeleteModal(); });
+
+    function _themeModal() {
+      const t = getThemeColors();
+      deleteModalBox.style.background = isDark() ? '#1c1628' : '#fffcf7';
+      deleteModalBox.style.borderColor = t.cardBorder;
+      deleteModalBox.style.color = t.textPrimary;
+      deleteModalBody.style.color = t.textSecondary;
+    }
+
+    function _setConfirmBtn(label, danger) {
+      deleteModalConfirm.textContent = label;
+      deleteModalConfirm.style.background = danger ? 'rgba(239,68,68,0.9)' : 'rgba(239,68,68,0.75)';
+      deleteModalConfirm.style.color = '#fff';
+      deleteModalConfirm.style.borderColor = danger ? '#ef4444' : 'transparent';
+    }
+
+    function _bindConfirm(fn) {
+      if (_deleteConfirmHandler) deleteModalConfirm.removeEventListener('click', _deleteConfirmHandler);
+      _deleteConfirmHandler = fn;
+      deleteModalConfirm.addEventListener('click', fn);
+    }
+
+    async function performDelete(name, force) {
+      try {
+        const res = await fetch(`/api/sessions/${encodeURIComponent(name)}/delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ force }),
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'deleted') {
+          const parts = [];
+          if (data.removed_worktree) parts.push('워크트리 제거됨');
+          if (data.branch_deleted) parts.push('브랜치 삭제됨');
+          closeDeleteModal();
+          fetch('/api/sessions').then(r => r.json()).then(render).catch(() => {});
+        } else if (res.status === 409 || data.status === 'blocked') {
+          renderBlockedModal(name, data.check || {});
+        } else {
+          deleteModalBody.innerHTML = `<div style="color:#ef4444;">삭제 실패: ${escapeHtml(data.error || data.status || '알 수 없는 오류')}</div>`;
+        }
+      } catch (err) {
+        deleteModalBody.innerHTML = `<div style="color:#ef4444;">네트워크 오류로 삭제하지 못했습니다.</div>`;
+      }
+    }
+
+    function _checkSummaryHtml(check) {
+      const disp = escapeHtml(shortName(check.session || ''));
+      let rows = '';
+      if (check.is_worktree) rows += `<div>⎇ 워크트리 세션 — 삭제 시 작업 디렉토리가 제거됩니다.</div>`;
+      if (check.reasons && check.reasons.length) {
+        rows += `<ul style="margin:8px 0 0 0;padding-left:18px;color:#fca5a5;">` +
+          check.reasons.map(r => `<li style="margin:2px 0;">${escapeHtml(r)}</li>`).join('') + `</ul>`;
+      }
+      return { disp, rows };
+    }
+
+    // Second-confirmation guard for force delete.
+    function renderForceConfirm(name, check) {
+      _themeModal();
+      const { disp } = _checkSummaryHtml(check);
+      deleteModalTitle.textContent = '⚠️ 강제 삭제 확인';
+      deleteModalBody.innerHTML =
+        `<div><strong>${disp}</strong> 세션을 <strong style="color:#ef4444;">강제로</strong> 삭제합니다.</div>` +
+        `<div style="margin-top:8px;">저장되지 않은 변경사항·미푸시 커밋이 <strong>영구히 사라집니다</strong>. 계속하시겠습니까?</div>`;
+      _setConfirmBtn('영구 삭제', true);
+      _bindConfirm(() => performDelete(name, true));
+    }
+
+    function renderBlockedModal(name, check) {
+      _themeModal();
+      const { disp, rows } = _checkSummaryHtml(check);
+      deleteModalTitle.textContent = '삭제할 수 없음';
+      deleteModalBody.innerHTML =
+        `<div><strong>${disp}</strong> 은(는) 아직 안전하게 삭제할 수 없습니다:</div>${rows}` +
+        `<div style="margin-top:10px;font-size:12px;opacity:0.7;">커밋·푸시${check.is_worktree ? '·병합' : ''} 후 다시 시도하거나, 강제 삭제할 수 있습니다.</div>`;
+      _setConfirmBtn('강제 삭제…', false);
+      _bindConfirm(() => renderForceConfirm(name, check));
+    }
+
+    function renderSafeConfirm(name, check) {
+      _themeModal();
+      const { disp } = _checkSummaryHtml(check);
+      deleteModalTitle.textContent = '세션 삭제';
+      let detail = '작업이 안전하게 저장되어 있습니다.';
+      if (check.is_worktree) detail = '브랜치가 병합되어 있어 안전합니다. 워크트리와 브랜치가 제거됩니다.';
+      else if (!check.is_git) detail = 'tmux 세션만 종료합니다 (파일은 유지됩니다).';
+      deleteModalBody.innerHTML = `<div><strong>${disp}</strong> 세션을 삭제하시겠습니까?</div><div style="margin-top:8px;color:#86efac;">✓ ${escapeHtml(detail)}</div>`;
+      _setConfirmBtn('삭제', false);
+      _bindConfirm(() => performDelete(name, false));
+    }
+
+    async function openDeleteFlow(name) {
+      _themeModal();
+      deleteModalTitle.textContent = '세션 삭제';
+      deleteModalBody.innerHTML = '<div style="opacity:0.7;">안전성 확인 중…</div>';
+      _setConfirmBtn('…', false);
+      _bindConfirm(() => {});
+      deleteModal.style.display = 'flex';
+      try {
+        const res = await fetch(`/api/sessions/${encodeURIComponent(name)}/delete-check`);
+        const check = await res.json();
+        if (check.safe) renderSafeConfirm(name, check);
+        else renderBlockedModal(name, check);
+      } catch (err) {
+        deleteModalBody.innerHTML = '<div style="color:#ef4444;">안전성 확인에 실패했습니다.</div>';
+      }
+    }
+
+    grid.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-delete-session]');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (isDragging) return;
+      openDeleteFlow(btn.dataset.deleteSession);
     });
 
     // Start — apply theme first, then connect

@@ -6,7 +6,36 @@ Extracted from claude_ctb.session_manager (stateless subset).
 """
 
 import subprocess
-from typing import List
+from typing import Dict, List
+
+
+def get_sessions_activity() -> Dict[str, int]:
+    """Return {session_name: last_activity_epoch} for all tmux sessions.
+
+    Uses tmux's #{session_activity} — the real last-activity time of the pane,
+    which is the right signal for a 'hide stale sessions' filter.
+    """
+    try:
+        result = subprocess.run(
+            "tmux list-sessions -F '#{session_name} #{session_activity}'",
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return {}
+        activity: Dict[str, int] = {}
+        for line in result.stdout.strip().split('\n'):
+            parts = line.strip().split(' ', 1)
+            if len(parts) == 2:
+                try:
+                    activity[parts[0]] = int(parts[1])
+                except ValueError:
+                    activity[parts[0]] = 0
+        return activity
+    except Exception:
+        return {}
 
 
 def get_all_claude_sessions(sort_by_mtime: bool = True) -> List[str]:
