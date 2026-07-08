@@ -205,6 +205,9 @@
 
     .del-btn { opacity: 0.28; transition: opacity 0.2s, background 0.2s; }
     .del-btn:hover { opacity: 1; background: rgba(239,68,68,0.22) !important; border-color: rgba(239,68,68,0.55) !important; }
+
+    [data-session-name]:focus { outline: 2px solid rgba(129,140,248,0.85); outline-offset: 2px; }
+    [data-session-name]:focus-visible { outline: 2px solid rgba(129,140,248,0.85); outline-offset: 2px; }
   </style>
   <!-- Alpine.js CSP build (eval-free) — vendored fallback if CDN fails -->
   <script nonce="{{ csp_nonce }}"
@@ -627,17 +630,33 @@
     // =============================================
     const FILTER_AGE_KEY = 'ctb_filter_age';
     const FILTER_DIR_KEY = 'ctb_filter_dir';
+    const FILTER_ENABLED_KEY = 'ctb_filter_enabled';
+    // Full catalog of selectable windows. '전체' is always present.
     const AGE_OPTIONS = [
       { id: 'all', label: '전체', secs: 0 },
+      { id: '1h',  label: '1시간', secs: 3600 },
+      { id: '3h',  label: '3시간', secs: 3 * 3600 },
+      { id: '1d',  label: '1일',  secs: 86400 },
       { id: '3d',  label: '3일',  secs: 3 * 86400 },
       { id: '7d',  label: '7일',  secs: 7 * 86400 },
       { id: '14d', label: '14일', secs: 14 * 86400 },
       { id: '30d', label: '한 달', secs: 30 * 86400 },
     ];
+    const DEFAULT_ENABLED = ['1h', '3h', '1d', '3d', '7d', '30d'];
     let _filterSearch = '';
     let _filterAge = localStorage.getItem(FILTER_AGE_KEY) || 'all';
-    // 'within' = 최근 N일 이내, 'older' = N일 이전(오래된 세션만 — 정리용)
+    // 'within' = 기준 시점 이후(최근), 'older' = 기준 시점 이전(오래된 세션 — 정리용)
     let _filterDir = localStorage.getItem(FILTER_DIR_KEY) || 'within';
+
+    function _loadEnabledAges() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(FILTER_ENABLED_KEY));
+        if (Array.isArray(raw)) return raw.filter(id => AGE_OPTIONS.some(o => o.id === id));
+      } catch {}
+      return [...DEFAULT_ENABLED];
+    }
+    // 'all' is implicit and always shown; store only the optional windows.
+    let _enabledAges = _loadEnabledAges();
 
     function _ageOption() {
       return AGE_OPTIONS.find(o => o.id === _filterAge) || AGE_OPTIONS[0];
@@ -672,10 +691,39 @@
       });
     }
 
+    function _visibleAgeOptions() {
+      // '전체' first, then the enabled windows in catalog order.
+      return AGE_OPTIONS.filter(o => o.id === 'all' || _enabledAges.includes(o.id));
+    }
+
     function buildAgeButtons() {
       const wrap = document.getElementById('filter-age');
       wrap.innerHTML = '';
-      for (const o of AGE_OPTIONS) {
+
+      // If the active window got disabled via settings, fall back to '전체'.
+      if (_filterAge !== 'all' && !_enabledAges.includes(_filterAge)) {
+        _filterAge = 'all';
+        localStorage.setItem(FILTER_AGE_KEY, 'all');
+      }
+
+      // Direction toggle FIRST so the buttons read naturally: "[오래된] 3일".
+      // within = 최근(기준 이후), older = 오래된(기준 이전).
+      const older = _filterDir === 'older';
+      const dir = document.createElement('button');
+      dir.textContent = older ? '오래된' : '최근';
+      dir.title = older
+        ? '선택 기간보다 오래된(그 이전) 세션만 표시 — 정리용'
+        : '선택 기간 이내(최근) 활동한 세션만 표시';
+      dir.style.cssText = `font-size:12px;padding:5px 11px;border-radius:9px;cursor:pointer;margin-right:2px;border:1px solid ${older ? 'rgba(251,146,60,0.7)' : 'rgba(52,211,153,0.6)'};background:${older ? 'rgba(251,146,60,0.18)' : 'rgba(52,211,153,0.15)'};color:inherit;visibility:${_filterAge === 'all' ? 'hidden' : 'visible'};`;
+      dir.addEventListener('click', () => {
+        _filterDir = older ? 'within' : 'older';
+        localStorage.setItem(FILTER_DIR_KEY, _filterDir);
+        buildAgeButtons();
+        if (lastSSEData) render(lastSSEData);
+      });
+      wrap.appendChild(dir);
+
+      for (const o of _visibleAgeOptions()) {
         const b = document.createElement('button');
         b.textContent = o.label;
         b.dataset.age = o.id;
@@ -690,19 +738,56 @@
         wrap.appendChild(b);
       }
 
-      // Direction toggle: 이내(within) ↔ 이전(older-than). Hidden when '전체'.
-      const dir = document.createElement('button');
-      const older = _filterDir === 'older';
-      dir.textContent = older ? '이전' : '이내';
-      dir.title = older ? '선택 기간보다 오래된 세션만 표시 (정리용)' : '선택 기간 이내 활동한 세션만 표시';
-      dir.style.cssText = `font-size:12px;padding:5px 11px;border-radius:9px;cursor:pointer;margin-left:4px;border:1px solid ${older ? 'rgba(251,146,60,0.7)' : 'rgba(255,255,255,0.1)'};background:${older ? 'rgba(251,146,60,0.18)' : 'rgba(255,255,255,0.05)'};color:inherit;visibility:${_filterAge === 'all' ? 'hidden' : 'visible'};`;
-      dir.addEventListener('click', () => {
-        _filterDir = older ? 'within' : 'older';
-        localStorage.setItem(FILTER_DIR_KEY, _filterDir);
-        buildAgeButtons();
-        if (lastSSEData) render(lastSSEData);
-      });
-      wrap.appendChild(dir);
+      // Settings gear — choose which windows appear as buttons.
+      const gear = document.createElement('button');
+      gear.textContent = '⚙';
+      gear.title = '표시할 기간 버튼 설정';
+      gear.style.cssText = 'font-size:12px;padding:5px 9px;border-radius:9px;cursor:pointer;margin-left:4px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.05);color:inherit;';
+      gear.addEventListener('click', (e) => { e.stopPropagation(); toggleAgeSettings(gear); });
+      wrap.appendChild(gear);
+    }
+
+    function toggleAgeSettings(anchor) {
+      const existing = document.getElementById('age-settings-pop');
+      if (existing) { existing.remove(); return; }
+      const t = getThemeColors();
+      const pop = document.createElement('div');
+      pop.id = 'age-settings-pop';
+      pop.style.cssText = `position:absolute;z-index:900;margin-top:6px;padding:10px 12px;border-radius:12px;background:${isDark() ? '#1c1628' : '#fffcf7'};border:1px solid ${t.cardBorder};box-shadow:0 10px 30px rgba(0,0,0,0.35);min-width:150px;`;
+      const title = document.createElement('div');
+      title.textContent = '표시할 기간 버튼';
+      title.style.cssText = `font-size:11px;font-weight:700;opacity:0.7;margin-bottom:8px;`;
+      pop.appendChild(title);
+      for (const o of AGE_OPTIONS) {
+        if (o.id === 'all') continue;
+        const row = document.createElement('label');
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:13px;padding:3px 0;cursor:pointer;';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = _enabledAges.includes(o.id);
+        cb.addEventListener('change', () => {
+          if (cb.checked) { if (!_enabledAges.includes(o.id)) _enabledAges.push(o.id); }
+          else { _enabledAges = _enabledAges.filter(x => x !== o.id); }
+          localStorage.setItem(FILTER_ENABLED_KEY, JSON.stringify(_enabledAges));
+          buildAgeButtons();
+          if (lastSSEData) render(lastSSEData);
+        });
+        row.appendChild(cb);
+        row.appendChild(document.createTextNode(o.label));
+        pop.appendChild(row);
+      }
+      anchor.parentElement.style.position = 'relative';
+      anchor.parentElement.appendChild(pop);
+      // close on outside click
+      setTimeout(() => {
+        const off = (ev) => {
+          if (!pop.contains(ev.target) && ev.target !== anchor) {
+            pop.remove();
+            document.removeEventListener('click', off);
+          }
+        };
+        document.addEventListener('click', off);
+      }, 0);
     }
 
     const _searchInput = document.getElementById('filter-search');
@@ -710,13 +795,20 @@
       _filterSearch = e.target.value;
       if (lastSSEData) render(lastSSEData);
     });
-    // Esc inside the box clears+blurs the search
     _searchInput.addEventListener('keydown', (e) => {
+      // Esc clears + blurs the search
       if (e.key === 'Escape') {
         _searchInput.value = '';
         _filterSearch = '';
         _searchInput.blur();
         if (lastSSEData) render(lastSSEData);
+        return;
+      }
+      // Enter jumps to the first matching card so arrow-key nav can take over
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const first = grid.querySelector('[data-session-name]');
+        if (first) first.focus();
       }
     });
     // Keyboard shortcut to jump into the search box:
@@ -990,7 +1082,7 @@
 
       return `
         <div class="group relative overflow-hidden ${cfg.border} draggable-card${freshClass}"
-             data-session-name="${name}"
+             data-session-name="${name}" tabindex="0"
              style="border-radius:20px 20px 16px 20px;background:${wtCardBg};border:1px solid;padding:${cardPadding};box-shadow:${cfg.glow},${t.cardShadowBase};${borderStyle}${wtStripe}${staleOpacity}transition:all 0.3s ease;">
           ${freshBar}
           <div class="long-press-ring"></div>
@@ -1860,6 +1952,25 @@
       e.stopPropagation();
       if (isDragging) return;
       openDeleteFlow(btn.dataset.deleteSession);
+    });
+
+    // Keyboard navigation between cards: arrows move focus, Enter activates
+    // (same as a click). Cards carry tabindex="0" in renderCard().
+    grid.addEventListener('keydown', (e) => {
+      const card = e.target.closest('[data-session-name]');
+      if (!card) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        card.click();
+        return;
+      }
+      if (['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'].includes(e.key)) {
+        e.preventDefault();
+        const cards = Array.from(grid.querySelectorAll('[data-session-name]'));
+        const idx = cards.indexOf(card);
+        const next = (e.key === 'ArrowRight' || e.key === 'ArrowDown') ? cards[idx + 1] : cards[idx - 1];
+        if (next) next.focus();
+      }
     });
 
     // Start — apply theme first, then connect
