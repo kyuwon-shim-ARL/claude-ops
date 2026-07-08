@@ -48,6 +48,35 @@ function fetchSessions(): Promise<SharedState | null> {
   });
 }
 
+/** Delete a session via the CTB API from the extension host (bypasses the
+ *  webview portMapping proxy, which blocks non-GET). Feedback via notifications. */
+function deleteSessionViaApi(session: string, force: boolean): void {
+  const body = JSON.stringify({ force });
+  const url = `${DASHBOARD_URL}/api/sessions/${encodeURIComponent(session)}/delete`;
+  const req = http.request(url, {
+    method: 'POST',
+    timeout: 8000,
+    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+  }, (res) => {
+    let data = '';
+    res.on('data', (chunk: string) => { data += chunk; });
+    res.on('end', () => {
+      if (res.statusCode === 200) {
+        vscode.window.setStatusBarMessage(`CTB: ${session} 삭제됨`, 4000);
+      } else if (res.statusCode === 409) {
+        vscode.window.showWarningMessage(
+          `CTB: '${session}' 삭제 차단 — 미커밋/미푸시/미병합. 강제 삭제를 사용하세요.`);
+      } else {
+        vscode.window.showErrorMessage(`CTB: '${session}' 삭제 실패 (HTTP ${res.statusCode})`);
+      }
+    });
+  });
+  req.on('error', (e: Error) => vscode.window.showErrorMessage(`CTB: 삭제 요청 실패 — ${e.message}`));
+  req.on('timeout', () => { req.destroy(); vscode.window.showErrorMessage('CTB: 삭제 요청 시간초과'); });
+  req.write(body);
+  req.end();
+}
+
 // --- Status Bar ---
 
 class StatusBarManager {
@@ -191,9 +220,13 @@ class DashboardPanel {
     DashboardPanel.panel.webview.html = await getWebviewContent(context);
 
     // Handle messages from webview (card click → terminal focus)
-    DashboardPanel.panel.webview.onDidReceiveMessage((message: { type: string; session?: string; url?: string }) => {
+    DashboardPanel.panel.webview.onDidReceiveMessage((message: { type: string; session?: string; url?: string; force?: boolean }) => {
       if (message.type === 'focusSession' && message.session) {
         focusOrCreateTerminalForSession(message.session);
+      } else if (message.type === 'deleteSession' && message.session) {
+        // VSCode webview portMapping only proxies GET; POST is blocked. Do the
+        // delete from the extension host, which reaches the server directly.
+        deleteSessionViaApi(message.session, !!message.force);
       } else if (message.type === 'openUrl' && message.url) {
         // Load the URL in-panel as an iframe so Projects view stays in the webview.
         // The proxy script forwards child-iframe postMessages to the extension so that
@@ -229,6 +262,10 @@ function fetchServerHtml(): Promise<string | null> {
 /** Rewrite relative /api URLs so they reach the CTB server from inside the webview. */
 function applyUrlRewrites(html: string): string {
   html = html.replace(/fetch\('\/api/g, `fetch('${DASHBOARD_URL}/api`);
+  // Template-literal fetches (e.g. fetch(`/api/sessions/${name}/delete-check`))
+  // must be rewritten too, otherwise they resolve against the vscode-webview
+  // origin and 403 inside the panel.
+  html = html.replace(/fetch\(`\/api/g, 'fetch(`' + DASHBOARD_URL + '/api');
   html = html.replace(/EventSource\('\/api/g, `EventSource('${DASHBOARD_URL}/api`);
   return html;
 }

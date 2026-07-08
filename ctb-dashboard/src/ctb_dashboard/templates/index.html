@@ -1848,6 +1848,15 @@
     }
 
     async function performDelete(name, force) {
+      // Inside the VSCode webview a fetch POST is blocked by portMapping (GET
+      // only). Route the delete through the extension host instead; it reports
+      // back via a VSCode notification and the SSE stream removes the card.
+      if (_vscodeApi) {
+        _vscodeApi.postMessage({ type: 'deleteSession', session: name, force: !!force });
+        closeDeleteModal();
+        fetch('/api/sessions').then(r => r.json()).then(render).catch(() => {});
+        return;
+      }
       try {
         const res = await fetch(`/api/sessions/${encodeURIComponent(name)}/delete`, {
           method: 'POST',
