@@ -359,8 +359,10 @@ show_status() {
         printf "  ⚠️  Single-session monitoring: ${YELLOW}Running (should stop)${NC}\n"
     fi
     
-    if tmux has-session -t telegram-bot 2>/dev/null; then
+    if systemctl --user is-active claude-telegram-bridge.service >/dev/null 2>&1; then
         printf "  📱 Telegram bot: ${GREEN}Running${NC}\n"
+    elif tmux has-session -t telegram-bot 2>/dev/null; then
+        printf "  📱 Telegram bot: ${GREEN}Running (tmux)${NC}\n"
     else
         printf "  📱 Telegram bot: ${RED}Stopped${NC}\n"
     fi
