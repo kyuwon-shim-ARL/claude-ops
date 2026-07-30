@@ -39,6 +39,7 @@ from .sessions import get_all_claude_sessions, get_session_path, get_sessions_ac
 from .session_delete import check_delete_safety, delete_session
 from .session_input import (
     ALLOWED_KEYS,
+    pane_command,
     send_interrupt,
     send_key,
     send_prompt,
@@ -701,7 +702,8 @@ async def session_prompt(name: str, req: PromptRequest, request: Request):
     before = await loop.run_in_executor(
         None, lambda: analyzer.get_screen_content(name, use_cache=False)
     )
-    can_send, reason, message = classify_readiness(state, before)
+    cmd = await loop.run_in_executor(None, pane_command, name)
+    can_send, reason, message = classify_readiness(state, before, cmd)
     if not can_send:
         _audit("prompt", name, client, False, reason)
         return Response(

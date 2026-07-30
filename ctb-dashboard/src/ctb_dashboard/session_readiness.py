@@ -14,9 +14,15 @@ from .state_detector import SessionState
 # Claude Code draws a bordered input area. If none of these are on screen the
 # pane is showing something else -- most often a plain shell -- and a prompt
 # typed into it would be executed as a shell command instead of reaching Claude.
-# "> " alone is too loose -- it appears in ordinary shell output and would make
-# a shell read as Claude, which is the exact confusion this guards against.
-CLAUDE_UI_MARKERS = ("╭─", "╰─", "│ >")
+# Shells, by the name tmux reports as the pane's foreground command.
+# A denylist of shells, not an allowlist of Claude: the risk being guarded
+# against is a prompt being executed as a shell command, and anything that is
+# not a shell cannot do that. An allowlist was tried first and blocked every
+# real session, because it was built from guessed screen glyphs rather than
+# from what Claude Code actually draws.
+SHELL_COMMANDS = frozenset({
+    "bash", "sh", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "ash",
+})
 
 # Refusals that are about *when*, with the reason surfaced to the caller.
 _REFUSALS = {
@@ -43,15 +49,23 @@ _REFUSALS = {
 }
 
 
-def claude_ui_present(screen: str | None) -> bool:
-    """Does the pane look like Claude Code's interface (vs a bare shell)?"""
-    if not screen:
+def is_shell(pane_command: str | None) -> bool:
+    """Is the pane sitting at a shell rather than running Claude?
+
+    Unknown or unavailable commands are not shells as far as this is concerned:
+    refusing on a failed tmux query would block real work to guard against a
+    case we have no evidence for.
+    """
+    if not pane_command:
         return False
-    tail = "\n".join(screen.split("\n")[-15:])
-    return any(marker in tail for marker in CLAUDE_UI_MARKERS)
+    return pane_command.strip().lstrip("-").lower() in SHELL_COMMANDS
 
 
-def classify_readiness(state: SessionState, screen: str | None) -> tuple[bool, str, str]:
+def classify_readiness(
+    state: SessionState,
+    screen: str | None,
+    pane_command: str | None = None,
+) -> tuple[bool, str, str]:
     """-> (can_send, reason_code, human_message).
 
     UNKNOWN is treated as sendable on purpose: screen reads fail transiently and
@@ -63,11 +77,11 @@ def classify_readiness(state: SessionState, screen: str | None) -> tuple[bool, s
         code, message = refusal
         return False, code, message
 
-    if not claude_ui_present(screen):
+    if is_shell(pane_command):
         return (
             False,
             "shell",
-            "Claude 입력창이 보이지 않습니다(셸 상태로 보임). "
+            f"이 세션은 Claude가 아니라 셸({pane_command})이 떠 있습니다. "
             "프롬프트가 셸 명령으로 실행될 수 있어 전송을 막았습니다.",
         )
 

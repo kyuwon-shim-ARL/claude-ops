@@ -13,8 +13,8 @@ from fastapi.testclient import TestClient
 import ctb_dashboard.server as _srv
 from ctb_dashboard.server import app
 from ctb_dashboard.session_readiness import (
-    claude_ui_present,
     classify_readiness,
+    is_shell,
 )
 from ctb_dashboard.state_detector import SessionState
 
@@ -36,29 +36,68 @@ SHELL_SCREEN = "\n".join([
 
 # --- pure readiness classification -----------------------------------------
 
-def test_idle_with_claude_ui_can_send():
-    can, reason, _ = classify_readiness(SessionState.IDLE, CLAUDE_SCREEN)
+def test_idle_claude_session_can_send():
+    can, reason, _ = classify_readiness(SessionState.IDLE, CLAUDE_SCREEN, "claude")
     assert (can, reason) == (True, "ready")
 
 
 def test_working_is_refused():
-    can, reason, msg = classify_readiness(SessionState.WORKING, CLAUDE_SCREEN)
+    can, reason, msg = classify_readiness(SessionState.WORKING, CLAUDE_SCREEN, "claude")
     assert can is False
     assert reason == "working"
     assert msg
 
 
 def test_awaiting_choice_is_refused_and_points_at_key_sending():
-    can, reason, msg = classify_readiness(SessionState.WAITING_INPUT, CLAUDE_SCREEN)
+    can, reason, msg = classify_readiness(SessionState.WAITING_INPUT, CLAUDE_SCREEN, "claude")
     assert can is False
     assert reason == "awaiting_choice"
     assert "키" in msg, "should tell the user to send a key instead"
 
 
 def test_shell_is_refused_even_though_state_looks_idle():
-    """A bare shell reads as IDLE to the detector -- the UI check is what catches it."""
-    can, reason, _ = classify_readiness(SessionState.IDLE, SHELL_SCREEN)
+    """A bare shell reads as IDLE to the detector; the pane command is what catches it."""
+    can, reason, _ = classify_readiness(SessionState.IDLE, SHELL_SCREEN, "bash")
     assert (can, reason) == (False, "shell")
+
+
+@pytest.mark.parametrize("cmd", ["bash", "zsh", "sh", "fish", "-bash", "BASH"])
+def test_every_shell_flavour_is_refused(cmd):
+    can, reason, _ = classify_readiness(SessionState.IDLE, SHELL_SCREEN, cmd)
+    assert (can, reason) == (False, "shell")
+
+
+@pytest.mark.parametrize("cmd", ["claude", "node", "python3", "uv", "vim"])
+def test_non_shell_commands_are_allowed(cmd):
+    """Denylist, not allowlist -- a tool we have not heard of must not block work."""
+    can, _, _ = classify_readiness(SessionState.IDLE, CLAUDE_SCREEN, cmd)
+    assert can is True
+
+
+def test_unavailable_pane_command_does_not_block():
+    """A failed tmux query is not evidence of a shell."""
+    assert classify_readiness(SessionState.IDLE, CLAUDE_SCREEN, None)[0] is True
+    assert classify_readiness(SessionState.IDLE, CLAUDE_SCREEN, "")[0] is True
+
+
+def test_real_claude_screen_is_not_mistaken_for_a_shell():
+    """Regression: the first implementation guessed the wrong glyphs.
+
+    Claude Code draws '❯' and └┴┘ box characters, not the ╭╰ set that was
+    assumed, so every live session was refused as 'shell'. Captured from a real
+    pane; the decision must not depend on these characters at all now.
+    """
+    real = "\n".join([
+        "  └────────┴──────────┘",
+        "",
+        "────────────────────────────",
+        "❯ 뭐를 위한",
+        "────────────────────────────",
+        "  [OMC#4.14.1] | Model: Opus 5 | ctx:26%",
+        "  ⏵⏵ bypass permissions on (shift+tab to cycle)",
+    ])
+    can, reason, _ = classify_readiness(SessionState.IDLE, real, "claude")
+    assert (can, reason) == (True, "ready"), "a real Claude pane must be sendable"
 
 
 @pytest.mark.parametrize("state", [
@@ -67,22 +106,22 @@ def test_shell_is_refused_even_though_state_looks_idle():
     SessionState.STUCK_AFTER_AGENT,
 ])
 def test_broken_states_are_refused(state):
-    can, reason, _ = classify_readiness(state, CLAUDE_SCREEN)
+    can, reason, _ = classify_readiness(state, CLAUDE_SCREEN, "claude")
     assert can is False
     assert reason == state.value
 
 
 def test_unknown_state_is_allowed_when_ui_is_present():
     """Transient read failures must not brick remote control."""
-    can, _, _ = classify_readiness(SessionState.UNKNOWN, CLAUDE_SCREEN)
+    can, _, _ = classify_readiness(SessionState.UNKNOWN, CLAUDE_SCREEN, "claude")
     assert can is True
 
 
-def test_claude_ui_present_rejects_empty_and_shell():
-    assert claude_ui_present(None) is False
-    assert claude_ui_present("") is False
-    assert claude_ui_present(SHELL_SCREEN) is False
-    assert claude_ui_present(CLAUDE_SCREEN) is True
+def test_is_shell_classification():
+    assert is_shell("bash") is True
+    assert is_shell("claude") is False
+    assert is_shell(None) is False
+    assert is_shell("") is False
 
 
 # --- endpoint behaviour -----------------------------------------------------
@@ -105,6 +144,7 @@ def wire(monkeypatch):
     monkeypatch.setattr(_srv, "session_exists", lambda name: True)
     monkeypatch.setattr(_srv, "send_prompt", lambda name, text: None)
     monkeypatch.setattr(_srv, "_SEND_CONFIRM_DELAY", 0)
+    monkeypatch.setattr(_srv, "pane_command", lambda name: "claude")
 
     def install(state, screens):
         monkeypatch.setattr(_srv, "_state_analyzer", FakeAnalyzer(state, screens))
@@ -150,7 +190,8 @@ def test_confirmed_false_when_screen_is_unchanged(wire):
     assert r.json()["confirmed"] is False
 
 
-def test_shell_session_is_refused_end_to_end(wire):
+def test_shell_session_is_refused_end_to_end(wire, monkeypatch):
+    monkeypatch.setattr(_srv, "pane_command", lambda name: "bash")
     client = wire(SessionState.IDLE, [SHELL_SCREEN])
     r = client.post("/api/sessions/claude_demo/prompt",
                     json={"text": "hi"}, headers=AUTH)

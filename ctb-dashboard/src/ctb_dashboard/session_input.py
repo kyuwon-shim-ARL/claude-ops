@@ -37,6 +37,31 @@ def session_exists(name: str) -> bool:
     return result.returncode == 0
 
 
+def pane_command(name: str) -> str | None:
+    """Foreground command running in the session's pane, e.g. 'claude' or 'bash'.
+
+    This is what tells a live Claude session apart from a bare shell. Screen
+    glyphs were tried first and were wrong: Claude Code draws its input with
+    '❯' and └┴┘ box characters, not the ╭╰ set that was guessed, so every real
+    session read as a shell. The running process is a fact rather than a
+    rendering detail, so it survives Claude changing its UI.
+
+    Returns None if tmux cannot answer -- callers must not treat that as
+    evidence of anything.
+    """
+    try:
+        result = subprocess.run(
+            ["tmux", "display-message", "-p", "-t", name, "#{pane_current_command}"],
+            capture_output=True, text=True, timeout=_TMUX_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning("tmux display-message timed out for %s", name)
+        return None
+    if result.returncode != 0:
+        return None
+    return (result.stdout or "").strip() or None
+
+
 def _tmux(argv: list[str], stdin_text: str | None = None) -> None:
     """Run a tmux command, raising on anything but success."""
     kwargs: dict = {
