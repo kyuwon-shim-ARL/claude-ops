@@ -43,6 +43,7 @@ from .session_input import (
     session_exists,
 )
 from .dangerous_commands import is_dangerous_command
+from .session_readiness import classify_readiness
 
 import sys as _sys
 _PSTATUS_DIR = "/home/kyuwon/projects/project-status"
@@ -77,6 +78,10 @@ def _resolve_control_secret() -> str:
 
 _CONTROL_SECRET = _resolve_control_secret()
 _SESSION_NAME_RE = re.compile(r'^[a-zA-Z0-9_\-:.]{1,64}$')
+
+# How long to wait before re-reading the pane to confirm a prompt landed.
+# Long enough for the TUI to redraw, short enough not to stall the request.
+_SEND_CONFIRM_DELAY = 0.4
 
 
 def require_control_token(x_ctb_secret: str | None = Header(None)) -> None:
@@ -675,13 +680,55 @@ async def session_prompt(name: str, req: PromptRequest):
             detail="Blocked: text matches a destructive-command pattern",
         )
 
+    # Refuse rather than send blind: on a phone the screen is not visible, and
+    # tmux send-keys succeeds even when a shell or a permission prompt would
+    # swallow the text.
+    analyzer = _state_analyzer
+    state = await loop.run_in_executor(
+        None, lambda: analyzer.get_state(name, None, False)
+    )
+    before = await loop.run_in_executor(
+        None, lambda: analyzer.get_screen_content(name, use_cache=False)
+    )
+    can_send, reason, message = classify_readiness(state, before)
+    if not can_send:
+        return Response(
+            content=json.dumps(
+                {
+                    "session": name,
+                    "status": "refused",
+                    "reason": reason,
+                    "state": state.value,
+                    "message": message,
+                },
+                ensure_ascii=False,
+            ),
+            status_code=409,
+            media_type="application/json",
+        )
+
     try:
         await loop.run_in_executor(None, send_prompt, name, req.text)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
-    return {"session": name, "status": "sent"}
+
+    # Confirm something actually changed on screen. tmux reports success for a
+    # send that landed nowhere, so this is the only evidence we have.
+    await asyncio.sleep(_SEND_CONFIRM_DELAY)
+    after = await loop.run_in_executor(
+        None, lambda: analyzer.get_screen_content(name, use_cache=False)
+    )
+    confirmed = bool(after) and after != before
+    if not confirmed:
+        logger.warning("prompt to %s produced no screen change", name)
+    return {
+        "session": name,
+        "status": "sent",
+        "state": state.value,
+        "confirmed": confirmed,
+    }
 
 
 @app.post("/api/sessions/{name}/interrupt", dependencies=[Depends(require_control_token)])

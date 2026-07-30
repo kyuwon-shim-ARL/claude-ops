@@ -9,16 +9,31 @@ from fastapi.testclient import TestClient
 
 import ctb_dashboard.server as _srv
 from ctb_dashboard.server import app
+from ctb_dashboard.state_detector import SessionState
 
 _SECRET = "prompt-endpoint-secret"
 AUTH = {"X-CTB-Secret": _SECRET}
 
+# A pane showing Claude's input box, so the readiness gate lets the send through.
+# Readiness itself is covered in tests/test_send_confirmation.py.
+_READY_SCREEN = "╭────────╮\n│ >      │\n╰────────╯"
+
+
+class _ReadyAnalyzer:
+    def get_state(self, name, path=None, use_cache=True):
+        return SessionState.IDLE
+
+    def get_screen_content(self, name, use_cache=True):
+        return _READY_SCREEN
+
 
 @pytest.fixture
 def sent(monkeypatch):
-    """Auth on, session present, tmux stubbed. Returns the recorded sends."""
+    """Auth on, session present, session ready, tmux stubbed."""
     monkeypatch.setattr(_srv, "_CONTROL_SECRET", _SECRET)
     monkeypatch.setattr(_srv, "session_exists", lambda name: name == "claude_demo")
+    monkeypatch.setattr(_srv, "_state_analyzer", _ReadyAnalyzer())
+    monkeypatch.setattr(_srv, "_SEND_CONFIRM_DELAY", 0)
     calls = []
     monkeypatch.setattr(_srv, "send_prompt", lambda name, text: calls.append((name, text)))
     monkeypatch.setattr(_srv, "send_interrupt", lambda name: calls.append((name, "<ESC>")))
