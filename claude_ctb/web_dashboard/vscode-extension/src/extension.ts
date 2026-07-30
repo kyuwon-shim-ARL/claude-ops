@@ -12,6 +12,31 @@ const DASHBOARD_URL = `http://localhost:${DASHBOARD_PORT}`;
 const API_SESSIONS_URL = `${DASHBOARD_URL}/api/sessions`;
 const POLL_INTERVAL = 5000; // 5 seconds
 
+// The dashboard gates mutating endpoints behind X-CTB-Secret. The webview's
+// portMapping proxy only forwards GET, so writes already go out from the
+// extension host -- which means it, not the webview, needs the token. Read it
+// from the same .env the systemd unit injects, so there is one source of truth.
+const ENV_PATH = '/home/kyuwon/projects/claude-ops/.env';
+
+function readControlSecret(): string {
+  let text: string;
+  try {
+    text = fs.readFileSync(ENV_PATH, 'utf8');
+  } catch {
+    return '';
+  }
+  const values = new Map<string, string>();
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq < 0) continue;
+    const value = line.slice(eq + 1).trim();
+    if (value) values.set(line.slice(0, eq).trim(), value);
+  }
+  return values.get('CTB_CONTROL_SECRET') || values.get('CTB_FOCUS_SECRET') || '';
+}
+
 interface SessionData {
   name: string;
   state: string;
@@ -53,16 +78,31 @@ function fetchSessions(): Promise<SharedState | null> {
 function deleteSessionViaApi(session: string, force: boolean): void {
   const body = JSON.stringify({ force });
   const url = `${DASHBOARD_URL}/api/sessions/${encodeURIComponent(session)}/delete`;
-  const req = http.request(url, {
-    method: 'POST',
-    timeout: 8000,
-    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-  }, (res) => {
+  const secret = readControlSecret();
+  if (!secret) {
+    vscode.window.showErrorMessage(
+      'CTB: 제어 토큰을 찾을 수 없습니다. .env 의 CTB_CONTROL_SECRET 을 확인하세요.');
+    return;
+  }
+  const headers: Record<string, string | number> = {
+    'Content-Type': 'application/json',
+    'Content-Length': Buffer.byteLength(body),
+    'X-CTB-Secret': secret,
+  };
+  const req = http.request(url, { method: 'POST', timeout: 8000, headers }, (res) => {
     let data = '';
     res.on('data', (chunk: string) => { data += chunk; });
     res.on('end', () => {
       if (res.statusCode === 200) {
         vscode.window.setStatusBarMessage(`CTB: ${session} 삭제됨`, 4000);
+      } else if (res.statusCode === 403) {
+        vscode.window.showErrorMessage(
+          'CTB: 제어 토큰이 거부되었습니다 (403). .env 의 CTB_CONTROL_SECRET 과 ' +
+          '서버 환경이 일치하는지 확인하세요.');
+      } else if (res.statusCode === 503) {
+        vscode.window.showErrorMessage(
+          'CTB: 서버에서 제어 기능이 비활성 상태입니다 (503). CTB_CONTROL_SECRET 설정 후 ' +
+          'systemctl --user restart ctb-dashboard 를 실행하세요.');
       } else if (res.statusCode === 409) {
         vscode.window.showWarningMessage(
           `CTB: '${session}' 삭제 차단 — 미커밋/미푸시/미병합. 강제 삭제를 사용하세요.`);

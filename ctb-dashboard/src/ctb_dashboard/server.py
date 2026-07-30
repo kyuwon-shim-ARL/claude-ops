@@ -26,7 +26,7 @@ import markdown as _markdown
 import bleach as _bleach
 
 import filelock as _filelock
-from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -58,8 +58,40 @@ POLL_INTERVAL = 3  # seconds between state refreshes
 # LAN exposure is closed by the firewall rules in deploy/firewall-8420.sh.
 BIND_HOST = os.environ.get("CTB_BIND_HOST") or "0.0.0.0"
 BIND_PORT = 8420
-_FOCUS_SECRET = os.environ.get("CTB_FOCUS_SECRET", "")
+
+
+def _resolve_control_secret() -> str:
+    """Shared secret guarding every mutating endpoint.
+
+    CTB_FOCUS_SECRET is the former name and is still accepted so an existing
+    deployment that only set the old variable does not silently lose writes.
+    """
+    return os.environ.get("CTB_CONTROL_SECRET") or os.environ.get("CTB_FOCUS_SECRET", "")
+
+
+_CONTROL_SECRET = _resolve_control_secret()
 _SESSION_NAME_RE = re.compile(r'^[a-zA-Z0-9_\-:.]{1,64}$')
+
+
+def require_control_token(x_ctb_secret: str | None = Header(None)) -> None:
+    """Fail-closed gate for endpoints that change state or drive a session.
+
+    Read endpoints stay open: the dashboard is a monitor first, and the VSCode
+    webview's portMapping proxy only forwards GET, so gating reads would break
+    it. Writes are a different matter -- they reach live tmux sessions.
+
+    With no secret configured we refuse writes (503) instead of allowing them.
+    The previous behaviour was the opposite, and since the secret was never
+    actually injected into the service environment, that meant wide-open
+    control endpoints in production.
+    """
+    if not _CONTROL_SECRET:
+        raise HTTPException(
+            status_code=503,
+            detail="Control endpoints are disabled: CTB_CONTROL_SECRET is not set",
+        )
+    if not x_ctb_secret or not secrets.compare_digest(x_ctb_secret, _CONTROL_SECRET):
+        raise HTTPException(status_code=403, detail="Invalid or missing X-CTB-Secret")
 
 # PI Review Gate
 _REVIEW_SECRET = os.environ.get("CTB_REVIEW_SECRET", "")
@@ -466,8 +498,11 @@ async def _background_poller():
 async def lifespan(app: FastAPI):
     """Start background poller on startup, cancel on shutdown."""
     logger.info(f"Dashboard server starting on {BIND_HOST}:{BIND_PORT}")
-    if not _FOCUS_SECRET:
-        logger.warning("CTB_FOCUS_SECRET not set, focus endpoint is unauthenticated")
+    if not _CONTROL_SECRET:
+        logger.warning(
+            "CTB_CONTROL_SECRET not set -- mutating endpoints are DISABLED (503). "
+            "Set it in .env; the systemd unit injects it via EnvironmentFile."
+        )
 
     # Haiku rate-limiting semaphore: max 5 concurrent calls
     app.state.haiku_semaphore = asyncio.Semaphore(5)
@@ -622,7 +657,7 @@ async def session_delete_check(name: str):
     return await loop.run_in_executor(None, check_delete_safety, name)
 
 
-@app.post("/api/sessions/{name}/delete")
+@app.post("/api/sessions/{name}/delete", dependencies=[Depends(require_control_token)])
 async def session_delete(name: str, req: DeleteRequest):
     """Delete a session. Blocks unsafe deletes unless force=True."""
     if not _SESSION_NAME_RE.match(name):
@@ -660,7 +695,7 @@ async def get_pinned():
     return _pinned_state
 
 
-@app.post("/api/pinned")
+@app.post("/api/pinned", dependencies=[Depends(require_control_token)])
 async def post_pinned(req: PinnedRequest):
     global _pinned_state
     _pinned_state = req.model_dump()
@@ -680,16 +715,13 @@ async def health(request: Request):
     }
 
 
-@app.post("/api/focus-session")
-async def focus_session(
-    req: FocusRequest,
-    x_ctb_secret: str | None = Header(None),
-):
-    """Switch the host's tmux client to the requested session."""
-    # Auth check (optional — only when CTB_FOCUS_SECRET is set)
-    if _FOCUS_SECRET and x_ctb_secret != _FOCUS_SECRET:
-        raise HTTPException(status_code=403, detail="Invalid or missing X-CTB-Secret")
+@app.post("/api/focus-session", dependencies=[Depends(require_control_token)])
+async def focus_session(req: FocusRequest):
+    """Switch the host's tmux client to the requested session.
 
+    Auth is handled by require_control_token; the old inline check only fired
+    when the secret happened to be set, which is exactly the fail-open bug.
+    """
     # Validate session name
     if not _SESSION_NAME_RE.match(req.session):
         raise HTTPException(status_code=422, detail="Invalid session name")

@@ -210,6 +210,7 @@
     [data-session-name]:focus-visible { outline: 2px solid rgba(129,140,248,0.85); outline-offset: 2px; }
   </style>
   <!-- Alpine.js CSP build (eval-free) — vendored fallback if CDN fails -->
+  <script nonce="{{ csp_nonce }}" src="/static/js/control-token.js"></script>
   <script nonce="{{ csp_nonce }}"
           src="https://cdn.jsdelivr.net/npm/@alpinejs/csp@3/dist/cdn.min.js"
           defer
@@ -480,9 +481,8 @@
       // cache and wipe persisted pins for every client.
       if (!_pinnedLoaded) return;
       _quadsCache = q;
-      fetch('/api/pinned', {
+      ctbControl.send('/api/pinned', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(q)
       }).catch(() => {});
     }
@@ -1762,9 +1762,8 @@
       }
 
       // Browser: REST API for tmux switch-client + signal file for VSCode extension
-      fetch('/api/focus-session', {
+      ctbControl.send('/api/focus-session', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session: name }),
       })
         .then(res => res.json().then(data => ({ ok: res.ok, data })))
@@ -1858,9 +1857,8 @@
         return;
       }
       try {
-        const res = await fetch(`/api/sessions/${encodeURIComponent(name)}/delete`, {
+        const res = await ctbControl.send(`/api/sessions/${encodeURIComponent(name)}/delete`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ force }),
         });
         const data = await res.json();
