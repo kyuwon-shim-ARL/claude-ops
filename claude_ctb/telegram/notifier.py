@@ -12,6 +12,7 @@ from typing import Optional
 from ..config import ClaudeOpsConfig
 from ..utils.session_state import SessionStateAnalyzer, SessionState
 from ..utils.prompt_recall import get_context_for_notification
+from ..utils.dashboard_link import deeplink_line
 from ..utils.log_length_manager import get_current_log_length
 from .message_queue import get_global_queue, ExponentialBackoffQueue
 # REMOVED: Task completion imports - simplifying to 2 notification types only
@@ -418,8 +419,8 @@ class SmartNotifier:
 {context}
 ```
 
-💡 **세션 전환**: `/sessions {session_name}` 또는 이 메시지에 Reply"""
-            
+💡 **세션 전환**: `/sessions {session_name}` 또는 이 메시지에 Reply{deeplink_line(session_name)}"""
+
             # Check for duplicate notifications
             import hashlib
             message_hash = hashlib.md5(message.encode()).hexdigest()
@@ -442,7 +443,7 @@ Claude가 작업을 완료했습니다.
 결과를 확인해보세요.
 ━━━━━━━━━━━━━━━━━━━━━━━━━
 
-💡 **세션 전환**: `/sessions {session_name}` 또는 이 메시지에 Reply"""
+💡 **세션 전환**: `/sessions {session_name}` 또는 이 메시지에 Reply{deeplink_line(session_name)}"""
             return self.send_notification_sync(message)
     
     # REMOVED: Task completion notification with priorities

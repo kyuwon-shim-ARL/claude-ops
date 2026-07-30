@@ -327,11 +327,42 @@
     show(trigger.getAttribute('data-console-session'));
   });
 
+  /* --- deep link -------------------------------------------------------- */
+
+  /* Mirrors server.py _SESSION_NAME_RE. A name outside this set would be
+   * rejected by every session route anyway, so opening a console for it would
+   * only produce errors. */
+  var SESSION_NAME_RE = /^[a-zA-Z0-9_\-:.]{1,64}$/;
+
+  function openFromQuery() {
+    var name;
+    try {
+      name = new URLSearchParams(window.location.search).get('session');
+    } catch (e) {
+      return;
+    }
+    if (!name || !SESSION_NAME_RE.test(name)) return;
+    show(name);
+    /* Drop the parameter so a reload (or a later share of the URL) does not
+     * reopen the sheet unexpectedly. */
+    if (window.history && window.history.replaceState) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', openFromQuery);
+  } else {
+    openFromQuery();
+  }
+
   window.ctbConsole = {
     open: show,
     close: hide,
     /* exposed for tests / debugging */
     _state: state,
+    _openFromQuery: openFromQuery,
+    SESSION_NAME_RE: SESSION_NAME_RE,
     POLL_MS: POLL_MS,
   };
 })();
