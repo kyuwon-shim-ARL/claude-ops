@@ -37,6 +37,12 @@ from starlette.middleware.sessions import SessionMiddleware
 from .state_detector import SessionStateAnalyzer, SessionState
 from .sessions import get_all_claude_sessions, get_session_path, get_sessions_activity
 from .session_delete import check_delete_safety, delete_session
+from .session_input import (
+    send_interrupt,
+    send_prompt,
+    session_exists,
+)
+from .dangerous_commands import is_dangerous_command
 
 import sys as _sys
 _PSTATUS_DIR = "/home/kyuwon/projects/project-status"
@@ -642,6 +648,57 @@ async def get_session_log(name: str, lines: int = 50):
         return {"session": name, "log": result.stdout}
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="tmux timeout")
+
+
+class PromptRequest(BaseModel):
+    text: str
+
+
+@app.post("/api/sessions/{name}/prompt", dependencies=[Depends(require_control_token)])
+async def session_prompt(name: str, req: PromptRequest):
+    """Type a prompt into a session and submit it.
+
+    Screening happens before anything reaches tmux: the same destructive-command
+    list the Telegram bot uses, since this endpoint is reachable from a phone
+    where the screen is not visible.
+    """
+    if not _SESSION_NAME_RE.match(name):
+        raise HTTPException(status_code=422, detail="Invalid session name")
+
+    loop = asyncio.get_running_loop()
+    if not await loop.run_in_executor(None, session_exists, name):
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if is_dangerous_command(req.text):
+        raise HTTPException(
+            status_code=400,
+            detail="Blocked: text matches a destructive-command pattern",
+        )
+
+    try:
+        await loop.run_in_executor(None, send_prompt, name, req.text)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"session": name, "status": "sent"}
+
+
+@app.post("/api/sessions/{name}/interrupt", dependencies=[Depends(require_control_token)])
+async def session_interrupt(name: str):
+    """Send ESC to stop whatever the session is doing (the bot's /stop)."""
+    if not _SESSION_NAME_RE.match(name):
+        raise HTTPException(status_code=422, detail="Invalid session name")
+
+    loop = asyncio.get_running_loop()
+    if not await loop.run_in_executor(None, session_exists, name):
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    try:
+        await loop.run_in_executor(None, send_interrupt, name)
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"session": name, "status": "interrupted"}
 
 
 class DeleteRequest(BaseModel):
