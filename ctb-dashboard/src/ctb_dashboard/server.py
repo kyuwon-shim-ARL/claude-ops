@@ -46,6 +46,7 @@ from .session_input import (
 )
 from .dangerous_commands import is_dangerous_command
 from .session_readiness import classify_readiness
+from .control_audit import limiter as _rate_limiter, record as _audit
 
 import sys as _sys
 _PSTATUS_DIR = "/home/kyuwon/projects/project-status"
@@ -662,21 +663,29 @@ class PromptRequest(BaseModel):
 
 
 @app.post("/api/sessions/{name}/prompt", dependencies=[Depends(require_control_token)])
-async def session_prompt(name: str, req: PromptRequest):
+async def session_prompt(name: str, req: PromptRequest, request: Request):
     """Type a prompt into a session and submit it.
 
     Screening happens before anything reaches tmux: the same destructive-command
     list the Telegram bot uses, since this endpoint is reachable from a phone
     where the screen is not visible.
     """
+    client = request.client.host if request.client else None
     if not _SESSION_NAME_RE.match(name):
+        _audit("prompt", name, client, False, "invalid_name")
         raise HTTPException(status_code=422, detail="Invalid session name")
+
+    if not _rate_limiter.allow():
+        _audit("prompt", name, client, False, "rate_limited")
+        raise HTTPException(status_code=429, detail="Too many control requests")
 
     loop = asyncio.get_running_loop()
     if not await loop.run_in_executor(None, session_exists, name):
+        _audit("prompt", name, client, False, "no_session")
         raise HTTPException(status_code=404, detail="Session not found")
 
     if is_dangerous_command(req.text):
+        _audit("prompt", name, client, False, "dangerous_pattern")
         raise HTTPException(
             status_code=400,
             detail="Blocked: text matches a destructive-command pattern",
@@ -694,6 +703,7 @@ async def session_prompt(name: str, req: PromptRequest):
     )
     can_send, reason, message = classify_readiness(state, before)
     if not can_send:
+        _audit("prompt", name, client, False, reason)
         return Response(
             content=json.dumps(
                 {
@@ -712,8 +722,10 @@ async def session_prompt(name: str, req: PromptRequest):
     try:
         await loop.run_in_executor(None, send_prompt, name, req.text)
     except ValueError as e:
+        _audit("prompt", name, client, False, "invalid_text")
         raise HTTPException(status_code=422, detail=str(e))
     except RuntimeError as e:
+        _audit("prompt", name, client, False, "tmux_failed")
         raise HTTPException(status_code=502, detail=str(e))
 
     # Confirm something actually changed on screen. tmux reports success for a
@@ -725,6 +737,7 @@ async def session_prompt(name: str, req: PromptRequest):
     confirmed = bool(after) and after != before
     if not confirmed:
         logger.warning("prompt to %s produced no screen change", name)
+    _audit("prompt", name, client, True, None if confirmed else "unconfirmed")
     return {
         "session": name,
         "status": "sent",
@@ -738,7 +751,7 @@ class KeyRequest(BaseModel):
 
 
 @app.post("/api/sessions/{name}/key", dependencies=[Depends(require_control_token)])
-async def session_key(name: str, req: KeyRequest):
+async def session_key(name: str, req: KeyRequest, request: Request):
     """Send one allowlisted key -- how a phone answers Claude's prompts.
 
     No readiness gate here on purpose: the state this is most needed in is
@@ -746,47 +759,63 @@ async def session_key(name: str, req: KeyRequest):
     allowlist instead, which also keeps this from becoming a way to type
     commands around the destructive-command screening.
     """
+    client = request.client.host if request.client else None
     if not _SESSION_NAME_RE.match(name):
+        _audit("key", name, client, False, "invalid_name")
         raise HTTPException(status_code=422, detail="Invalid session name")
 
     # Checked at the boundary, before dispatching anywhere. send_key repeats the
     # check as defence in depth, but the endpoint must not depend on it.
     if req.key not in ALLOWED_KEYS:
+        _audit("key", name, client, False, "key_not_allowed")
         raise HTTPException(
             status_code=422,
             detail=f"Key not allowed. Allowed: {sorted(ALLOWED_KEYS)}",
         )
 
+    if not _rate_limiter.allow():
+        _audit("key", name, client, False, "rate_limited")
+        raise HTTPException(status_code=429, detail="Too many control requests")
+
     loop = asyncio.get_running_loop()
     if not await loop.run_in_executor(None, session_exists, name):
+        _audit("key", name, client, False, "no_session")
         raise HTTPException(status_code=404, detail="Session not found")
 
     try:
         await loop.run_in_executor(None, send_key, name, req.key)
     except ValueError:
+        _audit("key", name, client, False, "key_not_allowed")
         raise HTTPException(
             status_code=422,
             detail=f"Key not allowed. Allowed: {sorted(ALLOWED_KEYS)}",
         )
     except RuntimeError as e:
+        _audit("key", name, client, False, "tmux_failed")
         raise HTTPException(status_code=502, detail=str(e))
+    _audit("key", name, client, True, req.key)
     return {"session": name, "status": "sent", "key": req.key}
 
 
 @app.post("/api/sessions/{name}/interrupt", dependencies=[Depends(require_control_token)])
-async def session_interrupt(name: str):
+async def session_interrupt(name: str, request: Request):
     """Send ESC to stop whatever the session is doing (the bot's /stop)."""
+    client = request.client.host if request.client else None
     if not _SESSION_NAME_RE.match(name):
+        _audit("interrupt", name, client, False, "invalid_name")
         raise HTTPException(status_code=422, detail="Invalid session name")
 
     loop = asyncio.get_running_loop()
     if not await loop.run_in_executor(None, session_exists, name):
+        _audit("interrupt", name, client, False, "no_session")
         raise HTTPException(status_code=404, detail="Session not found")
 
     try:
         await loop.run_in_executor(None, send_interrupt, name)
     except RuntimeError as e:
+        _audit("interrupt", name, client, False, "tmux_failed")
         raise HTTPException(status_code=502, detail=str(e))
+    _audit("interrupt", name, client, True)
     return {"session": name, "status": "interrupted"}
 
 
@@ -804,12 +833,17 @@ async def session_delete_check(name: str):
 
 
 @app.post("/api/sessions/{name}/delete", dependencies=[Depends(require_control_token)])
-async def session_delete(name: str, req: DeleteRequest):
+async def session_delete(name: str, req: DeleteRequest, request: Request):
     """Delete a session. Blocks unsafe deletes unless force=True."""
     if not _SESSION_NAME_RE.match(name):
         raise HTTPException(status_code=422, detail="Invalid session name")
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, delete_session, name, req.force)
+    _audit(
+        "delete", name, request.client.host if request.client else None,
+        result.get("status") == "deleted",
+        result.get("status"),
+    )
     if result.get("status") == "blocked":
         return Response(
             content=json.dumps(result, ensure_ascii=False),
