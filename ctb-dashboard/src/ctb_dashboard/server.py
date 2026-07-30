@@ -311,6 +311,8 @@ def _probe_session(name: str) -> tuple:
     work_context = _state_analyzer.extract_work_context(path)
 
     pending_count = _state_analyzer.extract_pending_task_count(screen_content)
+    progress = _state_analyzer.extract_screen_progress(screen_content)
+    last_reply = _state_analyzer.extract_last_reply(screen_content)
 
     # Stall detection: track when WORKING state started
     if state == SessionState.WORKING:
@@ -321,7 +323,8 @@ def _probe_session(name: str) -> tuple:
         _working_since.pop(name, None)
         working_since = None
 
-    return name, state.value, path, context_percent, last_prompt, work_context, pending_count, working_since
+    return (name, state.value, path, context_percent, last_prompt, work_context,
+            pending_count, working_since, progress, last_reply)
 
 
 def _poll_sessions() -> Dict[str, Any]:
@@ -336,7 +339,8 @@ def _poll_sessions() -> Dict[str, Any]:
         results = list(pool.map(_probe_session, sessions))
 
     session_list = []
-    for name, state_val, path, context_percent, last_prompt, work_context, pending_count, working_since in results:
+    for (name, state_val, path, context_percent, last_prompt, work_context,
+         pending_count, working_since, progress, last_reply) in results:
         # Only update timestamp when state actually changes
         prev_ts = _prev_session_timestamps.get(name, 0)
         prev_state = None
@@ -357,6 +361,8 @@ def _poll_sessions() -> Dict[str, Any]:
             "context_percent": context_percent,  # null when unavailable (frontend hides gauge)
             "last_prompt": last_prompt or "",     # always string (frontend shows placeholder)
             "work_context": work_context or "",   # always string (frontend shows placeholder)
+            "progress": list(progress) if progress else None,  # [n, m] from [Stage n/m]
+            "last_reply": last_reply or "",
             "pending_count": pending_count,       # null=no TodoWrite, 0=all done, N=pending tasks
             "working_since": working_since,       # epoch float when WORKING started, null otherwise
             "last_activity": activity_map.get(name, 0),  # tmux session_activity epoch (staleness filter)

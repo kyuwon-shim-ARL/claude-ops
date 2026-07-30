@@ -11,6 +11,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import logging
 import re
 from enum import Enum
@@ -811,6 +812,18 @@ class SessionStateAnalyzer:
 
         return None
 
+    # A source may only claim "current work" if its file is recent. Without
+    # this, a session whose active-state files have all gone quiet falls
+    # through to whatever stale file answers first -- observed 2026-07-31 as a
+    # three-month-old MANIFEST.yaml labelling a card with "[e025]".
+    WORK_CONTEXT_FRESH_SECONDS = 72 * 3600
+
+    def _fresh(self, path: Path) -> bool:
+        try:
+            return (time.time() - path.stat().st_mtime) < self.WORK_CONTEXT_FRESH_SECONDS
+        except OSError:
+            return False
+
     def extract_work_context(self, session_path: Optional[str]) -> Optional[str]:
         """Extract current work context from OMC state files in the session's working directory.
 
@@ -837,6 +850,8 @@ class SessionStateAnalyzer:
         if state_dir.is_dir():
             try:
                 for state_file in sorted(state_dir.glob("*-state.json")):
+                    if not self._fresh(state_file):
+                        continue
                     try:
                         data = json.loads(state_file.read_text(encoding="utf-8"))
                         status = data.get("status", "")
@@ -855,7 +870,7 @@ class SessionStateAnalyzer:
 
         # 1b. OMC critique-lock.json — converged/executing ticket summary
         lock_file = root / ".omc" / "state" / "critique-lock.json"
-        if lock_file.is_file():
+        if lock_file.is_file() and self._fresh(lock_file):
             try:
                 lock = json.loads(lock_file.read_text(encoding="utf-8"))
                 verdict = lock.get("final_verdict", "")
@@ -865,12 +880,19 @@ class SessionStateAnalyzer:
                     # available; fall back to generic 'exec'/'plan' for older locks.
                     skill = lock.get("source_skill") or ("exec" if verdict == "EXECUTING" else "plan")
                     return f"[{skill}] {summary}"[:120]
+                if verdict == "EXECUTED" and summary:
+                    # A ticket finished within the freshness window is still the
+                    # best description of what this session has been doing --
+                    # better than falling through to a directory name (or, as
+                    # observed, to a stale MANIFEST).
+                    skill = lock.get("source_skill") or "exec"
+                    return f"[{skill}\u2713] {summary}"[:120]
             except (json.JSONDecodeError, OSError):
                 pass
 
         # 1c. OMC skill-sessions.json — active skill
         skill_file = root / ".omc" / "state" / "skill-sessions.json"
-        if skill_file.is_file():
+        if skill_file.is_file() and self._fresh(skill_file):
             try:
                 skills = json.loads(skill_file.read_text(encoding="utf-8"))
                 if isinstance(skills, dict):
@@ -906,7 +928,7 @@ class SessionStateAnalyzer:
         manifest = root / "MANIFEST.yaml"
         if not manifest.is_file():
             manifest = root / "outputs" / "MANIFEST.yaml"
-        if manifest.is_file():
+        if manifest.is_file() and self._fresh(manifest):
             try:
                 content = manifest.read_text(encoding="utf-8")
                 current_exp = None
@@ -980,6 +1002,40 @@ class SessionStateAnalyzer:
         if dir_name:
             return f"[dir] {dir_name}"[:120]
 
+        return None
+
+    # Same [Stage N/M ...] grammar the monitor's progress_tracker.py uses.
+    # Vendored, not imported: ctb-dashboard does not depend on claude_ctb
+    # (see dangerous_commands.py for the convention).
+    _SCREEN_STAGE_RE = re.compile(r"\[Stage\s+(\d+)/(\d+)(?:\s[^\]]*)?\]")
+
+    def extract_screen_progress(self, screen_content: Optional[str]) -> Optional[tuple]:
+        """Most recent [Stage N/M] marker on screen -> (n, m), or None."""
+        if not screen_content:
+            return None
+        matches = self._SCREEN_STAGE_RE.findall(screen_content)
+        if not matches:
+            return None
+        try:
+            return int(matches[-1][0]), int(matches[-1][1])
+        except ValueError:
+            return None
+
+    def extract_last_reply(self, screen_content: Optional[str]) -> Optional[str]:
+        """First line of Claude's most recent response.
+
+        Claude Code prefixes assistant output lines with a '\u25cf ' bullet
+        (verified against a live pane -- not guessed glyphs; see the
+        session_readiness shell-detection incident).
+        """
+        if not screen_content:
+            return None
+        for line in reversed(screen_content.split("\n")[-60:]):
+            stripped = line.strip()
+            if stripped.startswith("\u25cf"):
+                text = stripped[1:].strip()
+                if text:
+                    return text[:100]
         return None
 
     def extract_pending_task_count(self, screen_content: str) -> int | None:

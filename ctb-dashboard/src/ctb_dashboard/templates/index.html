@@ -975,6 +975,26 @@
         </div>`;
     }
 
+    // Progress badge: [Stage N/M] parsed server-side from the pane
+    function renderProgressBadge(session, t) {
+      const p = session.progress;
+      if (!p || p.length !== 2) return '';
+      const [n, m] = p;
+      const pct = m > 0 ? Math.round((n / m) * 100) : 0;
+      const done = n >= m;
+      const color = done ? '#34d399' : '#818cf8';
+      const bg = done ? 'rgba(52,211,153,0.10)' : 'rgba(129,140,248,0.12)';
+      const border = done ? 'rgba(52,211,153,0.35)' : 'rgba(129,140,248,0.4)';
+      return `<div style="margin-top:4px;"><span style="font-size:11px;font-weight:600;background:${bg};border:1px solid ${border};color:${color};padding:2px 8px;border-radius:99px;display:inline-block;">${done ? '✅' : '⏩'} Stage ${n}/${m}</span></div>`;
+    }
+
+    // Last reply: first line of Claude's most recent answer ("what just happened")
+    function renderLastReply(session, t) {
+      if (!session.last_reply) return '';
+      const text = escapeHtml(session.last_reply);
+      return `<div style="font-size:12px;color:${t.textSecondary};margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;" title="${text}"><span style="opacity:0.6;">&#9679;</span> ${text}</div>`;
+    }
+
     // Stall badge: shown when session has been WORKING beyond threshold
     function renderTicketBadge(sessionName) {
       const entry = _ticketLinks[sessionName];
@@ -1103,6 +1123,8 @@
           ${pendingBadge}
           ${isCompact ? '' : renderWorkContext(session, t)}
           ${isCompact ? '' : renderLastPrompt(session, t)}
+          ${isCompact ? '' : renderLastReply(session, t)}
+          ${renderProgressBadge(session, t)}
           ${stuckBadge}
           ${stallBadge}
           ${renderTicketBadge(name)}
