@@ -125,3 +125,6 @@ quarto-*
 catboost_info/
 academic/
 .gstack/
+
+# 비밀값 백업 (커밋 금지)
+.env.bak-*
