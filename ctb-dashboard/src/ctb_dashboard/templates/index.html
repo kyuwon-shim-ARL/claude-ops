@@ -211,6 +211,7 @@
   </style>
   <!-- Alpine.js CSP build (eval-free) — vendored fallback if CDN fails -->
   <script nonce="{{ csp_nonce }}" src="/static/js/control-token.js"></script>
+  <script nonce="{{ csp_nonce }}" src="/static/js/session-control.js"></script>
   <script nonce="{{ csp_nonce }}"
           src="https://cdn.jsdelivr.net/npm/@alpinejs/csp@3/dist/cdn.min.js"
           defer
@@ -1087,6 +1088,7 @@
           ${freshBar}
           <div class="long-press-ring"></div>
           <button data-pin-session="${name}" style="position:absolute;top:8px;left:6px;width:26px;height:26px;border-radius:9px;background:${t.pinBtnBg};display:flex;align-items:center;justify-content:center;font-size:12px;opacity:${pinOpacity};border:1px solid ${t.pinBtnBorder};cursor:pointer;transition:opacity 0.2s;touch-action:manipulation;" title="${isPinned ? 'Unpin session' : 'Pin session'}" aria-label="${isPinned ? 'Unpin session' : 'Pin session'}">${pinIcon}</button>
+          <button data-console-session="${name}" class="console-btn" style="position:absolute;bottom:6px;right:34px;width:24px;height:24px;border-radius:8px;background:${t.pinBtnBg};display:flex;align-items:center;justify-content:center;font-size:12px;border:1px solid ${t.pinBtnBorder};cursor:pointer;touch-action:manipulation;z-index:6;" title="세션 콘솔 (지시 전송)" aria-label="세션 콘솔 열기">💬</button>
           <button data-delete-session="${name}" class="del-btn" style="position:absolute;bottom:6px;right:6px;width:24px;height:24px;border-radius:8px;background:${t.pinBtnBg};display:flex;align-items:center;justify-content:center;font-size:12px;border:1px solid ${t.pinBtnBorder};cursor:pointer;touch-action:manipulation;z-index:6;" title="세션 삭제" aria-label="세션 삭제">🗑</button>
           <div class="flex items-center justify-between">
             <div style="flex:1;min-width:0;">
