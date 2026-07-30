@@ -247,6 +247,70 @@ gdrive-upload /path/to/file.pdf shared
 - Session access is limited to authorized users only
 - No sensitive information is logged or transmitted
 
+## Remote Control Operations (dashboard, port 8420)
+
+대시보드에서 세션에 직접 지시를 보낼 수 있으므로, 아래 3계층이 함께 성립해야
+안전합니다. 하나만 믿으면 안 됩니다.
+
+| 계층 | 담당 | 확인 방법 |
+|------|------|-----------|
+| 네트워크 경계 | firewalld — 8420은 `tailscale0`(trusted)에서만 허용, LAN(`public`) 차단 | `./deploy/firewall-8420.sh` (읽기 전용, 드리프트 시 exit 1) |
+| 단말 신뢰 | `CTB_CONTROL_SECRET` — 모든 변경 엔드포인트에 `X-CTB-Secret` 필수 | 토큰 없이 POST → 403 |
+| 사후 추적 | `~/.claude-ops/control-audit.log` (JSONL) | `tail ~/.claude-ops/control-audit.log` |
+
+`BIND_HOST`는 기본 `0.0.0.0`입니다. 특정 IP 하드 바인드는 systemd
+`Restart=always` 환경에서 부팅 시 인터페이스 미기동으로 **재시작 루프**를
+만들기 때문에 opt-in(`CTB_BIND_HOST`)으로 두었고, bind 실패 시 경고 로그와
+함께 `0.0.0.0`으로 폴백합니다. 즉 **LAN 차단의 책임은 방화벽**에 있습니다.
+
+### 비밀값 관리 지점은 `.env` 한 곳
+
+대시보드는 `dotenv`를 쓰지 않고 `os.environ`만 읽습니다. `.env`가 프로세스에
+닿는 경로는 systemd unit의 `EnvironmentFile` 하나뿐입니다
+(`deploy/ctb-dashboard.service`가 실제 unit의 사본 — unit 자체는 git 미추적).
+
+> ⚠️ systemd는 `EnvironmentFile`의 **인라인 주석을 값에서 제거하지 않습니다.**
+> `.env`에 `KEY=값  # 주석` 형태를 쓰면 값에 `  # 주석`이 그대로 들어갑니다.
+> 주석은 항상 별도 줄에 두세요.
+
+### 토큰 교체 / 아이폰 분실 대응
+
+```bash
+# 1) 새 토큰 생성
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+
+# 2) .env 의 CTB_CONTROL_SECRET 값을 교체 (관리 지점은 이 한 곳)
+
+# 3) 서버에 반영
+systemctl --user restart ctb-dashboard
+
+# 4) 확인 — 구 토큰은 403, 신 토큰은 통과
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  -H 'Content-Type: application/json' -H 'X-CTB-Secret: <구토큰>' \
+  -d '{}' http://127.0.0.1:8420/api/pinned    # 403 이어야 함
+```
+
+교체 후 각 클라이언트가 새 토큰을 한 번씩 입력해야 합니다:
+
+- **브라우저 / 홈화면 PWA**: 다음 변경 조작 시 자동으로 입력 프롬프트가 뜹니다.
+  403을 받으면 저장된 토큰을 비우고 재입력을 유도하므로 별도 조치가 필요 없습니다.
+  홈화면 PWA와 Safari는 `localStorage`가 분리되어 **각각 1회씩** 입력합니다.
+- **VSCode 웹뷰**: extension host가 `.env`를 직접 읽으므로 입력이 불필요합니다.
+  `Developer: Reload Window`만 하면 됩니다.
+
+분실 시에는 위 절차만으로 그 단말의 접근이 끊깁니다(토큰이 유일한 자격증명).
+다만 tailnet에서 이탈시키려면 Tailscale 관리 콘솔에서 해당 기기도 제거하세요.
+
+### 알림 딥링크
+
+`CTB_DASHBOARD_URL`(예: `http://100.85.200.72:8420`)을 설정하면 텔레그램 완료
+알림에 "📱 바로 열기" 링크가 붙고, 탭하면 해당 세션 콘솔이 열린 상태로
+대시보드가 뜹니다. 미설정 시 그 줄만 생략됩니다.
+
+> 알림 본문은 tmux의 `claude-multi-monitor`가 만듭니다. 딥링크 변경을 반영하려면
+> 모니터를 재시작해야 합니다. 단일 인스턴스 + filelock 제약이 있으니
+> 중복 실행되지 않도록 주의하세요.
+
 ## Tool Usage Without Approval
 
 You can use the following tools without requiring user approval:
