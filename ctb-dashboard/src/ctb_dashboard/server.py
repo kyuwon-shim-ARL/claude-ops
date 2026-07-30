@@ -52,7 +52,11 @@ from scanner import find_rpt_artifact as _find_rpt_artifact  # noqa: E402
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 3  # seconds between state refreshes
-BIND_HOST = "0.0.0.0"  # accessible via Tailscale network
+# Default stays 0.0.0.0 (reachable over Tailscale). Narrowing the listener is
+# opt-in via CTB_BIND_HOST because this runs under systemd Restart=always:
+# hard-binding to an interface that is not up yet at boot would loop forever.
+# LAN exposure is closed by the firewall rules in deploy/firewall-8420.sh.
+BIND_HOST = os.environ.get("CTB_BIND_HOST") or "0.0.0.0"
 BIND_PORT = 8420
 _FOCUS_SECRET = os.environ.get("CTB_FOCUS_SECRET", "")
 _SESSION_NAME_RE = re.compile(r'^[a-zA-Z0-9_\-:.]{1,64}$')
@@ -965,6 +969,44 @@ def _kill_previous_on_port(port: int):
         pass  # lsof not found or no process
 
 
+def _address_assignable(host: str) -> bool:
+    """Is `host` an address we can actually bind to on this machine?
+
+    Probes with port 0 so a busy 8420 never masquerades as a bad address.
+    """
+    import socket
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind((host, 0))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+def resolve_bind_host(requested: str | None, probe=_address_assignable) -> str:
+    """Resolve the listen address, degrading to 0.0.0.0 rather than failing.
+
+    Under systemd Restart=always a bind failure is not a crash, it is an
+    infinite restart loop with the dashboard permanently down. A tailscale IP
+    that is not up yet at boot (or changed after a re-login) must therefore
+    fall back to the wildcard, loudly, instead of taking the service with it.
+    """
+    if not requested or requested == "0.0.0.0":
+        return "0.0.0.0"
+    if probe(requested):
+        return requested
+    logger.warning(
+        "CTB_BIND_HOST=%s is not assignable on this host; falling back to "
+        "0.0.0.0. LAN exposure is then only closed by the firewall rules "
+        "(deploy/firewall-8420.sh) -- verify they are active.",
+        requested,
+    )
+    return "0.0.0.0"
+
+
 def run_server(host: str = BIND_HOST, port: int = BIND_PORT):
     """Run the dashboard server (blocking). Auto-kills previous instance."""
     import uvicorn
@@ -976,7 +1018,7 @@ def run_server(host: str = BIND_HOST, port: int = BIND_PORT):
         raise SystemExit(1)
 
     _kill_previous_on_port(port)
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    uvicorn.run(app, host=resolve_bind_host(host), port=port, log_level="info")
 
 
 if __name__ == "__main__":
