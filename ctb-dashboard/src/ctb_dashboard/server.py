@@ -38,7 +38,9 @@ from .state_detector import SessionStateAnalyzer, SessionState
 from .sessions import get_all_claude_sessions, get_session_path, get_sessions_activity
 from .session_delete import check_delete_safety, delete_session
 from .session_input import (
+    ALLOWED_KEYS,
     send_interrupt,
+    send_key,
     send_prompt,
     session_exists,
 )
@@ -729,6 +731,46 @@ async def session_prompt(name: str, req: PromptRequest):
         "state": state.value,
         "confirmed": confirmed,
     }
+
+
+class KeyRequest(BaseModel):
+    key: str
+
+
+@app.post("/api/sessions/{name}/key", dependencies=[Depends(require_control_token)])
+async def session_key(name: str, req: KeyRequest):
+    """Send one allowlisted key -- how a phone answers Claude's prompts.
+
+    No readiness gate here on purpose: the state this is most needed in is
+    exactly the one send_prompt refuses (WAITING_INPUT). Safety comes from the
+    allowlist instead, which also keeps this from becoming a way to type
+    commands around the destructive-command screening.
+    """
+    if not _SESSION_NAME_RE.match(name):
+        raise HTTPException(status_code=422, detail="Invalid session name")
+
+    # Checked at the boundary, before dispatching anywhere. send_key repeats the
+    # check as defence in depth, but the endpoint must not depend on it.
+    if req.key not in ALLOWED_KEYS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Key not allowed. Allowed: {sorted(ALLOWED_KEYS)}",
+        )
+
+    loop = asyncio.get_running_loop()
+    if not await loop.run_in_executor(None, session_exists, name):
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    try:
+        await loop.run_in_executor(None, send_key, name, req.key)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Key not allowed. Allowed: {sorted(ALLOWED_KEYS)}",
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"session": name, "status": "sent", "key": req.key}
 
 
 @app.post("/api/sessions/{name}/interrupt", dependencies=[Depends(require_control_token)])

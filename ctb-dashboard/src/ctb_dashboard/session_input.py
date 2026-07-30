@@ -87,3 +87,25 @@ def send_prompt(name: str, text: str) -> None:
 def send_interrupt(name: str) -> None:
     """Send ESC -- the same key the bot's /stop uses to halt Claude."""
     _tmux(["tmux", "send-keys", "-t", name, "Escape"])
+
+# Keys the dashboard may send. An allowlist, not an escape hatch: this endpoint
+# exists to answer Claude's permission prompts (y/n, numbered choices, arrow
+# selection) from a phone. Arbitrary key sequences would be a way to type
+# commands while bypassing the destructive-command screening on send_prompt.
+ALLOWED_KEYS = frozenset({
+    "Enter", "Escape", "Tab", "Space", "BSpace",
+    "Up", "Down", "Left", "Right",
+    "y", "n", "Y", "N",
+    "1", "2", "3", "4", "5", "6", "7", "8", "9",
+    "C-c",
+})
+
+
+def send_key(name: str, key: str) -> None:
+    """Send a single key from ALLOWED_KEYS to the session.
+
+    Raises ValueError for anything outside the allowlist.
+    """
+    if key not in ALLOWED_KEYS:
+        raise ValueError(f"key {key!r} is not in the allowlist")
+    _tmux(["tmux", "send-keys", "-t", name, key])
