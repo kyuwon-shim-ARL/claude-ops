@@ -261,15 +261,39 @@
   var COPY_OPEN = '[[COPY]]';
   var COPY_CLOSE = '[[/COPY]]';
 
-  /* Most recent COMPLETE block wins; markers themselves are excluded. */
+  /* Most recent COMPLETE block wins; markers themselves are excluded.
+   *
+   * The text arrives as rendered terminal output, which means two kinds of
+   * contamination that would survive into the clipboard:
+   *   - Claude Code indents its output by two columns, and
+   *   - tmux pads every line out to the pane width.
+   * Pasting Python or YAML with a spurious global indent actually breaks it,
+   * so strip the padding and remove the common indent (keeping relative
+   * structure intact). Found by running the real thing, not the unit fixture.
+   */
   function extractCopyBlock(text) {
     if (!text) return null;
     var close = text.lastIndexOf(COPY_CLOSE);
     if (close < 0) return null;
     var open = text.lastIndexOf(COPY_OPEN, close);
     if (open < 0) return null;
-    var body = text.slice(open + COPY_OPEN.length, close);
-    body = body.replace(/^\s*\n/, '').replace(/\n\s*$/, '');
+
+    var lines = text.slice(open + COPY_OPEN.length, close).split('\n');
+    lines = lines.map(function (l) { return l.replace(/\s+$/, ''); });
+    while (lines.length && !lines[0].trim()) lines.shift();
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+    if (!lines.length) return null;
+
+    var indent = Infinity;
+    lines.forEach(function (l) {
+      if (!l.trim()) return;
+      var m = l.match(/^ */);
+      indent = Math.min(indent, m[0].length);
+    });
+    if (indent > 0 && indent !== Infinity) {
+      lines = lines.map(function (l) { return l.slice(indent); });
+    }
+    var body = lines.join('\n');
     return body || null;
   }
 
@@ -466,6 +490,7 @@
     /* exposed for tests / debugging */
     _state: state,
     _openFromQuery: openFromQuery,
+    _extractCopyBlock: extractCopyBlock,
     SESSION_NAME_RE: SESSION_NAME_RE,
     POLL_MS: POLL_MS,
   };
