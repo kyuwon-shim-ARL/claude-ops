@@ -83,6 +83,19 @@
       '-webkit-user-select:text', 'user-select:text',
     ].join(';');
 
+    /* One-tap copy for a marked region. A session's Claude wraps content in
+     * [[COPY]] / [[/COPY]] lines when asked (convention in the user's global
+     * CLAUDE.md); the chip appears only while such a block is on screen, so
+     * nothing needs selecting by hand. */
+    var chip = document.createElement('button');
+    chip.type = 'button';
+    chip.style.cssText = btnCss('#173a2a', 'auto') +
+      'padding:7px 12px;margin-bottom:8px;display:none;font-weight:600;color:#34d399;' +
+      'border-color:rgba(52,211,153,0.45);align-self:flex-start;max-width:100%;';
+    chip.addEventListener('click', function () {
+      if (state.copyBlock) copyText(state.copyBlock, '\uad6c\uac04 \ubcf5\uc0ac\ub428');
+    });
+
     /* Keys first: answering a permission prompt is the thing you most often
      * need in a hurry, and send_prompt refuses while one is pending. */
     var keys = document.createElement('div');
@@ -151,11 +164,12 @@
 
     root.appendChild(header);
     root.appendChild(tail);
+    root.appendChild(chip);
     root.appendChild(keys);
     root.appendChild(row);
     document.body.appendChild(root);
 
-    el = { root: root, title: title, status: status, tail: tail, input: input, send: send };
+    el = { root: root, title: title, status: status, tail: tail, chip: chip, input: input, send: send };
 
     // The keyboard shrinks the visual viewport; sit on top of it, not under.
     if (window.visualViewport) {
@@ -195,8 +209,7 @@
 
   /* --- tail ------------------------------------------------------------- */
 
-  function copyTail() {
-    var text = el.tail ? el.tail.textContent : '';
+  function copyText(text, okLabel) {
     if (!text) return;
 
     /* The dashboard is served over plain http on the tailnet, where
@@ -204,7 +217,7 @@
      * textarea + execCommand path is the one that actually works here; the
      * async API is tried first for any future https deployment. */
     function report(ok) {
-      setStatus(ok ? '\ud654\uba74 \ub0b4\uc6a9 \ubcf5\uc0ac\ub428' : '\ubcf5\uc0ac \uc2e4\ud328 \u2014 \uae38\uac8c \ub20c\ub7ec \uc9c1\uc811 \uc120\ud0dd\ud558\uc138\uc694',
+      setStatus(ok ? okLabel : '\ubcf5\uc0ac \uc2e4\ud328 \u2014 \uae38\uac8c \ub20c\ub7ec \uc9c1\uc811 \uc120\ud0dd\ud558\uc138\uc694',
                 ok ? '#34d399' : '#fbbf24');
     }
 
@@ -216,6 +229,11 @@
       return;
     }
     report(legacyCopy(text));
+  }
+
+  function copyTail() {
+    copyText(el.tail ? el.tail.textContent : '',
+             '\ud654\uba74 \ub0b4\uc6a9 \ubcf5\uc0ac\ub428');
   }
 
   function legacyCopy(text) {
@@ -238,6 +256,36 @@
     return ok;
   }
 
+  /* --- marked copy block ([[COPY]] ... [[/COPY]]) ------------------------- */
+
+  var COPY_OPEN = '[[COPY]]';
+  var COPY_CLOSE = '[[/COPY]]';
+
+  /* Most recent COMPLETE block wins; markers themselves are excluded. */
+  function extractCopyBlock(text) {
+    if (!text) return null;
+    var close = text.lastIndexOf(COPY_CLOSE);
+    if (close < 0) return null;
+    var open = text.lastIndexOf(COPY_OPEN, close);
+    if (open < 0) return null;
+    var body = text.slice(open + COPY_OPEN.length, close);
+    body = body.replace(/^\s*\n/, '').replace(/\n\s*$/, '');
+    return body || null;
+  }
+
+  function updateCopyChip(text) {
+    var block = extractCopyBlock(text);
+    state.copyBlock = block;
+    if (!el.chip) return;
+    if (block) {
+      var lines = block.split('\n').length;
+      el.chip.textContent = '\ud83d\udcce \ub9c8\ud0b9 \uad6c\uac04 \ubcf5\uc0ac (' + lines + '\uc904)';
+      el.chip.style.display = 'inline-flex';
+    } else {
+      el.chip.style.display = 'none';
+    }
+  }
+
   function pollTail() {
     if (!state.session) return;
     var name = state.session;
@@ -250,6 +298,7 @@
         var atBottom =
           el.tail.scrollTop + el.tail.clientHeight >= el.tail.scrollHeight - 24;
         el.tail.textContent = data.log || '';
+        updateCopyChip(data.log || '');
         if (atBottom) el.tail.scrollTop = el.tail.scrollHeight;
       })
       .catch(function () { /* transient; next tick retries */ });
@@ -361,6 +410,8 @@
   function hide() {
     stopPolling();
     state.session = null;
+    state.copyBlock = null;
+    if (el.chip) el.chip.style.display = 'none';
     if (el.root) el.root.style.display = 'none';
   }
 

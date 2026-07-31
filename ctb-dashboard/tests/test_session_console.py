@@ -145,6 +145,36 @@ def test_tail_text_is_selectable(console_js):
     assert "user-select:text" in console_js
 
 
+def test_marked_copy_block_is_detected_and_one_tap_copyable(console_js):
+    """[[COPY]]...[[/COPY]] on screen -> a chip that copies just that region.
+
+    The point is no drag-selection on a phone: the session's Claude wraps the
+    wanted content in markers, and the console turns it into one tap.
+    """
+    assert "'[[COPY]]'" in console_js
+    assert "'[[/COPY]]'" in console_js
+    assert "extractCopyBlock" in console_js
+    assert "updateCopyChip" in console_js
+
+
+def test_most_recent_complete_block_wins(console_js):
+    """lastIndexOf from the close marker backwards -- an unclosed opener or an
+    older block must not shadow the newest complete one."""
+    assert "lastIndexOf(COPY_CLOSE)" in console_js
+    assert "lastIndexOf(COPY_OPEN, close)" in console_js
+
+
+def test_chip_resets_when_console_closes(console_js):
+    assert "state.copyBlock = null" in console_js
+
+
+def test_log_endpoint_joins_wrapped_lines():
+    """capture-pane -J: without it a copied block inherits artificial line
+    breaks at whatever width the tmux pane happened to be."""
+    server_src = (SRC / "server.py").read_text()
+    assert '"-J"' in server_src
+
+
 def test_interrupt_control_exists(console_js):
     assert "/interrupt" in console_js
 

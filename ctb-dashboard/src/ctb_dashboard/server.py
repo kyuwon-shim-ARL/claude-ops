@@ -655,7 +655,10 @@ async def get_session_log(name: str, lines: int = 50):
         raise HTTPException(status_code=422, detail="Invalid session name")
     try:
         result = subprocess.run(
-            ["tmux", "capture-pane", "-t", name, "-p", f"-S-{lines}"],
+            # -J joins pane-width-wrapped lines back into their original form.
+            # Without it, a copied block inherits artificial line breaks at
+            # whatever width the tmux pane happened to be.
+            ["tmux", "capture-pane", "-t", name, "-p", "-J", f"-S-{lines}"],
             capture_output=True, text=True, timeout=5,
         )
         if result.returncode != 0:
