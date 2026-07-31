@@ -124,6 +124,27 @@ def test_approval_keys_are_offered(console_js, key):
     assert key in console_js
 
 
+def test_copy_button_works_without_a_secure_context(console_js):
+    """The dashboard is served over plain http on the tailnet, where
+    navigator.clipboard does not exist. The legacy execCommand path must be
+    present and must not be gated behind the async API succeeding."""
+    assert "execCommand('copy')" in console_js
+    assert "legacyCopy" in console_js
+    # Feature-detect, never assume the secure-context API.
+    assert "navigator.clipboard && navigator.clipboard.writeText" in console_js
+
+
+def test_copy_failure_tells_the_user_what_to_do(console_js):
+    """A silent no-op copy is worse than none -- the fallback hint must exist."""
+    # The JS source keeps Korean as \\u escapes, so match the escaped form.
+    assert "\\uae38\\uac8c \\ub20c\\ub7ec" in console_js  # "길게 눌러" hint
+
+
+def test_tail_text_is_selectable(console_js):
+    """Manual long-press selection is the last resort; user-select must allow it."""
+    assert "user-select:text" in console_js
+
+
 def test_interrupt_control_exists(console_js):
     assert "/interrupt" in console_js
 

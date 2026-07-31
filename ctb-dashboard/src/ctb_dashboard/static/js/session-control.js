@@ -51,6 +51,14 @@
     var status = document.createElement('span');
     status.style.cssText = 'font-size:11px;color:#9ca3af;flex-shrink:0;';
 
+    var copy = document.createElement('button');
+    copy.type = 'button';
+    copy.textContent = '\ud83d\udccb';
+    copy.title = '\ud654\uba74 \ub0b4\uc6a9 \ubcf5\uc0ac';
+    copy.setAttribute('aria-label', '\ud654\uba74 \ub0b4\uc6a9 \ubcf5\uc0ac');
+    copy.style.cssText = btnCss('#1f2937', '36px');
+    copy.addEventListener('click', copyTail);
+
     var close = document.createElement('button');
     close.type = 'button';
     close.textContent = '✕';
@@ -60,6 +68,7 @@
 
     header.appendChild(title);
     header.appendChild(status);
+    header.appendChild(copy);
     header.appendChild(close);
 
     var tail = document.createElement('pre');
@@ -71,6 +80,7 @@
       "font-family:'JetBrains Mono',monospace", 'font-size:11px',
       'line-height:1.45', 'white-space:pre-wrap', 'word-break:break-word',
       '-webkit-overflow-scrolling:touch',
+      '-webkit-user-select:text', 'user-select:text',
     ].join(';');
 
     /* Keys first: answering a permission prompt is the thing you most often
@@ -184,6 +194,49 @@
   }
 
   /* --- tail ------------------------------------------------------------- */
+
+  function copyTail() {
+    var text = el.tail ? el.tail.textContent : '';
+    if (!text) return;
+
+    /* The dashboard is served over plain http on the tailnet, where
+     * navigator.clipboard does not exist (secure-context only). The legacy
+     * textarea + execCommand path is the one that actually works here; the
+     * async API is tried first for any future https deployment. */
+    function report(ok) {
+      setStatus(ok ? '\ud654\uba74 \ub0b4\uc6a9 \ubcf5\uc0ac\ub428' : '\ubcf5\uc0ac \uc2e4\ud328 \u2014 \uae38\uac8c \ub20c\ub7ec \uc9c1\uc811 \uc120\ud0dd\ud558\uc138\uc694',
+                ok ? '#34d399' : '#fbbf24');
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(
+        function () { report(true); },
+        function () { report(legacyCopy(text)); }
+      );
+      return;
+    }
+    report(legacyCopy(text));
+  }
+
+  function legacyCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    /* Keep it on-screen but invisible: iOS refuses to copy from elements it
+     * considers hidden (display:none / off-viewport can both fail). */
+    ta.style.cssText = 'position:fixed;top:0;left:0;width:2em;height:2em;opacity:0;border:none;';
+    document.body.appendChild(ta);
+    var ok = false;
+    try {
+      ta.focus();
+      ta.setSelectionRange(0, ta.value.length);
+      ok = document.execCommand('copy');
+    } catch (e) {
+      ok = false;
+    }
+    document.body.removeChild(ta);
+    return ok;
+  }
 
   function pollTail() {
     if (!state.session) return;
