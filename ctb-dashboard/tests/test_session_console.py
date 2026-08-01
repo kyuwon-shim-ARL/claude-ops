@@ -145,34 +145,44 @@ def test_tail_text_is_selectable(console_js):
     assert "user-select:text" in console_js
 
 
-def test_marked_copy_block_is_detected_and_one_tap_copyable(console_js):
-    """[[COPY]]...[[/COPY]] on screen -> a chip that copies just that region.
+def test_tap_range_selection_exists(console_js):
+    """Tap a line, tap another, copy that span -- no drag, no model cooperation.
 
-    The point is no drag-selection on a phone: the session's Claude wraps the
-    wanted content in markers, and the console turns it into one tap.
+    Replaces the earlier [[COPY]] marker convention, which worked but rented
+    space in the global CLAUDE.md that every session paid for on every turn.
     """
-    assert "'[[COPY]]'" in console_js
-    assert "'[[/COPY]]'" in console_js
-    assert "extractCopyBlock" in console_js
-    assert "updateCopyChip" in console_js
+    assert "onLineTap" in console_js
+    assert "selectionRange" in console_js
+    assert "copySelection" in console_js
+    assert "clearSelection" in console_js
+    # No trace of the retired convention.
+    for gone in ("[[COPY]]", "extractCopyBlock", "updateCopyChip"):
+        assert gone not in console_js
 
 
-def test_most_recent_complete_block_wins(console_js):
-    """lastIndexOf from the close marker backwards -- an unclosed opener or an
-    older block must not shadow the newest complete one."""
-    assert "lastIndexOf(COPY_CLOSE)" in console_js
-    assert "lastIndexOf(COPY_OPEN, close)" in console_js
+def test_selection_uses_click_not_touchstart(console_js):
+    """touchstart would fire mid-scroll and select lines the user was passing."""
+    assert "tail.addEventListener('click'" in console_js
+    # Match the listener registration, not the word in the explanatory comment.
+    assert "addEventListener('touchstart'" not in console_js
 
 
-def test_chip_resets_when_console_closes(console_js):
-    assert "state.copyBlock = null" in console_js
+def test_tail_refresh_is_frozen_while_selecting(console_js):
+    """Lines must not shift under a finger mid-selection, and the poll must
+    resume once the selection is cleared."""
+    assert "if (state.selStart !== null) return;" in console_js
+    assert "stopPolling();" in console_js
+    assert "if (state.session && !state.timer) startPolling();" in console_js
 
 
-def test_log_endpoint_joins_wrapped_lines():
-    """capture-pane -J: without it a copied block inherits artificial line
-    breaks at whatever width the tmux pane happened to be."""
-    server_src = (SRC / "server.py").read_text()
-    assert '"-J"' in server_src
+def test_selection_resets_on_session_switch_and_close(console_js):
+    assert console_js.count("state.selStart = null;") >= 2
+
+
+def test_copied_text_is_cleaned(console_js):
+    """Both whole-screen and range copies go through the same dedent path."""
+    assert "cleanLines(state.lines.slice(range[0], range[1] + 1))" in console_js
+    assert "cleanLines(state.lines.slice())" in console_js
 
 
 def test_interrupt_control_exists(console_js):
