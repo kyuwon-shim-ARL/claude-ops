@@ -430,35 +430,37 @@ class SessionStateAnalyzer:
         # a background skill sub-agent is still running, even if the main Claude
         # prompt shows "✻ Cooked for Xm" (past-tense) and ❯ is visible.
         #
-        # Two guard cases:
-        # GUARD A — stale ⚡N counter (MC_reanalysis pattern):
-        #   skill: + ⚡N(>0) visible + ❯ visible → counter stuck at N after work
-        #   done; presence of ❯ means Claude is at idle, override → skip.
-        # GUARD B — ⚡0 explicit → all tasks finished → skip.
+        # The OMC HUD wraps and truncates on narrow terminals, so ⚡N can land
+        # on the line(s) BELOW the skill: line, or be cut off entirely. The ⚡
+        # counter is therefore searched across the HUD block (skill line + next
+        # 2 lines), not just the skill line itself.
         #
-        # NO guard when ⚡N is absent/truncated (narrow terminal, e.g. 151 chars):
-        #   status bar `... | skill:external-context(...) | ctx:56% | agent…`
-        #   gets cut off before ⚡N. skill: alone is treated as WORKING because
-        #   we cannot confirm ⚡0.
+        # Guard cases:
+        # GUARD A — ❯ prompt visible → idle. Covers both the stale-⚡N-counter
+        #   pattern (MC_reanalysis) and the truncated-HUD pattern (2026-08-03
+        #   incident: sessions stuck WORKING for 3 days because a truncated
+        #   `skill:...` bar with ❯ visible was treated as WORKING forever,
+        #   permanently suppressing completion notifications). A false idle
+        #   costs one early notification; a false WORKING suppresses them
+        #   permanently — so with ❯ visible we prefer idle.
+        # GUARD B — ⚡0 explicit in the HUD block → all tasks finished → skip.
         _prompt_visible = any(l.strip() in ('❯', '❯\xa0', '❯ ') for l in recent_lines)
         _skill_bar_re = re.compile(r'\bskill:[A-Za-z0-9_:\-]+\([^)]+\)')
-        _active_tasks_re = re.compile(r'⚡([1-9]\d*)')  # ⚡1..∞
         _zero_tasks_re = re.compile(r'⚡0\b')            # ⚡0 = explicitly done
-        for line in recent_lines:
+        for i, line in enumerate(recent_lines):
             if not _skill_bar_re.search(line):
                 continue
-            has_active = bool(_active_tasks_re.search(line))
-            has_zero = bool(_zero_tasks_re.search(line))
-            if has_active and _prompt_visible:
-                # GUARD A: ⚡N visible but counter is stuck; ❯ = idle → skip
-                logger.debug("⏭ SKIP 1b-2: ❯ visible + ⚡N visible — stale counter (GUARD A)")
+            hud_block = '\n'.join(recent_lines[i:i + 3])
+            if _prompt_visible:
+                # GUARD A: ❯ = idle; skill bar is stale/truncated HUD → skip
+                logger.debug("⏭ SKIP 1b-2: ❯ visible — skill bar treated as stale HUD (GUARD A)")
                 continue
-            if has_zero:
+            if _zero_tasks_re.search(hud_block):
                 # GUARD B: ⚡0 = all tasks done → skip
-                logger.debug("⏭ SKIP 1b-2: ⚡0 explicit — tasks finished (GUARD B)")
+                logger.debug("⏭ SKIP 1b-2: ⚡0 explicit in HUD block — tasks finished (GUARD B)")
                 continue
-            # skill: found, ⚡N not visible (truncated or absent) and not ⚡0
-            logger.debug(f"🎯 WORKING: OMC status bar shows active skill (⚡N absent/truncated): {line.strip()[:80]}")
+            # skill: found, no ❯ prompt, ⚡0 not confirmed → still working
+            logger.debug(f"🎯 WORKING: OMC status bar shows active skill: {line.strip()[:80]}")
             return True
 
         # PRIORITY 1c: Check for Claude Code background tasks still running

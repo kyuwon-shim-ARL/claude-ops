@@ -960,6 +960,71 @@ class TestWideWindowAndOMCSignals:
         assert elapsed < 0.05, f"Collapse too slow: {elapsed:.3f}s"
 
 
+class TestSkillBarWrappedHud:
+    """PRIORITY 1b-2: OMC HUD wraps/truncates so ⚡N lands on a different line.
+
+    Real incident (2026-08-03): sessions stuck in WORKING for 3 days because
+    the skill: bar rule only looked for ⚡N on the same line, but the OMC HUD
+    now wraps `skill:...` and `⚡N` onto separate lines (or truncates with …).
+    """
+
+    def setup_method(self):
+        self.analyzer = SessionStateAnalyzer()
+
+    def test_skill_bar_with_active_counter_on_next_line_and_prompt_is_idle(self):
+        """claude_multica pattern: ⚡1 on the line AFTER skill:, ❯ visible → idle."""
+        screen = (
+            "───\n"
+            "❯ \n"
+            "───\n"
+            "  [OMC#4.14.1] | Model: Opus 4.8 | 5h:5%*(~2h17m) | session:93166m | skill:office-hours(여러 연구 프...)\n"
+            "  ctx:10% | 🔧122 🤖2 ⚡1\n"
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is False
+
+    def test_skill_bar_truncated_no_lightning_anywhere_with_prompt_is_idle(self):
+        """claude_CAMDA pattern: HUD truncated with …, ⚡ never visible, ❯ visible → idle."""
+        screen = (
+            "  ⎿  Bye!\n"
+            "───\n"
+            "❯ \n"
+            "───\n"
+            "  [OMC#4.14.1] | Model: Opus 4.8 | session:117230m | skill:rpt(--fast) | ctx:16% | 🔧118 …\n"
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is False
+
+    def test_skill_bar_wrapped_counter_two_lines_below_with_prompt_is_idle(self):
+        """claude_spark_setup pattern: ⚡7 two lines below skill:, ❯ visible → idle."""
+        screen = (
+            "───\n"
+            "❯ \n"
+            "───\n"
+            "  [OMC#4.14.1] | Model: Opus 4.8 | session:117610m | skill:external-context(다음 키워드...) | ctx:1…\n"
+            "  🔧153 🤖30 ⚡7\n"
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is False
+
+    def test_skill_bar_without_prompt_still_working(self):
+        """No ❯ prompt visible + active skill bar → keep WORKING verdict."""
+        screen = (
+            "✻ Cooked for 3m\n"
+            "───\n"
+            "  [OMC#4.14.1] | Model: Opus 4.8 | skill:external-context(검색...) | ctx:56%\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is True
+
+    def test_skill_bar_zero_counter_same_line_is_idle(self):
+        """GUARD B unchanged: ⚡0 on the skill line → idle."""
+        screen = (
+            "───\n"
+            "  [OMC#4.14.1] | skill:rpt(--fast) | ctx:16% | ⚡0\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is False
+
+
 class TestErrorHandling:
     """Test error handling and edge cases"""
 
