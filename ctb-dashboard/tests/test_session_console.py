@@ -238,6 +238,44 @@ def test_desktop_card_tap_still_focuses_the_terminal(index_html):
     assert "focusSession(card, name)" in handler
 
 
+def _console_btn_media_query(index_html: str) -> str:
+    """The @media block that hides the console button, with its rule."""
+    style = index_html[index_html.index("<style>"):index_html.index("</style>")]
+    for block in style.split("@media")[1:]:
+        if ".console-btn" in block.split("}")[0] + block.split("}")[1]:
+            return "@media" + block[:block.index("}") + 2]
+    raise AssertionError("no @media block targets .console-btn")
+
+
+def test_console_button_is_hidden_on_mobile(index_html):
+    """Mobile card tap already opens the console, so the icon is redundant."""
+    block = _console_btn_media_query(index_html)
+    assert "display: none" in block or "display:none" in block
+
+
+def test_hiding_the_console_button_beats_its_inline_style(index_html):
+    """The button carries inline display:flex, which only !important overrides."""
+    assert "display:flex" in index_html[index_html.index("data-console-session"):][:400]
+    block = _console_btn_media_query(index_html)
+    assert "!important" in block, "inline display:flex would otherwise win"
+
+
+def test_hide_breakpoint_matches_the_isMobile_predicate(index_html):
+    """CSS and JS must agree on what 'mobile' is, or the icon hides on a device
+    whose card tap still focuses a terminal (leaving no way into the console)."""
+    block = _console_btn_media_query(index_html)
+    assert "pointer: coarse" in block
+    assert "max-width: 767px" in block, "isMobile() uses innerWidth < 768"
+    js = index_html[index_html.index("function isMobile"):]
+    js = js[:js.index("}")]
+    assert "pointer: coarse" in js and "768" in js
+
+
+def test_console_button_still_rendered_for_desktop(index_html):
+    """Hiding is presentational — desktop's only route to the console stays."""
+    assert "data-console-session" in index_html
+
+
 # --- served correctly -------------------------------------------------------
 
 def test_static_modules_are_served():

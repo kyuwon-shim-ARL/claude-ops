@@ -206,6 +206,16 @@
     .del-btn { opacity: 0.28; transition: opacity 0.2s, background 0.2s; }
     .del-btn:hover { opacity: 1; background: rgba(239,68,68,0.22) !important; border-color: rgba(239,68,68,0.55) !important; }
 
+    /* On a phone the whole card opens the console, so the 💬 button would be a
+       second control for the same action. Desktop keeps it: there the card tap
+       focuses the terminal instead, and this is the only way in.
+       The query must stay in step with isMobile() in the card tap handler —
+       widen one without the other and a device gets neither route.
+       !important: the button carries an inline display:flex. */
+    @media (pointer: coarse) and (max-width: 767px) {
+      .console-btn { display: none !important; }
+    }
+
     [data-session-name]:focus { outline: 2px solid rgba(129,140,248,0.85); outline-offset: 2px; }
     [data-session-name]:focus-visible { outline: 2px solid rgba(129,140,248,0.85); outline-offset: 2px; }
   </style>
