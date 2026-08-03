@@ -5,6 +5,7 @@ otherwise regress silently: the console stays in its own module, the tail poll
 stays bounded to one session, and nothing inline sneaks past the CSP.
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -219,31 +220,61 @@ def test_card_tap_opts_out_of_every_in_card_control(index_html):
         assert control in handler, f"card tap must skip {control}"
 
 
+def _card_tap_branches(index_html: str) -> tuple:
+    """(mobile, desktop) bodies of the handler's isMobile() split.
+
+    Asserting on the whole handler cannot tell the two branches apart, so a
+    swapped if/else — the likeliest regression here — would pass. Split first.
+    """
+    handler = _card_tap_handler(index_html)
+    after_if = handler[handler.index("isMobile()) {") + len("isMobile()) {"):]
+    mobile, _, desktop = after_if.partition("} else {")
+    assert desktop, "card tap must keep an else branch for desktop"
+    return mobile, desktop
+
+
 def test_mobile_card_tap_opens_the_console(index_html):
     """On a phone the console is the primary action, not a clipboard copy.
 
     The copy predates the console and pasted `/sessions <name>` into Telegram;
     with the console shipped it only forces the user to hit a 24px icon.
     """
-    handler = _card_tap_handler(index_html)
-    assert "ctbConsole.open" in handler
-    assert "/sessions ${name}" not in handler, (
+    mobile, desktop = _card_tap_branches(index_html)
+    assert "ctbConsole.open" in mobile
+    assert "ctbConsole.open" not in desktop, "console-open belongs to the mobile branch"
+    assert "/sessions ${name}" not in mobile, (
         "the Telegram-era clipboard copy should no longer be the mobile action"
     )
 
 
 def test_desktop_card_tap_still_focuses_the_terminal(index_html):
     """Focus switches the real tmux client — the console cannot replace it."""
-    handler = _card_tap_handler(index_html)
-    assert "focusSession(card, name)" in handler
+    mobile, desktop = _card_tap_branches(index_html)
+    assert "focusSession(card, name)" in desktop
+    assert "focusSession" not in mobile, "a phone has no terminal to focus"
 
 
 def _console_btn_media_query(index_html: str) -> str:
-    """The @media block that hides the console button, with its rule."""
+    """The whole @media block that styles .console-btn.
+
+    Brace-matched rather than split on the first few `}`: reordering rules
+    inside the block is behaviour-preserving CSS, and a helper that loses the
+    block when that happens reports a confusing failure for a non-bug.
+    """
     style = index_html[index_html.index("<style>"):index_html.index("</style>")]
-    for block in style.split("@media")[1:]:
-        if ".console-btn" in block.split("}")[0] + block.split("}")[1]:
-            return "@media" + block[:block.index("}") + 2]
+    for m in re.finditer(r"@media[^{]*\{", style):
+        depth, i = 0, m.end() - 1
+        while i < len(style):
+            if style[i] == "{":
+                depth += 1
+            elif style[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        block = style[m.start():i + 1]
+        if ".console-btn" in block:
+            return block
     raise AssertionError("no @media block targets .console-btn")
 
 
