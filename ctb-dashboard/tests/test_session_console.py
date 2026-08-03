@@ -189,6 +189,55 @@ def test_interrupt_control_exists(console_js):
     assert "/interrupt" in console_js
 
 
+# --- card tap routing -------------------------------------------------------
+#
+# The 💬 button sits inside the card, and the card's own tap handler is
+# registered on the grid — an ancestor of the card but a descendant of the
+# document the console listens on. So the card handler runs FIRST and the
+# console's stopPropagation() cannot undo it: tapping 💬 used to also fire the
+# card action (desktop terminal focus), which is why the two controls looked
+# identical on desktop. The card handler must opt out of the console button
+# the same way it already opts out of pin and delete.
+
+def _card_tap_handler(index_html: str) -> str:
+    """The grid click listener that implements card tap."""
+    start = index_html.index("// --- Card tap handler")
+    # Terminate on the listener's own closing line, not on a nested callback's.
+    return index_html[start:index_html.index("\n    });", start)]
+
+
+def test_card_tap_ignores_the_console_button(index_html):
+    handler = _card_tap_handler(index_html)
+    assert "data-console-session" in handler, (
+        "tapping 💬 must not also trigger the card action"
+    )
+
+
+def test_card_tap_opts_out_of_every_in_card_control(index_html):
+    handler = _card_tap_handler(index_html)
+    for control in ("data-pin-session", "data-delete-session", "data-console-session"):
+        assert control in handler, f"card tap must skip {control}"
+
+
+def test_mobile_card_tap_opens_the_console(index_html):
+    """On a phone the console is the primary action, not a clipboard copy.
+
+    The copy predates the console and pasted `/sessions <name>` into Telegram;
+    with the console shipped it only forces the user to hit a 24px icon.
+    """
+    handler = _card_tap_handler(index_html)
+    assert "ctbConsole.open" in handler
+    assert "/sessions ${name}" not in handler, (
+        "the Telegram-era clipboard copy should no longer be the mobile action"
+    )
+
+
+def test_desktop_card_tap_still_focuses_the_terminal(index_html):
+    """Focus switches the real tmux client — the console cannot replace it."""
+    handler = _card_tap_handler(index_html)
+    assert "focusSession(card, name)" in handler
+
+
 # --- served correctly -------------------------------------------------------
 
 def test_static_modules_are_served():

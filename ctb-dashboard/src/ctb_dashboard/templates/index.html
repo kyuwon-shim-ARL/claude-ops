@@ -1809,20 +1809,23 @@
         });
     }
 
-    // --- Card tap handler: mobile=copy, desktop=focus ---
+    // --- Card tap handler: mobile=console, desktop=focus ---
+    // The card action is whatever that device can actually do with a session.
+    // On a phone that is the console (there is no terminal to focus); on a
+    // desktop it is the tmux focus, which the console cannot replace.
+    // The in-card buttons opt out: this listener sits on the grid, so it runs
+    // before the console's own document-level listener and its
+    // stopPropagation() comes too late to cancel us.
     grid.addEventListener('click', (e) => {
       if (_dragConfirmed) return;
       if (e.target.closest('[data-pin-session]')) return;
       if (e.target.closest('[data-delete-session]')) return;
+      if (e.target.closest('[data-console-session]')) return;
       const card = e.target.closest('[data-session-name]');
       if (!card) return;
       const name = card.dataset.sessionName;
       if (isMobile()) {
-        const cmd = `/sessions ${name}`;
-        copyToClipboard(cmd, () => {
-          flashCard(card, 'green');
-          showCardToast(card, `Copied ${cmd}`, 'green');
-        });
+        window.ctbConsole.open(name);
       } else {
         focusSession(card, name);
       }
