@@ -137,20 +137,67 @@ def test_a_transition_during_downtime_is_not_reported_as_the_old_age(clean_state
 
 
 def test_a_working_session_keeps_its_start_time_across_a_restart(clean_state, tmp_path):
-    """The counterweight: a working pane prints constantly.
+    """The counterweight: elapsed working time must not collapse to the last
+    line the pane happened to print.
 
-    Its activity is always ~now, so deferring to activity would reset "작업중 1h"
-    to zero on every restart. Only settled states may take the activity time.
+    The case that isolates this from the startup clamp is a session working
+    quietly — mid tool call, last output a minute ago, so its activity is
+    newer than when it started working but still predates us. Without the
+    WORKING guard that output would be read as a transition and "작업중 1h"
+    would become "작업중 1m".
     """
     name = "claude_demo"
     started = time.time() - 3600
+    last_output = time.time() - 60
     server._prev_session_timestamps = {name: started}
 
-    result = _poll([name], {name: time.time()}, {name: _probe(name, "working")}, tmp_path)
+    with patch.object(server, "_PROCESS_START", time.time()):
+        result = _poll([name], {name: last_output},
+                       {name: _probe(name, "working")}, tmp_path)
 
     assert _entry(result, name)["updated_at"] == pytest.approx(started, abs=1), (
         "a working session must keep how long it has been working"
     )
+
+
+def test_pane_noise_after_startup_does_not_reset_a_settled_badge(clean_state, tmp_path):
+    """Output is not proof that the session changed state.
+
+    A pane can keep printing with nothing happening logically — a footer that
+    repaints, a `tail -f` someone left running. tmux's session_activity records
+    any pty write. Adopting it would put the badge back at zero, which is the
+    bug this whole mechanism exists to prevent, just narrowed to noisy panes.
+
+    What separates the two: a transition that happened while we were down
+    printed before this process existed. Noise keeps printing after it.
+    """
+    name = "claude_demo"
+    went_idle = time.time() - 7200
+    server._prev_session_timestamps = {name: went_idle}
+    startup = time.time() - 2
+    noise_since_startup = time.time()
+
+    with patch.object(server, "_PROCESS_START", startup):
+        result = _poll([name], {name: noise_since_startup},
+                       {name: _probe(name, "idle")}, tmp_path)
+
+    assert _entry(result, name)["updated_at"] == pytest.approx(went_idle, abs=1), (
+        "pane chatter was mistaken for a state change and zeroed the badge"
+    )
+
+
+def test_output_from_during_the_outage_is_still_accepted(clean_state, tmp_path):
+    """The counterweight: output predating startup is the transition evidence."""
+    name = "claude_demo"
+    started_working = time.time() - 7200
+    finished_while_down = time.time() - 30
+    server._prev_session_timestamps = {name: started_working}
+
+    with patch.object(server, "_PROCESS_START", time.time() - 10):
+        result = _poll([name], {name: finished_while_down},
+                       {name: _probe(name, "idle")}, tmp_path)
+
+    assert _entry(result, name)["updated_at"] == pytest.approx(finished_while_down, abs=1)
 
 
 def test_settled_session_untouched_since_the_outage_keeps_its_timestamp(clean_state, tmp_path):

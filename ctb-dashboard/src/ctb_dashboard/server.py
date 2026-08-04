@@ -230,6 +230,10 @@ def _load_timestamps() -> Dict[str, float]:
         return {}
 
 _prev_session_timestamps: Dict[str, float] = _load_timestamps()  # track per-session state change time
+# Anything a pane printed before this moment happened while we were not
+# watching; anything after it we saw happen. Used to tell a transition during
+# an outage apart from a pane that simply keeps printing.
+_PROCESS_START = time.time()
 _completion_times: Dict[str, float] = {}  # track working->idle/waiting transitions
 _state_analyzer = SessionStateAnalyzer()
 
@@ -361,11 +365,17 @@ def _poll_sessions() -> Dict[str, Any]:
             # the persisted timestamp stands by default.
             # It can still be out of date — the session may have moved on while
             # we were down. Output after the moment we recorded means something
-            # happened since, and it is the only record of when. Settled states
-            # only: a WORKING pane prints continuously, so its activity is
-            # always ~now and would erase how long it has been running.
+            # happened since, and it is the only record of when.
+            # Two limits on trusting it, because output is not proof of a state
+            # change: a WORKING pane prints continuously, so its activity is
+            # always ~now and would erase how long it has been running; and a
+            # settled pane can still print (a repainting footer, a stray
+            # `tail -f`), so only output from before we started counts —
+            # anything since is chatter we watched happen without the state
+            # moving, and adopting it would put the badge back at zero.
             activity = activity_map.get(name) or 0
-            if state_val != SessionState.WORKING.value and activity > prev_ts:
+            if (state_val != SessionState.WORKING.value
+                    and prev_ts < activity <= _PROCESS_START):
                 prev_ts = activity
                 _prev_session_timestamps[name] = prev_ts
         elif prev_state != state_val:
