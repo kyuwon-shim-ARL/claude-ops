@@ -348,9 +348,20 @@ def _poll_sessions() -> Dict[str, Any]:
             if s["name"] == name:
                 prev_state = s.get("state")
                 break
-        if prev_state != state_val or prev_ts == 0:
+        if prev_ts == 0:
+            # Never seen this session. It predates us, so the poll time would
+            # claim it just changed state; the pane's last activity is the
+            # closest thing we have to when the current state began.
+            prev_ts = activity_map.get(name) or now
+            _prev_session_timestamps[name] = prev_ts
+        elif prev_state is not None and prev_state != state_val:
             _prev_session_timestamps[name] = now
             prev_ts = now
+        # prev_state is None with a persisted prev_ts means this is the first
+        # poll of a fresh process: _cached_state is in-memory only, so there is
+        # nothing to compare against. Treating that as a state change is what
+        # reset every idle badge to zero on each restart — keep the timestamp
+        # we loaded from disk instead.
 
         entry = {
             "name": name,
