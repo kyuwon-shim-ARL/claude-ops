@@ -117,6 +117,72 @@ def test_first_sight_without_activity_data_falls_back_to_now(clean_state, tmp_pa
     assert _entry(result, name)["updated_at"] == pytest.approx(time.time(), abs=5)
 
 
+def test_a_transition_during_downtime_is_not_reported_as_the_old_age(clean_state, tmp_path):
+    """Disk can disagree with reality: the session moved on while we were down.
+
+    Keeping the persisted timestamp blindly reports "idle for 2h" for a session
+    that actually finished ten minutes ago, and sorts it accordingly. The pane's
+    activity is the only record of when that happened.
+    """
+    name = "claude_demo"
+    started_working = time.time() - 7200   # what we persisted before going down
+    finished = time.time() - 600           # pane last printed when it finished
+    server._prev_session_timestamps = {name: started_working}
+
+    result = _poll([name], {name: finished}, {name: _probe(name, "idle")}, tmp_path)
+
+    assert _entry(result, name)["updated_at"] == pytest.approx(finished, abs=1), (
+        "reported the pre-outage timestamp for a state that changed during it"
+    )
+
+
+def test_a_working_session_keeps_its_start_time_across_a_restart(clean_state, tmp_path):
+    """The counterweight: a working pane prints constantly.
+
+    Its activity is always ~now, so deferring to activity would reset "작업중 1h"
+    to zero on every restart. Only settled states may take the activity time.
+    """
+    name = "claude_demo"
+    started = time.time() - 3600
+    server._prev_session_timestamps = {name: started}
+
+    result = _poll([name], {name: time.time()}, {name: _probe(name, "working")}, tmp_path)
+
+    assert _entry(result, name)["updated_at"] == pytest.approx(started, abs=1), (
+        "a working session must keep how long it has been working"
+    )
+
+
+def test_settled_session_untouched_since_the_outage_keeps_its_timestamp(clean_state, tmp_path):
+    """Nothing happened while we were down — do not move the clock forward."""
+    name = "claude_demo"
+    went_idle = time.time() - 7200
+    server._prev_session_timestamps = {name: went_idle}
+
+    result = _poll([name], {name: went_idle - 5}, {name: _probe(name, "idle")}, tmp_path)
+
+    assert _entry(result, name)["updated_at"] == pytest.approx(went_idle, abs=1)
+
+
+def test_a_crash_mid_write_does_not_destroy_the_saved_timestamps(clean_state, tmp_path):
+    """A truncated file reloads as {} and wipes every badge — the original bug.
+
+    The write must not be able to leave the real file half-written, so it goes
+    to a temporary file and is renamed into place.
+    """
+    import json
+    path = tmp_path / "ts.json"
+    good = {"claude_demo": time.time() - 3600}
+    path.write_text(json.dumps(good))
+
+    name = "claude_demo"
+    server._prev_session_timestamps = dict(good)
+    with patch.object(server.json, "dump", side_effect=OSError("disk full")):
+        _poll([name], {name: good[name]}, {name: _probe(name, "idle")}, tmp_path)
+
+    assert json.loads(path.read_text()) == good, "the previous file was destroyed"
+
+
 def test_timestamps_are_written_for_the_next_process(clean_state, tmp_path):
     name = "claude_demo"
     went_idle = time.time() - 3600

@@ -354,14 +354,23 @@ def _poll_sessions() -> Dict[str, Any]:
             # closest thing we have to when the current state began.
             prev_ts = activity_map.get(name) or now
             _prev_session_timestamps[name] = prev_ts
-        elif prev_state is not None and prev_state != state_val:
+        elif prev_state is None:
+            # First poll of a fresh process: _cached_state is in-memory only, so
+            # there is nothing to compare against. Treating that as a state
+            # change is what reset every idle badge to zero on each restart, so
+            # the persisted timestamp stands by default.
+            # It can still be out of date — the session may have moved on while
+            # we were down. Output after the moment we recorded means something
+            # happened since, and it is the only record of when. Settled states
+            # only: a WORKING pane prints continuously, so its activity is
+            # always ~now and would erase how long it has been running.
+            activity = activity_map.get(name) or 0
+            if state_val != SessionState.WORKING.value and activity > prev_ts:
+                prev_ts = activity
+                _prev_session_timestamps[name] = prev_ts
+        elif prev_state != state_val:
             _prev_session_timestamps[name] = now
             prev_ts = now
-        # prev_state is None with a persisted prev_ts means this is the first
-        # poll of a fresh process: _cached_state is in-memory only, so there is
-        # nothing to compare against. Treating that as a state change is what
-        # reset every idle badge to zero on each restart — keep the timestamp
-        # we loaded from disk instead.
 
         entry = {
             "name": name,
@@ -394,10 +403,21 @@ def _poll_sessions() -> Dict[str, Any]:
     for gone in set(_last_known_prompt) - active_names:
         del _last_known_prompt[gone]
 
-    # Persist timestamps to disk so they survive server restarts
+    # Persist timestamps to disk so they survive server restarts.
+    # Written to a temporary file and renamed: a crash partway through a plain
+    # write leaves truncated JSON, _load_timestamps() swallows the parse error
+    # and returns {}, and every badge resets to zero — the failure this whole
+    # mechanism exists to prevent.
     try:
-        with open(_TS_PERSIST_PATH, "w") as f:
-            json.dump(_prev_session_timestamps, f)
+        tmp_dir = os.path.dirname(_TS_PERSIST_PATH) or "."
+        fd, tmp_path = tempfile.mkstemp(dir=tmp_dir, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(_prev_session_timestamps, f)
+            os.replace(tmp_path, _TS_PERSIST_PATH)
+        except Exception:
+            os.unlink(tmp_path)
+            raise
     except Exception:
         pass
 
