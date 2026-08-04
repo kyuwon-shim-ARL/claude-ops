@@ -206,13 +206,14 @@
     .del-btn { opacity: 0.28; transition: opacity 0.2s, background 0.2s; }
     .del-btn:hover { opacity: 1; background: rgba(239,68,68,0.22) !important; border-color: rgba(239,68,68,0.55) !important; }
 
-    /* On a phone the whole card opens the console, so the 💬 button would be a
-       second control for the same action. Desktop keeps it: there the card tap
-       focuses the terminal instead, and this is the only way in.
-       The query must stay in step with isMobile() in the card tap handler —
-       widen one without the other and a device gets neither route.
+    /* On a touch device the whole card opens the console, so the 💬 button
+       would be a second control for the same action. Pointer-based desktops
+       keep it: there the card tap focuses the terminal instead, and this is
+       the only way in.
+       Must stay in step with isMobile() in the card tap handler — no width
+       test in either, or rotating a phone changes what its cards do.
        !important: the button carries an inline display:flex. */
-    @media (pointer: coarse) and (max-width: 767px) {
+    @media (pointer: coarse) {
       .console-btn { display: none !important; }
     }
 
@@ -1738,9 +1739,15 @@
       });
     });
 
-    // --- Device detection: mobile = touch-only + narrow screen ---
+    // --- Device detection: mobile = no terminal to focus ---
+    // The question this answers is not "small screen" but "can this device
+    // focus the tmux client?" A coarse pointer means a touch device, which is
+    // always remote from the terminal — tablets included.
+    // Deliberately no width test: a phone in landscape is over 768px (iPhone
+    // 14: 852px), so a width cutoff flipped the card tap to the desktop branch
+    // on rotation, where the focus cannot land.
     function isMobile() {
-      return window.matchMedia('(pointer: coarse)').matches && window.innerWidth < 768;
+      return window.matchMedia('(pointer: coarse)').matches;
     }
 
     // --- Card toast helper ---
@@ -1809,7 +1816,10 @@
               : `Focused ${name.replace(/^claude[_-]/, '')}`;
             showCardToast(card, label, 'green');
           } else if (data.error === 'no_attached_client') {
-            copyFallback(card, cmd, '터미널 미연결 — copied');
+            // Nothing to focus and nowhere to paste a `/sessions` command, so
+            // hand over the one control that works without a terminal.
+            showCardToast(card, '터미널 미연결 — 콘솔로 엽니다', 'orange');
+            window.ctbConsole.open(name);
           } else {
             copyFallback(card, cmd, 'Focus failed — copied');
           }

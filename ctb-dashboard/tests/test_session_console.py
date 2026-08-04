@@ -291,15 +291,61 @@ def test_hiding_the_console_button_beats_its_inline_style(index_html):
     assert "!important" in block, "inline display:flex would otherwise win"
 
 
-def test_hide_breakpoint_matches_the_isMobile_predicate(index_html):
+def _is_mobile_body(index_html: str) -> str:
+    js = index_html[index_html.index("function isMobile"):]
+    return js[:js.index("}")]
+
+
+def test_mobile_is_decided_by_pointer_not_width(index_html):
+    """A phone in landscape is still a phone.
+
+    The predicate used to also require innerWidth < 768, which most current
+    phones exceed in landscape (iPhone 14: 852px). Rotating the device flipped
+    the card tap to the desktop branch, where the tmux focus cannot succeed —
+    it fell through to copying `/sessions <name>`, the very Telegram-era
+    behaviour the console replaced. Pointer type does not change on rotation.
+    """
+    js = _is_mobile_body(index_html)
+    assert "pointer: coarse" in js
+    assert "innerWidth" not in js, "width must not decide this — landscape flips it"
+    assert "768" not in js
+
+
+def test_hide_rule_matches_the_isMobile_predicate(index_html):
     """CSS and JS must agree on what 'mobile' is, or the icon hides on a device
     whose card tap still focuses a terminal (leaving no way into the console)."""
     block = _console_btn_media_query(index_html)
     assert "pointer: coarse" in block
-    assert "max-width: 767px" in block, "isMobile() uses innerWidth < 768"
-    js = index_html[index_html.index("function isMobile"):]
-    js = js[:js.index("}")]
-    assert "pointer: coarse" in js and "768" in js
+    for width_cond in ("max-width", "min-width"):
+        assert width_cond not in block, (
+            f"{width_cond} would reintroduce the orientation flip"
+        )
+
+
+def _no_attached_client_branch(index_html: str) -> str:
+    """The focusSession branch taken when no tmux client is attached."""
+    start = index_html.index("data.error === 'no_attached_client'")
+    return index_html[start:index_html.index("} else {", start)]
+
+
+def test_no_terminal_falls_back_to_the_console(index_html):
+    """Copying `/sessions <name>` helps nobody when there is no terminal.
+
+    The clipboard fallback assumes somewhere to paste it. If no tmux client is
+    attached there is no such place, so hand the user the console instead —
+    the one thing that still works without a terminal.
+    """
+    branch = _no_attached_client_branch(index_html)
+    assert "ctbConsole.open" in branch
+    assert "copyFallback" not in branch
+
+
+def test_other_focus_failures_still_copy(index_html):
+    """A server error is not 'no terminal' — the copy stays a useful escape."""
+    body = index_html[index_html.index("function focusSession"):]
+    body = body[:body.index("\n    }\n")]
+    assert "copyFallback(card, cmd, 'Focus failed" in body
+    assert "copyFallback(card, cmd, 'Network error" in body
 
 
 def test_console_button_still_rendered_for_desktop(index_html):
