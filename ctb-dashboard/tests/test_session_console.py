@@ -92,8 +92,48 @@ def test_stale_response_for_a_previous_session_is_discarded(console_js):
 # --- input behaviour --------------------------------------------------------
 
 def test_enter_sends_and_shift_enter_inserts_a_newline(console_js):
-    assert "e.key === 'Enter' && !e.shiftKey" in console_js
+    assert "e.key === 'Enter'" in console_js
     assert "preventDefault" in console_js
+
+
+# --- soft-keyboard IME -------------------------------------------------------
+#
+# Reported from a phone (2026-08-05): typing a prompt and pressing return left
+# a newline in the box without sending, and it took another return or two to go.
+# A soft-keyboard IME (Hangul here) does not report the return that commits a
+# composition as Enter — it arrives with isComposing set, or as keyCode 229, or
+# as an unnamed key — so a handler that only looks for key === 'Enter' misses
+# it and the browser inserts a line break instead. Deciding on the line break
+# itself is engine-independent: whatever the keyboard called it, the browser is
+# telling us it is about to break the line, and without Shift that is the send.
+# iOS WebKit cannot be launched on this host, so these pin the structure and a
+# Chromium run covers the behaviour.
+
+def _input_key_handlers(console_js: str) -> str:
+    start = console_js.index("input.addEventListener('keydown'")
+    return console_js[start:console_js.index("input.addEventListener('focus'", start)]
+
+
+def test_a_composing_enter_does_not_submit_on_keydown(console_js):
+    """Mid-composition the return belongs to the IME, not to us."""
+    handlers = _input_key_handlers(console_js)
+    assert "isComposing" in handlers
+    assert "229" in handlers, "keyCode 229 is how a soft keyboard says 'IME is handling this'"
+
+
+def test_an_inserted_line_break_sends(console_js):
+    """The IME path: no Enter keydown ever arrives, only the line break."""
+    handlers = _input_key_handlers(console_js)
+    assert "beforeinput" in handlers
+    assert "insertLineBreak" in handlers
+
+
+def test_shift_enter_is_still_a_newline_on_the_line_break_path(console_js):
+    """beforeinput carries no modifiers, so the keydown must record Shift."""
+    handlers = _input_key_handlers(console_js)
+    assert "shiftKey" in handlers
+    body = handlers[handlers.index("beforeinput"):]
+    assert "shift" in body.lower(), "the line-break path must honour Shift+Enter"
 
 
 def test_textarea_is_used_so_multiline_is_possible(console_js):

@@ -156,11 +156,33 @@
       'font-size:15px', // >=16px avoids iOS zoom-on-focus; 15 + no-zoom meta is fine
       'line-height:1.4', 'font-family:inherit',
     ].join(';');
+    /* Sending is decided on the line break, not on the key.
+     *
+     * A soft-keyboard IME (Hangul, Kana, Pinyin) does not report the return
+     * that commits a composition as Enter: it arrives with isComposing set, or
+     * as keyCode 229, or under no name at all. A handler watching for
+     * key === 'Enter' misses it, the browser inserts a newline instead, and the
+     * prompt sits in the box until the user presses return again -- which is
+     * exactly what a phone reported. Whatever the keyboard called it, the
+     * browser still tells us it is about to break the line, and a line break
+     * without Shift is the send gesture.
+     *
+     * beforeinput carries no modifier state, so the keydown records it. */
+    var shiftHeld = false;
     input.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' && !e.shiftKey) {
+      shiftHeld = e.shiftKey;
+      var imeIsHandlingIt = e.isComposing || e.keyCode === 229;
+      if (e.key === 'Enter' && !e.shiftKey && !imeIsHandlingIt) {
         e.preventDefault();
         submit();
       }
+    });
+    input.addEventListener('beforeinput', function (e) {
+      var breaksLine = e.inputType === 'insertLineBreak'
+        || (e.inputType === 'insertText' && e.data === '\n');
+      if (!breaksLine || shiftHeld) return;
+      e.preventDefault();
+      submit();
     });
     // Keep the input visible when the on-screen keyboard opens.
     input.addEventListener('focus', function () {
