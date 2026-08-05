@@ -118,21 +118,11 @@ class SmartNotifier:
             rate_limit_enabled = self.config.telegram_rate_limit_enabled
 
             url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-            # Check if message contains rich context (starts with emoji)
-            if message.startswith("✅") and "```" in message:
-                # For rich notifications, use Markdown for clickable commands
-                data = {
-                    "chat_id": chat_id,
-                    "text": message,
-                    "parse_mode": "Markdown"
-                }
-            else:
-                # For simple notifications, use Markdown for better formatting
-                data = {
-                    "chat_id": chat_id,
-                    "text": message,
-                    "parse_mode": "Markdown"
-                }
+            data = {
+                "chat_id": chat_id,
+                "text": message,
+                "parse_mode": "Markdown"
+            }
 
             response = requests.post(url, data=data, timeout=10)
 
@@ -160,8 +150,28 @@ class SmartNotifier:
 
             # T047: Handle other API errors (400 Bad Request)
             if response.status_code == 400:
+                # One 400 is recoverable. Notification bodies embed text scraped
+                # from the session screen, where a lone '*', '_' or backtick is
+                # routine, and Telegram refuses to send a message whose entities
+                # it cannot parse. Escaping every construction site cannot be
+                # proven complete, so resend once with formatting turned off:
+                # an unformatted notification beats one that never arrives.
+                if "can't parse entities" in response.text:
+                    logger.warning(
+                        "Telegram rejected the Markdown; resending as plain text"
+                    )
+                    plain = {"chat_id": chat_id, "text": message}
+                    response = requests.post(url, data=plain, timeout=10)
+                    if response.status_code == 200:
+                        logger.info("Telegram notification sent successfully (plain text)")
+                        return True
+                    logger.error(
+                        f"Plain-text resend also failed: "
+                        f"{response.status_code} - {response.text}"
+                    )
+                    return False
                 logger.error(f"Bad Request (400): Invalid parameters - {response.text}")
-                # Don't retry bad requests - they won't succeed
+                # Any other 400 is a real client error — retrying won't help
                 return False
 
             if response.status_code == 200:
