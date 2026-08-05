@@ -552,6 +552,63 @@
     }
     updateNotifBtn();
 
+    // --- Web Push -----------------------------------------------------------
+    // Everything else here is drawn by this page, so it only alerts while the
+    // page is running. A push is delivered to the service worker instead, which
+    // is the only way a completion reaches a phone with the screen off.
+    // Needs a secure context: over plain http the service worker API does not
+    // exist at all, so this quietly does nothing and the in-page alert stands.
+    let pushSubscribed = false;
+
+    function urlBase64ToUint8Array(base64) {
+      const padded = (base64 + '='.repeat((4 - base64.length % 4) % 4))
+        .replace(/-/g, '+').replace(/_/g, '/');
+      const raw = atob(padded);
+      return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+    }
+
+    async function subscribeToPush() {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
+      if (Notification.permission !== 'granted') return false;
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        let sub = await reg.pushManager.getSubscription();
+        if (!sub) {
+          const key = (await (await fetch('/api/push/public-key')).json()).key;
+          sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(key),
+          });
+        }
+        const res = await ctbControl.send('/api/push/subscribe', {
+          method: 'POST',
+          body: JSON.stringify(sub.toJSON()),
+        });
+        pushSubscribed = res.ok;
+        return res.ok;
+      } catch (e) {
+        console.warn('push subscribe failed', e);
+        return false;
+      }
+    }
+
+    async function unsubscribeFromPush() {
+      pushSubscribed = false;
+      if (!('serviceWorker' in navigator)) return;
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (!sub) return;
+        await ctbControl.send('/api/push/unsubscribe', {
+          method: 'POST',
+          body: JSON.stringify({ endpoint: sub.endpoint }),
+        });
+        await sub.unsubscribe();
+      } catch (e) {
+        console.warn('push unsubscribe failed', e);
+      }
+    }
+
     btnNotif.addEventListener('click', async () => {
       if (!notifEnabled) {
         if ('Notification' in window && Notification.permission === 'default') {
@@ -560,12 +617,19 @@
         if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         if (audioCtx.state === 'suspended') audioCtx.resume();
         notifEnabled = true;
+        await subscribeToPush();
       } else {
         notifEnabled = false;
+        await unsubscribeFromPush();
       }
       localStorage.setItem(NOTIF_KEY, notifEnabled);
       updateNotifBtn();
     });
+
+    // Re-subscribe on load if alerts were already on: a push subscription can
+    // be revoked by the browser, and the server prunes endpoints the push
+    // service reports as gone, so it has to be re-established, not assumed.
+    if (notifEnabled) subscribeToPush();
 
     function playBeep() {
       try {
@@ -585,6 +649,10 @@
     function notifyCompletion(sessionName) {
       const display = shortName(sessionName);
       playBeep();
+      // The server pushes the same completion when subscribed, and that one
+      // arrives whether the page is open or not. Drawing it here as well would
+      // show it twice on the one device that is definitely looking.
+      if (pushSubscribed) return;
       if ('Notification' in window && Notification.permission === 'granted') {
         if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
           navigator.serviceWorker.ready.then(reg => {

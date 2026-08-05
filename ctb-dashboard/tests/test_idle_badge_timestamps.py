@@ -230,6 +230,13 @@ def test_a_crash_mid_write_does_not_destroy_the_saved_timestamps(clean_state, tm
     assert json.loads(path.read_text()) == good, "the previous file was destroyed"
 
 
+def test_push_dedup_state_does_not_outlive_its_session(clean_state, tmp_path):
+    """Worktree sessions come and go; their dedup entries should not pile up."""
+    server._pushed_completions["claude_gone"] = time.time()
+    _poll([], {}, {}, tmp_path)
+    assert "claude_gone" not in server._pushed_completions
+
+
 def test_timestamps_are_written_for_the_next_process(clean_state, tmp_path):
     name = "claude_demo"
     went_idle = time.time() - 3600

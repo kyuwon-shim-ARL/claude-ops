@@ -35,6 +35,7 @@ from sse_starlette.sse import EventSourceResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from .state_detector import SessionStateAnalyzer, SessionState
+from . import push
 from .sessions import get_all_claude_sessions, get_session_path, get_sessions_activity
 from .session_delete import check_delete_safety, delete_session
 from .session_input import (
@@ -331,6 +332,37 @@ def _probe_session(name: str) -> tuple:
             pending_count, working_since, progress, last_reply)
 
 
+# Which completion we have already pushed for, per session. Keyed by the
+# completion timestamp so the next completion of the same session pushes again.
+_pushed_completions: Dict[str, float] = {}
+
+
+def _push_completions(session_list: list) -> None:
+    """Push a finished session to every subscribed phone.
+
+    Pinned sessions only, matching the in-page alerts: with 71 sessions, pushing
+    all of them would make the lock screen useless. Nothing here may raise --
+    polling drives the whole UI, and a push service having a bad day must not
+    take it down with it.
+    """
+    try:
+        pinned = pinned_session_names()
+        if not pinned:
+            return
+        for entry in session_list:
+            name = entry.get("name")
+            completed_at = entry.get("completed_at")
+            if not completed_at or name not in pinned:
+                continue
+            if _pushed_completions.get(name) == completed_at:
+                continue
+            _pushed_completions[name] = completed_at
+            short = name.replace("claude_", "", 1)
+            push.notify(name, f"{short} 세션이 작업을 마쳤습니다")
+    except Exception as e:
+        logger.warning("Completion push failed: %s", e)
+
+
 def _poll_sessions() -> Dict[str, Any]:
     """Poll all tmux sessions and return state dict using SessionStateAnalyzer."""
     global _prev_session_timestamps
@@ -399,6 +431,8 @@ def _poll_sessions() -> Dict[str, Any]:
         }
         session_list.append(entry)
 
+    _push_completions(session_list)
+
     # Content hash for SSE change detection (includes dynamic fields for real-time updates)
     content_key = json.dumps([
         (s["name"], s["state"], bool(s.get("completed_at")),
@@ -410,6 +444,8 @@ def _poll_sessions() -> Dict[str, Any]:
     # Clean up timestamps and prompt cache for removed sessions
     active_names = {s["name"] for s in session_list}
     _prev_session_timestamps = {k: v for k, v in _prev_session_timestamps.items() if k in active_names}
+    for gone in set(_pushed_completions) - active_names:
+        del _pushed_completions[gone]
     for gone in set(_last_known_prompt) - active_names:
         del _last_known_prompt[gone]
 
@@ -920,6 +956,47 @@ async def session_ticket_links(response: Response):
     response.headers["X-Server-Time"] = str(int(time.time()))
     response.headers["X-Badge-TTL"] = str(_BADGE_TTL)
     return {"links": links, "ttl": _BADGE_TTL}
+
+
+def pinned_session_names() -> set:
+    """Every pinned session, flattened out of the quadrants."""
+    names = set()
+    for value in (_pinned_state or {}).values():
+        if isinstance(value, list):
+            names.update(v for v in value if isinstance(v, str))
+    return names
+
+
+@app.get("/api/push/public-key")
+async def push_public_key():
+    """The applicationServerKey. Public by definition — a browser needs it
+    before it has anything to authenticate with."""
+    return {"key": push.public_key()}
+
+
+@app.post("/api/push/subscribe", dependencies=[Depends(require_control_token)])
+async def push_subscribe(sub: dict):
+    # The endpoint is a URL this server POSTs to on every completion, so it is
+    # checked here, at the boundary, rather than deeper in. Every real push
+    # service is https; anything else is someone pointing our outbound requests
+    # at a target of their choosing.
+    endpoint = (sub or {}).get("endpoint")
+    if not isinstance(endpoint, str) or not endpoint.startswith("https://"):
+        raise HTTPException(status_code=422, detail="endpoint must be an https URL")
+    try:
+        push.add_subscription(sub)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {"status": "subscribed"}
+
+
+@app.post("/api/push/unsubscribe", dependencies=[Depends(require_control_token)])
+async def push_unsubscribe(body: dict):
+    endpoint = (body or {}).get("endpoint")
+    if not endpoint:
+        raise HTTPException(status_code=422, detail="endpoint is required")
+    push.remove_subscription(endpoint)
+    return {"status": "unsubscribed"}
 
 
 @app.get("/api/pinned")

@@ -31,6 +31,7 @@ dependencies = [
     "filelock>=3.29.0",
     "itsdangerous>=2.2.0",
     "bleach==6.1.0",
+    "pywebpush>=2.0.0",
 ]
 
 [project.urls]
@@ -46,6 +47,13 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 ctb_dashboard = ["static/*"]
+
+[dependency-groups]
+# Without pytest here, `uv run pytest` falls through to whatever pytest is on
+# PATH -- the pyenv one -- and the suite silently runs against globally
+# installed packages instead of this project's. A new dependency then imports
+# fine at runtime but not under test.
+dev = ["pytest>=8.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

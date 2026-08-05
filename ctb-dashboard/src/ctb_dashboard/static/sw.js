@@ -6,7 +6,7 @@
 // state of live sessions -- serving a stale session list from cache would be
 // worse than showing nothing, because it looks authoritative.
 
-const CACHE = 'ctb-shell-v1';
+const CACHE = 'ctb-shell-v2';
 
 // Deliberately small: the shell, not the data.
 const SHELL = [
@@ -63,15 +63,40 @@ self.addEventListener('fetch', (e) => {
   );
 });
 
+/* A push arrives whether or not the app is running -- this is the only path
+ * that reaches a phone with the screen off, since everything else the
+ * dashboard shows is drawn by an open page. */
+self.addEventListener('push', (e) => {
+  let data = {};
+  try { data = e.data ? e.data.json() : {}; } catch (_) {}
+  const title = data.title || 'Claude 작업 완료';
+  e.waitUntil(self.registration.showNotification(title, {
+    body: data.body || '',
+    icon: '/static/icon-192.png',
+    badge: '/static/icon-192.png',
+    // One notification per session: a second completion replaces the first
+    // rather than stacking up behind it.
+    tag: data.session ? 'ctb-done-' + data.session : 'ctb-done',
+    renotify: true,
+    vibrate: [200, 100, 200],
+    data: { url: data.url || '/' },
+  }));
+});
+
 // Handle notification click -- focus dashboard tab
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
+  const target = (e.notification.data && e.notification.data.url) || '/';
   e.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
       for (const c of list) {
-        if (c.url.includes('/') && 'focus' in c) return c.focus();
+        if (c.url.includes('/') && 'focus' in c) {
+          // Take the tab to the session the notification is about.
+          if ('navigate' in c && target !== '/') c.navigate(target).catch(() => {});
+          return c.focus();
+        }
       }
-      if (clients.openWindow) return clients.openWindow('/');
+      if (clients.openWindow) return clients.openWindow(target);
     })
   );
 });
