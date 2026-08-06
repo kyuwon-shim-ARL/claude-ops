@@ -41,13 +41,14 @@ from .session_delete import check_delete_safety, delete_session
 from .session_input import (
     ALLOWED_KEYS,
     pane_command,
+    pane_has_claude,
     send_interrupt,
     send_key,
     send_prompt,
     session_exists,
 )
 from .dangerous_commands import is_dangerous_command
-from .session_readiness import classify_readiness
+from .session_readiness import classify_readiness, is_shell
 from .control_audit import limiter as _rate_limiter, record as _audit
 
 import sys as _sys
@@ -789,7 +790,12 @@ async def session_prompt(name: str, req: PromptRequest, request: Request):
         None, lambda: analyzer.get_screen_content(name, use_cache=False)
     )
     cmd = await loop.run_in_executor(None, pane_command, name)
-    can_send, reason, message = classify_readiness(state, before, cmd)
+    # Only worth the process walk when the reported command looks like a shell,
+    # which is the only case where it changes the answer.
+    claude_running = False
+    if is_shell(cmd):
+        claude_running = await loop.run_in_executor(None, pane_has_claude, name)
+    can_send, reason, message = classify_readiness(state, before, cmd, claude_running)
     if not can_send:
         _audit("prompt", name, client, False, reason)
         return Response(

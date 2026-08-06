@@ -80,6 +80,46 @@ def test_unavailable_pane_command_does_not_block():
     assert classify_readiness(SessionState.IDLE, CLAUDE_SCREEN, "")[0] is True
 
 
+# --- pane_current_command reports the process group leader -------------------
+#
+# Field incident (2026-08-06): sends from the phone were refused as 'shell' on
+# sessions where Claude was plainly running and drawing its UI. tmux's
+# pane_current_command names the foreground process *group leader*, and when
+# claude ends up in the same group as the bash that launched it, that leader is
+# bash. Ten live sessions were blocked this way; the audit log shows four
+# refusals in five minutes on one of them.
+#
+# So the pane command alone cannot decide this. A claude process running in the
+# pane is a fact that outranks the reported name.
+
+def test_a_shell_name_is_not_a_shell_when_claude_runs_in_the_pane():
+    can, reason, _ = classify_readiness(
+        SessionState.IDLE, CLAUDE_SCREEN, "bash", claude_running=True)
+    assert (can, reason) == (True, "ready"), (
+        "blocked a session that has Claude running in it"
+    )
+
+
+def test_a_shell_with_no_claude_process_is_still_refused():
+    """The guard has to keep working: this is the case it exists for."""
+    can, reason, _ = classify_readiness(
+        SessionState.IDLE, SHELL_SCREEN, "bash", claude_running=False)
+    assert (can, reason) == (False, "shell")
+
+
+def test_claude_running_is_assumed_false_when_not_supplied():
+    """Callers that never learned about this must not accidentally open it up."""
+    can, reason, _ = classify_readiness(SessionState.IDLE, SHELL_SCREEN, "bash")
+    assert (can, reason) == (False, "shell")
+
+
+def test_a_busy_session_is_still_refused_even_with_claude_running():
+    """The process check answers 'is this a shell', not 'is this a good time'."""
+    can, reason, _ = classify_readiness(
+        SessionState.WORKING, CLAUDE_SCREEN, "bash", claude_running=True)
+    assert (can, reason) == (False, "working")
+
+
 def test_real_claude_screen_is_not_mistaken_for_a_shell():
     """Regression: the first implementation guessed the wrong glyphs.
 

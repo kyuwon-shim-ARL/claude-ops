@@ -65,19 +65,26 @@ def classify_readiness(
     state: SessionState,
     screen: str | None,
     pane_command: str | None = None,
+    claude_running: bool = False,
 ) -> tuple[bool, str, str]:
     """-> (can_send, reason_code, human_message).
 
     UNKNOWN is treated as sendable on purpose: screen reads fail transiently and
     refusing on every hiccup would make remote control unusable. The post-send
     screen diff is what catches a send that went nowhere.
+
+    `claude_running` outranks the pane command. tmux names the foreground
+    process *group leader*, so a session whose claude shares a group with the
+    bash that launched it reports 'bash' while Claude is plainly running --
+    ten live sessions were refused that way. It defaults to False so a caller
+    that has not checked keeps the old, stricter behaviour.
     """
     refusal = _REFUSALS.get(state)
     if refusal is not None:
         code, message = refusal
         return False, code, message
 
-    if is_shell(pane_command):
+    if is_shell(pane_command) and not claude_running:
         return (
             False,
             "shell",
