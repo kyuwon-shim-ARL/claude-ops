@@ -203,19 +203,32 @@ class PinnedRequest(BaseModel):
 # --- Session Poller (reuses SessionStateAnalyzer for accurate detection) ---
 
 _cached_state: Dict[str, Any] = {"version": 1, "updated_at": 0, "sessions": [], "_hash": ""}
-_TS_PERSIST_PATH = "/tmp/ctb-session-timestamps.json"
-_PINNED_PERSIST_PATH = "/tmp/ctb-pinned-sessions.json"
+# Not /tmp. This host sweeps it (`q /tmp ... 10d`), and pins are configuration,
+# not scratch: they gate every completion alert, so losing them turns alerts off
+# silently and permanently. That is exactly how "notifications used to come and
+# then stopped" happened. Timestamps live here too, for the same reason —
+# losing them resets every idle badge.
+_STATE_DIR = os.path.expanduser(os.environ.get("CTB_STATE_DIR", "~/.claude-ops"))
+_TS_PERSIST_PATH = os.path.join(_STATE_DIR, "session-timestamps.json")
+_PINNED_PERSIST_PATH = os.path.join(_STATE_DIR, "pinned-sessions.json")
+# Where both used to live. Read once so an upgrade does not drop live pins.
+_LEGACY_PINNED_PATH = "/tmp/ctb-pinned-sessions.json"
+_LEGACY_TS_PATH = "/tmp/ctb-session-timestamps.json"
+
+
+def _read_pinned_file(path: str) -> Dict[str, Any] | None:
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except Exception:
+        return None
+    return data if all(k in data for k in ("Q1", "Q2", "Q3", "Q4")) else None
 
 
 def _load_pinned() -> Dict[str, Any]:
-    try:
-        with open(_PINNED_PERSIST_PATH) as f:
-            data = json.load(f)
-        if all(k in data for k in ("Q1", "Q2", "Q3", "Q4")):
-            return data
-    except Exception:
-        pass
-    return {"Q1": [], "Q2": [], "Q3": [], "Q4": []}
+    return (_read_pinned_file(_PINNED_PERSIST_PATH)
+            or _read_pinned_file(_LEGACY_PINNED_PATH)
+            or {"Q1": [], "Q2": [], "Q3": [], "Q4": []})
 
 
 _pinned_state: Dict[str, Any] = _load_pinned()
@@ -223,7 +236,11 @@ _pinned_state: Dict[str, Any] = _load_pinned()
 def _load_timestamps() -> Dict[str, float]:
     """Load persisted session timestamps from disk (survives server restart)."""
     try:
-        with open(_TS_PERSIST_PATH) as f:
+        try:
+            f = open(_TS_PERSIST_PATH)
+        except FileNotFoundError:
+            f = open(_LEGACY_TS_PATH)
+        with f:
             data = json.load(f)
         # Discard entries older than 24h to avoid stale data
         cutoff = time.time() - 86400
@@ -457,6 +474,7 @@ def _poll_sessions() -> Dict[str, Any]:
     # mechanism exists to prevent.
     try:
         tmp_dir = os.path.dirname(_TS_PERSIST_PATH) or "."
+        os.makedirs(tmp_dir, mode=0o700, exist_ok=True)
         fd, tmp_path = tempfile.mkstemp(dir=tmp_dir, suffix=".tmp")
         try:
             with os.fdopen(fd, "w") as f:
@@ -481,6 +499,7 @@ def _poll_sessions() -> Dict[str, Any]:
 def _atomic_json_write(path: str, data: dict) -> bool:
     """Write JSON to path atomically via write-then-rename. Returns False on error."""
     dir_ = os.path.dirname(path) or "."
+    os.makedirs(dir_, mode=0o700, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=dir_, suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
