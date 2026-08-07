@@ -546,9 +546,46 @@
     let audioCtx = null;
 
     const btnNotif = document.getElementById('btn-notif');
+    // Declared before updateNotifBtn runs at load: the switch reads it.
+    let pushSubscribed = false;
+
+    // Why this browser cannot receive a push, in words the user can act on.
+    // Returns null when it can. Alerts that only fire while the page is open
+    // look identical to real ones until the phone is in your pocket, so the
+    // switch has to say which kind it is.
+    const DASHBOARD_URL = {{ dashboard_url|tojson }};
+    function pushBlockReason() {
+      if (!window.isSecureContext || !('serviceWorker' in navigator)) {
+        return 'HTTPS 주소로 열어야 백그라운드 알림을 받을 수 있습니다.'
+          + (DASHBOARD_URL ? '\n\n' + DASHBOARD_URL + ' 로 여세요.' : '');
+      }
+      if (!('Notification' in window)) {
+        // iOS exposes Notification only to an installed Home Screen app.
+        return '아이폰에서는 홈 화면에 추가한 뒤 그 아이콘으로 열어야 '
+          + '백그라운드 알림을 받을 수 있습니다.\n\n'
+          + '공유 → 홈 화면에 추가 → 홈 화면 아이콘으로 다시 열기';
+      }
+      if (!('PushManager' in window)) {
+        return '이 브라우저는 웹 푸시를 지원하지 않습니다.';
+      }
+      if (Notification.permission === 'denied') {
+        return '알림 권한이 거부되어 있습니다. 기기 설정에서 이 앱의 알림을 허용해 주세요.';
+      }
+      return null;
+    }
+
     function updateNotifBtn() {
-      btnNotif.textContent = notifEnabled ? 'ON' : 'OFF';
-      btnNotif.title = notifEnabled ? 'Alerts ON (click to disable)' : 'Alerts OFF (click to enable)';
+      if (!notifEnabled) {
+        btnNotif.textContent = 'OFF';
+        btnNotif.title = 'Alerts OFF (click to enable)';
+        return;
+      }
+      // ON alone used to mean both "push is armed" and "this page only",
+      // which is exactly the confusion that made a silent phone look fine.
+      btnNotif.textContent = pushSubscribed ? 'ON' : 'ON (화면만)';
+      btnNotif.title = pushSubscribed
+        ? '백그라운드 알림 켜짐 (누르면 끔)'
+        : (pushBlockReason() || '푸시 등록 중…');
     }
     updateNotifBtn();
 
@@ -558,7 +595,6 @@
     // is the only way a completion reaches a phone with the screen off.
     // Needs a secure context: over plain http the service worker API does not
     // exist at all, so this quietly does nothing and the in-page alert stands.
-    let pushSubscribed = false;
 
     function urlBase64ToUint8Array(base64) {
       const padded = (base64 + '='.repeat((4 - base64.length % 4) % 4))
@@ -633,8 +669,18 @@
           if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
           if (audioCtx.state === 'suspended') audioCtx.resume();
           await subscribeToPush();
+          updateNotifBtn();
+          // Say it once, now, rather than let a silent phone be discovered
+          // later: alerts that need the page open look identical to real ones
+          // until you put the phone down.
+          if (!pushSubscribed) {
+            const why = pushBlockReason();
+            window.alert('이 화면이 열려 있을 때만 알림이 울립니다.\n\n'
+              + (why || '푸시 등록에 실패했습니다. 잠시 후 다시 시도해 주세요.'));
+          }
         } else {
           await unsubscribeFromPush();
+          updateNotifBtn();
         }
       } catch (e) {
         console.warn('alerts toggle: background setup failed', e);
@@ -644,7 +690,7 @@
     // Re-subscribe on load if alerts were already on: a push subscription can
     // be revoked by the browser, and the server prunes endpoints the push
     // service reports as gone, so it has to be re-established, not assumed.
-    if (notifEnabled) subscribeToPush();
+    if (notifEnabled) subscribeToPush().then(updateNotifBtn);
 
     function playBeep() {
       try {

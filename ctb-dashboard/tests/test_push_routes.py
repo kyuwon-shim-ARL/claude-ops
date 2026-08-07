@@ -195,3 +195,39 @@ def test_notification_is_never_touched_unguarded():
     assert guard < body.index("Notification.permission"), (
         "Notification.permission is read before checking the API exists"
     )
+
+
+def test_the_switch_distinguishes_armed_from_page_only():
+    """ON meaning both "push armed" and "only while this page is open" is what
+    made a silent phone look correctly configured."""
+    s = INDEX.read_text()
+    body = s[s.index("function updateNotifBtn"):]
+    body = body[:body.index("\n    }")]
+    assert "pushSubscribed" in body, "the label must depend on whether push is armed"
+    assert "화면만" in body
+
+
+def test_every_reason_push_cannot_arm_is_named():
+    s = INDEX.read_text()
+    body = s[s.index("function pushBlockReason"):]
+    body = body[:body.index("\n    }")]
+    for check in ("isSecureContext", "serviceWorker", "'Notification' in window",
+                  "PushManager", "denied"):
+        assert check in body, f"{check} has no explanation"
+
+
+def test_subscription_attempts_are_audited(client):
+    """A phone that never manages to subscribe must not look like one that
+    never tried."""
+    with patch.object(server, "_audit") as audit:
+        client.post("/api/push/subscribe", json=SUB, headers=_auth())
+    assert any(c.args[0] == "push_subscribe" and c.args[3] is True
+               for c in audit.call_args_list)
+
+
+def test_a_refused_subscription_is_audited_too(client):
+    with patch.object(server, "_audit") as audit:
+        client.post("/api/push/subscribe",
+                    json={"endpoint": "http://x/y"}, headers=_auth())
+    assert any(c.args[0] == "push_subscribe" and c.args[3] is False
+               for c in audit.call_args_list)

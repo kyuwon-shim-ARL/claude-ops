@@ -709,7 +709,7 @@ async def root(request: Request):
     response = templates.TemplateResponse(
         request,
         "index.html",
-        {"csp_nonce": nonce},
+        {"csp_nonce": nonce, "dashboard_url": os.environ.get("CTB_DASHBOARD_URL", "")},
     )
     response.headers["Content-Security-Policy"] = csp
     # Dashboard HTML embeds its JS inline; never let a browser serve a stale
@@ -1000,18 +1000,26 @@ async def push_public_key():
 
 
 @app.post("/api/push/subscribe", dependencies=[Depends(require_control_token)])
-async def push_subscribe(sub: dict):
+async def push_subscribe(sub: dict, request: Request):
     # The endpoint is a URL this server POSTs to on every completion, so it is
     # checked here, at the boundary, rather than deeper in. Every real push
     # service is https; anything else is someone pointing our outbound requests
     # at a target of their choosing.
+    # Audited: without this a phone that never manages to subscribe is
+    # indistinguishable from one that never tried, which is a diagnosis by
+    # guesswork every time notifications are quiet.
+    client = request.client.host if request.client else None
     endpoint = (sub or {}).get("endpoint")
     if not isinstance(endpoint, str) or not endpoint.startswith("https://"):
+        _audit("push_subscribe", "-", client, False, "bad_endpoint")
         raise HTTPException(status_code=422, detail="endpoint must be an https URL")
     try:
         push.add_subscription(sub)
     except ValueError as e:
+        _audit("push_subscribe", "-", client, False, "invalid")
         raise HTTPException(status_code=422, detail=str(e))
+    _audit("push_subscribe", "-", client, True)
+    logger.info("Push subscription registered (%d total)", len(push.subscriptions()))
     return {"status": "subscribed"}
 
 
