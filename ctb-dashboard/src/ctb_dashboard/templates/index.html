@@ -568,6 +568,10 @@
     }
 
     async function subscribeToPush() {
+      // iOS only exposes Notification inside an installed Home Screen PWA, so
+      // in a Safari tab this name is not merely un-permitted, it is undefined.
+      // Touching it unguarded throws, and the caller loses everything after it.
+      if (!('Notification' in window)) return false;
       if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
       if (Notification.permission !== 'granted') return false;
       try {
@@ -610,20 +614,31 @@
     }
 
     btnNotif.addEventListener('click', async () => {
-      if (!notifEnabled) {
-        if ('Notification' in window && Notification.permission === 'default') {
-          await Notification.requestPermission();
-        }
-        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        if (audioCtx.state === 'suspended') audioCtx.resume();
-        notifEnabled = true;
-        await subscribeToPush();
-      } else {
-        notifEnabled = false;
-        await unsubscribeFromPush();
-      }
+      const turningOn = !notifEnabled;
+      // Record and repaint first. Push subscription can fail for reasons that
+      // have nothing to do with what this switch means -- no Notification API
+      // in an iOS Safari tab, permission denied, the push service unreachable
+      // -- and none of them should leave the button showing the opposite of
+      // what the user just chose. It said OFF after being switched on because
+      // an unguarded Notification reference threw before this line was reached.
+      notifEnabled = turningOn;
       localStorage.setItem(NOTIF_KEY, notifEnabled);
       updateNotifBtn();
+
+      try {
+        if (turningOn) {
+          if ('Notification' in window && Notification.permission === 'default') {
+            await Notification.requestPermission();
+          }
+          if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          if (audioCtx.state === 'suspended') audioCtx.resume();
+          await subscribeToPush();
+        } else {
+          await unsubscribeFromPush();
+        }
+      } catch (e) {
+        console.warn('alerts toggle: background setup failed', e);
+      }
     });
 
     // Re-subscribe on load if alerts were already on: a push subscription can

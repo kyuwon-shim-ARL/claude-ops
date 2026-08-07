@@ -149,3 +149,49 @@ def test_a_push_failure_does_not_break_the_poll(client):
     with patch.object(server, "pinned_session_names", return_value={"claude_a"}), \
          patch.object(push_mod, "notify", side_effect=RuntimeError("boom")):
         server._push_completions([_completion("claude_a")])   # must not raise
+
+
+# --- the alerts toggle must not depend on push succeeding ---------------------
+#
+# Reported (2026-08-07): switching alerts on left the button showing OFF. iOS
+# exposes window.Notification only inside an installed Home Screen PWA, so in a
+# Safari tab the unguarded reference in subscribeToPush threw, and the click
+# handler never reached the lines that store and repaint the state. The switch
+# records what the user chose; subscribing is a consequence of it, not a
+# precondition.
+
+from pathlib import Path
+
+INDEX = Path(__file__).resolve().parents[1] / "src" / "ctb_dashboard" / "templates" / "index.html"
+
+
+def _toggle_handler() -> str:
+    s = INDEX.read_text()
+    start = s.index("btnNotif.addEventListener('click'")
+    return s[start:s.index("\n    });", start)]
+
+
+def test_the_toggle_is_recorded_before_any_awaiting():
+    handler = _toggle_handler()
+    persist = handler.index("localStorage.setItem(NOTIF_KEY")
+    assert "await" not in handler[:persist], (
+        "an await before persisting lets a failure leave the button lying"
+    )
+    assert handler.index("updateNotifBtn()") < handler.index("subscribeToPush"), (
+        "repaint before subscribing, not after"
+    )
+
+
+def test_subscription_failures_cannot_escape_the_toggle():
+    assert "catch" in _toggle_handler()
+
+
+def test_notification_is_never_touched_unguarded():
+    """Every read of it must be behind an existence check."""
+    s = INDEX.read_text()
+    body = s[s.index("async function subscribeToPush"):]
+    body = body[:body.index("async function unsubscribeFromPush")]
+    guard = body.index("'Notification' in window")
+    assert guard < body.index("Notification.permission"), (
+        "Notification.permission is read before checking the API exists"
+    )
