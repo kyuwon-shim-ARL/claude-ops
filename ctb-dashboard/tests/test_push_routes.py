@@ -231,3 +231,16 @@ def test_a_refused_subscription_is_audited_too(client):
                     json={"endpoint": "http://x/y"}, headers=_auth())
     assert any(c.args[0] == "push_subscribe" and c.args[3] is False
                for c in audit.call_args_list)
+
+
+def test_each_cause_has_a_label_visible_without_tapping():
+    """"ON (화면만)" alone still left both sides guessing which of four causes
+    it was; the switch has to name the one it hit."""
+    s = INDEX.read_text()
+    body = s[s.index("function pushBlockReason"):]
+    body = body[:body.index("\n    }\n")]
+    for short in ("HTTPS 필요", "홈화면 필요", "권한 거부", "미지원"):
+        assert short in body, f"no short label for {short}"
+    btn = s[s.index("function updateNotifBtn"):]
+    btn = btn[:btn.index("\n    }")]
+    assert "blocked.short" in btn, "the label must reach the button"
