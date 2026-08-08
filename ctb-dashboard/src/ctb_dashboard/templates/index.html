@@ -549,6 +549,7 @@
     // Declared before updateNotifBtn runs at load: the switch reads it.
     let pushSubscribed = false;
     let pushLastError = '';
+    let pushBusy = false;
 
     // Why this browser cannot receive a push, in words the user can act on.
     // Returns null when it can. Alerts that only fire while the page is open
@@ -611,6 +612,11 @@
       }
       // ON alone used to mean both "push is armed" and "this page only",
       // which is exactly the confusion that made a silent phone look fine.
+      if (!pushSubscribed && pushBusy) {
+        btnNotif.textContent = 'ON (등록 중…)';
+        btnNotif.title = '푸시 등록을 시도하는 중입니다.';
+        return;
+      }
       const blocked = pushSubscribed ? null : pushBlockReason();
       btnNotif.textContent = pushSubscribed ? 'ON'
         : 'ON (' + (blocked ? blocked.short : '화면만') + ')';
@@ -642,20 +648,32 @@
       if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
       if (Notification.permission !== 'granted') return false;
       pushLastError = '';
+      pushBusy = true;
+      updateNotifBtn();
+      // Every step here can hang rather than fail -- a service worker that
+      // never activates, a subscribe() the platform never settles -- and a
+      // pending promise is indistinguishable from a silent failure from the
+      // outside. Each step gets a deadline and says which one ran out, so the
+      // phone can report where it stopped instead of just staying quiet.
+      const step = (label, promise, ms) => Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(
+          () => reject(new Error(label + ' 단계에서 응답 없음 (' + (ms / 1000) + '초 초과)')), ms)),
+      ]);
       try {
-        const reg = await navigator.serviceWorker.ready;
-        let sub = await reg.pushManager.getSubscription();
+        const reg = await step('서비스워커 준비', navigator.serviceWorker.ready, 10000);
+        let sub = await step('기존 구독 조회', reg.pushManager.getSubscription(), 10000);
         if (!sub) {
           const key = (await (await fetch('/api/push/public-key')).json()).key;
-          sub = await reg.pushManager.subscribe({
+          sub = await step('푸시 구독 생성', reg.pushManager.subscribe({
             userVisibleOnly: true,
             applicationServerKey: urlBase64ToUint8Array(key),
-          });
+          }), 20000);
         }
-        const res = await ctbControl.send('/api/push/subscribe', {
+        const res = await step('서버 등록', ctbControl.send('/api/push/subscribe', {
           method: 'POST',
           body: JSON.stringify(sub.toJSON()),
-        });
+        }), 15000);
         pushSubscribed = res.ok;
         if (!res.ok) pushLastError = '서버 응답 ' + res.status;
         return res.ok;
@@ -663,6 +681,8 @@
         pushLastError = String((e && (e.message || e.name)) || e);
         console.warn('push subscribe failed', e);
         return false;
+      } finally {
+        pushBusy = false;
       }
     }
 

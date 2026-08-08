@@ -266,3 +266,24 @@ def test_a_registration_failure_reports_what_it_said():
     reason = s[s.index("function pushBlockReason"):]
     reason = reason[:reason.index("\n    }\n")]
     assert "pushLastError" in reason, "and surfaced where the user can read it"
+
+
+def test_a_stalled_registration_is_not_read_as_a_failure():
+    """A pending promise looks identical to a silent failure from outside; the
+    phone showed "(화면만)" for both."""
+    s = INDEX.read_text()
+    btn = s[s.index("function updateNotifBtn"):]
+    btn = btn[:btn.index("\n    }")]
+    assert "pushBusy" in btn and "등록 중" in btn
+
+
+def test_every_registration_step_has_a_deadline_and_a_name():
+    """Without one, a step that never settles leaves the switch stuck forever
+    with nothing to report."""
+    s = INDEX.read_text()
+    sub = s[s.index("async function subscribeToPush"):]
+    sub = sub[:sub.index("\n    }")]
+    assert "Promise.race" in sub, "a step that never settles must still time out"
+    for stage in ("서비스워커 준비", "기존 구독 조회", "푸시 구독 생성", "서버 등록"):
+        assert stage in sub, f"{stage} is unnamed, so a stall there cannot be reported"
+    assert "finally" in sub, "the in-flight flag must clear on every path"
