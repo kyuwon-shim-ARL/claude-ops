@@ -992,6 +992,26 @@ def pinned_session_names() -> set:
     return names
 
 
+@app.get("/sw.js")
+async def service_worker():
+    """The worker must be served from the root.
+
+    A worker's scope defaults to the directory it is served from, so at
+    /static/sw.js it governed /static/ and nothing controlled the app at /.
+    navigator.serviceWorker.ready waits for an active worker in the page's own
+    scope, so it never settled: push registration timed out at its first step
+    and the app-shell caching never took effect either.
+    """
+    path = os.path.join(os.path.dirname(__file__), "static", "sw.js")
+    with open(path) as f:
+        body = f.read()
+    return Response(
+        content=body,
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @app.get("/api/push/public-key")
 async def push_public_key():
     """The applicationServerKey. Public by definition — a browser needs it

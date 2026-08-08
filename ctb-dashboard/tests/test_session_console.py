@@ -407,3 +407,31 @@ def test_dashboard_page_references_both_modules():
     body = client.get("/").text
     assert "/static/js/control-token.js" in body
     assert "/static/js/session-control.js" in body
+
+
+# --- service worker scope ----------------------------------------------------
+#
+# Root cause of every "push never registers" report (2026-08-09): the worker was
+# registered from /static/sw.js, so its scope was /static/ and nothing
+# controlled the app at /. navigator.serviceWorker.ready waits for an active
+# worker in the *page's* scope, so it never settled and registration timed out
+# at the first step. Confirmed in a browser: scope /static/, controller null,
+# ready unresolved after 10s. The app-shell caching never worked either.
+
+def test_the_worker_is_served_from_the_root():
+    """Scope comes from the script's directory; only a root path governs /."""
+    client = TestClient(app)
+    r = client.get("/sw.js")
+    assert r.status_code == 200
+    assert "addEventListener('push'" in r.text
+
+
+def test_the_page_registers_the_root_worker(index_html):
+    assert "register('/sw.js'" in index_html
+    assert "register('/static/sw.js')" not in index_html
+
+
+def test_a_worker_left_at_the_old_scope_is_cleaned_up(index_html):
+    """Phones carry the /static/ registration; it controls nothing and made
+    getRegistrations() look healthy while push could not work."""
+    assert "unregister" in index_html

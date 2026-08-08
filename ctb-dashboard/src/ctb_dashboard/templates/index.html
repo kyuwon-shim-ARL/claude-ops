@@ -2225,7 +2225,16 @@
 
     // Register service worker for PWA
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+      // Registered from the root: a worker's scope is the directory it is
+      // served from, and only a root scope controls this page. Phones still
+      // carry the old /static/ registration, which controls nothing but made
+      // getRegistrations() look healthy while push could not work at all.
+      navigator.serviceWorker.getRegistrations().then((regs) => {
+        for (const reg of regs) {
+          if (new URL(reg.scope).pathname !== '/') reg.unregister().catch(() => {});
+        }
+      }).catch(() => {});
+      navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
     }
 
   </script>
