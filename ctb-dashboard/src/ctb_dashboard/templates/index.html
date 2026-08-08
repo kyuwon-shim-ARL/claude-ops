@@ -548,6 +548,7 @@
     const btnNotif = document.getElementById('btn-notif');
     // Declared before updateNotifBtn runs at load: the switch reads it.
     let pushSubscribed = false;
+    let pushLastError = '';
 
     // Why this browser cannot receive a push, in words the user can act on.
     // Returns null when it can. Alerts that only fire while the page is open
@@ -585,6 +586,19 @@
           short: '권한 거부',
           message: '알림 권한이 거부되어 있습니다. 기기 설정에서 이 앱의 알림을 허용해 주세요.',
         };
+      }
+      if (Notification.permission !== 'granted') {
+        return {
+          short: '권한 필요',
+          message: '알림 권한이 아직 허용되지 않았습니다.\n\n'
+            + '스위치를 껐다가 다시 켜면 권한 요청이 뜹니다. "허용"을 눌러 주세요.',
+        };
+      }
+      // Everything a browser needs is present, so anything left is a failure
+      // during registration. Report what it actually said: this runs on a
+      // phone, where a console warning is invisible.
+      if (pushLastError) {
+        return { short: '등록 실패', message: '푸시 등록에 실패했습니다.\n\n' + pushLastError };
       }
       return null;
     }
@@ -627,6 +641,7 @@
       if (!('Notification' in window)) return false;
       if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
       if (Notification.permission !== 'granted') return false;
+      pushLastError = '';
       try {
         const reg = await navigator.serviceWorker.ready;
         let sub = await reg.pushManager.getSubscription();
@@ -642,8 +657,10 @@
           body: JSON.stringify(sub.toJSON()),
         });
         pushSubscribed = res.ok;
+        if (!res.ok) pushLastError = '서버 응답 ' + res.status;
         return res.ok;
       } catch (e) {
+        pushLastError = String((e && (e.message || e.name)) || e);
         console.warn('push subscribe failed', e);
         return false;
       }

@@ -244,3 +244,25 @@ def test_each_cause_has_a_label_visible_without_tapping():
     btn = s[s.index("function updateNotifBtn"):]
     btn = btn[:btn.index("\n    }")]
     assert "blocked.short" in btn, "the label must reach the button"
+
+
+def test_a_pending_permission_is_not_left_unexplained():
+    """'default' blocks a subscription exactly as 'denied' does. Naming only
+    'denied' sent an unanswered prompt to the meaningless "(화면만)"."""
+    s = INDEX.read_text()
+    body = s[s.index("function pushBlockReason"):]
+    body = body[:body.index("\n    }\n")]
+    assert "권한 필요" in body
+    assert "!== 'granted'" in body
+
+
+def test_a_registration_failure_reports_what_it_said():
+    """This runs on a phone; a console warning is invisible there."""
+    s = INDEX.read_text()
+    assert "pushLastError" in s
+    sub = s[s.index("async function subscribeToPush"):]
+    sub = sub[:sub.index("\n    }")]
+    assert "pushLastError =" in sub, "the failure must be recorded, not only logged"
+    reason = s[s.index("function pushBlockReason"):]
+    reason = reason[:reason.index("\n    }\n")]
+    assert "pushLastError" in reason, "and surfaced where the user can read it"
