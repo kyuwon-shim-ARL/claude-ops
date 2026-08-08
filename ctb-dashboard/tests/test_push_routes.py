@@ -287,3 +287,28 @@ def test_every_registration_step_has_a_deadline_and_a_name():
     for stage in ("서비스워커 준비", "기존 구독 조회", "푸시 구독 생성", "서버 등록"):
         assert stage in sub, f"{stage} is unnamed, so a stall there cannot be reported"
     assert "finally" in sub, "the in-flight flag must clear on every path"
+
+
+# --- the phone reports why registration failed --------------------------------
+#
+# Four rounds of asking the user to read a label back. The browser already knows
+# which step timed out; it should say so where it can be read directly.
+
+def test_a_registration_failure_can_be_reported(client):
+    with patch.object(server, "_audit") as audit:
+        r = client.post("/api/push/report",
+                        json={"stage": "서비스워커 준비", "error": "응답 없음"},
+                        headers=_auth())
+    assert r.status_code == 200
+    assert any(c.args[0] == "push_report" for c in audit.call_args_list)
+
+
+def test_reporting_requires_the_control_token(client):
+    assert client.post("/api/push/report", json={"stage": "x"}).status_code == 403
+
+
+def test_the_client_reports_what_it_caught():
+    s = INDEX.read_text()
+    sub = s[s.index("async function subscribeToPush"):]
+    sub = sub[:sub.index("\n    }")]
+    assert "/api/push/report" in sub, "the failure must be sent, not only shown"

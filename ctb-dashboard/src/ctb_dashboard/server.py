@@ -1023,6 +1023,22 @@ async def push_subscribe(sub: dict, request: Request):
     return {"status": "subscribed"}
 
 
+@app.post("/api/push/report", dependencies=[Depends(require_control_token)])
+async def push_report(body: dict, request: Request):
+    """Where a phone's push registration stopped.
+
+    Registration fails inside the browser, before anything reaches this server,
+    so without this the only channel is asking the user to read a label back —
+    which took four rounds and still did not name the step.
+    """
+    client = request.client.host if request.client else None
+    stage = str((body or {}).get("stage", ""))[:80]
+    error = str((body or {}).get("error", ""))[:300]
+    _audit("push_report", stage or "-", client, False, error or "unknown")
+    logger.warning("Push registration failed on a client: stage=%r error=%r", stage, error)
+    return {"status": "recorded"}
+
+
 @app.post("/api/push/unsubscribe", dependencies=[Depends(require_control_token)])
 async def push_unsubscribe(body: dict):
     endpoint = (body or {}).get("endpoint")

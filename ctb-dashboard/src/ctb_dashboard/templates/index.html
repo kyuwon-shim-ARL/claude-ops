@@ -680,6 +680,14 @@
       } catch (e) {
         pushLastError = String((e && (e.message || e.name)) || e);
         console.warn('push subscribe failed', e);
+        // Send it: this fails inside the browser, so the server never sees it
+        // otherwise, and reading a label off a phone screen has not worked.
+        try {
+          await ctbControl.send('/api/push/report', {
+            method: 'POST',
+            body: JSON.stringify({ stage: 'subscribe', error: pushLastError }),
+          });
+        } catch (_) {}
         return false;
       } finally {
         pushBusy = false;
