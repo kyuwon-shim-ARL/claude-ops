@@ -55,10 +55,9 @@ import sys as _sys
 _PSTATUS_DIR = "/home/kyuwon/projects/project-status"
 if _PSTATUS_DIR not in _sys.path:
     _sys.path.insert(0, _PSTATUS_DIR)
-import projects_router as _pstatus_module  # noqa: E402
-_pstatus_scan_loop = _pstatus_module.scan_loop
-projects_router = _pstatus_module.router
-pstatus_static_app = _pstatus_module.pstatus_static_app
+# Only scanner is needed now: the PI review gate reads plans and reports from
+# the projects tree. The Projects tab that used to mount this package's router,
+# static files and scan loop is gone.
 from scanner import PROJECTS_ROOT as _SCANNER_PROJECTS_ROOT  # noqa: E402
 from scanner import find_rpt_artifact as _find_rpt_artifact  # noqa: E402
 
@@ -647,14 +646,12 @@ async def lifespan(app: FastAPI):
     app.state.startup_ready.set()
 
     task = asyncio.create_task(_background_poller())
-    pstatus_task = asyncio.create_task(_pstatus_scan_loop())
     purge_task = asyncio.create_task(_purge_consumed_loop())
     app.state.purge_consumed_task = purge_task
     yield
     task.cancel()
-    pstatus_task.cancel()
     purge_task.cancel()
-    for t in (task, pstatus_task, purge_task):
+    for t in (task, purge_task):
         try:
             await t
         except asyncio.CancelledError:
@@ -686,8 +683,6 @@ _templates_dir = os.path.join(os.path.dirname(__file__), "templates")
 templates = Jinja2Templates(directory=_templates_dir)
 
 # Project-status integration (Phase C)
-app.mount("/pstatus-static", pstatus_static_app, name="pstatus-static")
-app.include_router(projects_router, prefix="/projects")
 
 
 @app.get("/dev/cards")
