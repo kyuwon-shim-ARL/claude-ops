@@ -41,11 +41,17 @@ def test_idle_claude_session_can_send():
     assert (can, reason) == (True, "ready")
 
 
-def test_working_is_refused():
-    can, reason, msg = classify_readiness(SessionState.WORKING, CLAUDE_SCREEN, "claude")
-    assert can is False
-    assert reason == "working"
-    assert msg
+def test_working_is_allowed_because_claude_queues_it():
+    """A prompt sent mid-task is queued and run in turn, not lost.
+
+    Verified against a live session: a second prompt sent eight seconds into a
+    25-second task was submitted immediately and answered after the first one
+    finished, in order. Refusing it blocked the way this is actually used --
+    chaining follow-ups while the model works -- to guard against a loss that
+    does not happen.
+    """
+    can, reason, _ = classify_readiness(SessionState.WORKING, CLAUDE_SCREEN, "claude")
+    assert (can, reason) == (True, "ready")
 
 
 def test_awaiting_choice_is_refused_and_points_at_key_sending():
@@ -113,11 +119,11 @@ def test_claude_running_is_assumed_false_when_not_supplied():
     assert (can, reason) == (False, "shell")
 
 
-def test_a_busy_session_is_still_refused_even_with_claude_running():
+def test_a_session_awaiting_a_choice_is_still_refused_with_claude_running():
     """The process check answers 'is this a shell', not 'is this a good time'."""
     can, reason, _ = classify_readiness(
-        SessionState.WORKING, CLAUDE_SCREEN, "bash", claude_running=True)
-    assert (can, reason) == (False, "working")
+        SessionState.WAITING_INPUT, CLAUDE_SCREEN, "bash", claude_running=True)
+    assert (can, reason) == (False, "awaiting_choice")
 
 
 def test_real_claude_screen_is_not_mistaken_for_a_shell():
@@ -194,23 +200,35 @@ def wire(monkeypatch):
 
 
 def test_refuses_with_409_and_reports_state(wire):
-    client = wire(SessionState.WORKING, [CLAUDE_SCREEN])
+    client = wire(SessionState.WAITING_INPUT, [CLAUDE_SCREEN])
     r = client.post("/api/sessions/claude_demo/prompt",
                     json={"text": "hi"}, headers=AUTH)
     assert r.status_code == 409
     body = r.json()
     assert body["status"] == "refused"
-    assert body["reason"] == "working"
-    assert body["state"] == "working"
+    assert body["reason"] == "awaiting_choice"
+    assert body["state"] == "waiting"
     assert body["message"]
 
 
 def test_refusal_happens_before_anything_is_sent(wire, monkeypatch):
     sent = []
     monkeypatch.setattr(_srv, "send_prompt", lambda n, t: sent.append(t))
-    client = wire(SessionState.WORKING, [CLAUDE_SCREEN])
+    client = wire(SessionState.WAITING_INPUT, [CLAUDE_SCREEN])
     client.post("/api/sessions/claude_demo/prompt", json={"text": "hi"}, headers=AUTH)
     assert sent == []
+
+
+def test_a_prompt_sent_while_working_reaches_the_session(wire, monkeypatch):
+    """The point of allowing it: it must actually be delivered, not just not
+    refused."""
+    sent = []
+    monkeypatch.setattr(_srv, "send_prompt", lambda n, t: sent.append(t))
+    client = wire(SessionState.WORKING, [CLAUDE_SCREEN, "changed"])
+    r = client.post("/api/sessions/claude_demo/prompt",
+                    json={"text": "follow-up"}, headers=AUTH)
+    assert r.status_code == 200
+    assert sent == ["follow-up"]
 
 
 def test_confirmed_true_when_screen_changes(wire):

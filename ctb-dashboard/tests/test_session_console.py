@@ -162,7 +162,7 @@ def test_refusal_and_block_paths_are_handled(console_js):
 
 @pytest.mark.parametrize("key", [
     "'y'", "'n'", "'Enter'", "'Escape'", "'Tab'", "'Up'", "'Down'",
-    "'1'", "'2'", "'3'", "'4'", "'5'",
+    "'1'", "'2'", "'3'", "'4'", "'5'", "'Left'", "'Right'",
 ])
 def test_approval_keys_are_offered(console_js, key):
     assert key in console_js

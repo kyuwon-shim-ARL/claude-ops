@@ -25,11 +25,15 @@ SHELL_COMMANDS = frozenset({
 })
 
 # Refusals that are about *when*, with the reason surfaced to the caller.
+#
+# WORKING is deliberately absent. Claude Code queues a prompt typed while it is
+# busy and runs it in turn -- checked against a live session: a second prompt
+# sent eight seconds into a 25-second task was submitted immediately and
+# answered after the first, in order. Refusing it blocked the way this is
+# actually used, chaining follow-ups while the model works, to guard against a
+# loss that does not happen. WAITING_INPUT stays refused: there, free text
+# would be read as an answer to a choice.
 _REFUSALS = {
-    SessionState.WORKING: (
-        "working",
-        "세션이 작업 중입니다. 완료를 기다리거나 먼저 중단(interrupt)하세요.",
-    ),
     SessionState.WAITING_INPUT: (
         "awaiting_choice",
         "세션이 선택/승인을 기다리고 있습니다. 텍스트 대신 키 전송을 쓰세요.",

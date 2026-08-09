@@ -125,6 +125,7 @@
       ['↵', 'Enter', 'Enter'], ['esc', 'Escape', 'Escape'],
       ['⇥', 'Tab', 'Tab'],
       ['↑', 'Up', '위'], ['↓', 'Down', '아래'],
+      ['←', 'Left', '왼쪽'], ['→', 'Right', '오른쪽'],
     ].forEach(function (spec) {
       var b = document.createElement('button');
       b.type = 'button';
