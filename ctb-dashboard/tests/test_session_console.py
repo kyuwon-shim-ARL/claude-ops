@@ -160,9 +160,23 @@ def test_refusal_and_block_paths_are_handled(console_js):
 
 # --- approval-prompt keys (T7 UI) ------------------------------------------
 
-@pytest.mark.parametrize("key", ["'y'", "'n'", "'Enter'", "'Escape'", "'Up'", "'Down'"])
+@pytest.mark.parametrize("key", [
+    "'y'", "'n'", "'Enter'", "'Escape'", "'Tab'", "'Up'", "'Down'",
+    "'1'", "'2'", "'3'", "'4'", "'5'",
+])
 def test_approval_keys_are_offered(console_js, key):
     assert key in console_js
+
+
+def test_every_offered_key_is_one_the_server_accepts(console_js):
+    """A button the server rejects is a dead control on a phone."""
+    from ctb_dashboard.session_input import ALLOWED_KEYS
+    row = console_js[console_js.index("['y', 'y'"):]
+    row = row[:row.index("].forEach")]
+    offered = re.findall(r"\['[^']*', '([^']+)'", row)
+    assert offered, "could not read the key row"
+    unknown = sorted(set(offered) - set(ALLOWED_KEYS))
+    assert not unknown, f"buttons the server would refuse: {unknown}"
 
 
 def test_copy_button_works_without_a_secure_context(console_js):

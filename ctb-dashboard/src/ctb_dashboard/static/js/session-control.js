@@ -120,8 +120,10 @@
       'display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;flex-shrink:0;';
     [
       ['y', 'y', '예'], ['n', 'n', '아니오'],
-      ['1', '1', '1번'], ['2', '2', '2번'],
+      ['1', '1', '1번'], ['2', '2', '2번'], ['3', '3', '3번'],
+      ['4', '4', '4번'], ['5', '5', '5번'],
       ['↵', 'Enter', 'Enter'], ['esc', 'Escape', 'Escape'],
+      ['⇥', 'Tab', 'Tab'],
       ['↑', 'Up', '위'], ['↓', 'Down', '아래'],
     ].forEach(function (spec) {
       var b = document.createElement('button');
