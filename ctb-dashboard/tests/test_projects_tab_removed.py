@@ -56,3 +56,29 @@ def test_the_review_gate_still_knows_where_projects_live():
     """It reads plans and reports from disk; losing this root breaks it."""
     assert server._CTB_PROJECTS_ROOT
     assert callable(server._find_rpt_artifact)
+
+
+# --- the tab bar itself ------------------------------------------------------
+#
+# With Projects gone, the bar held one link pointing at the page you were
+# already on. A navigation control with nowhere to navigate is just a strip of
+# vertical space, which on a phone is the scarcest thing there is.
+
+def test_the_tab_bar_is_gone():
+    html = INDEX.read_text()
+    assert "<nav" not in html, "a one-item nav is not navigation"
+    assert ">Sessions<" not in html
+
+
+def test_the_app_header_survives():
+    """The title, session count, connection dot and alerts switch live there."""
+    html = INDEX.read_text()
+    assert 'id="app-header"' in html
+    for control in ('id="badge-count"', 'id="conn-status"', 'id="btn-notif"'):
+        assert control in html
+
+
+def test_the_page_still_renders():
+    r = TestClient(app).get("/")
+    assert r.status_code == 200
+    assert 'id="grid"' in r.text
