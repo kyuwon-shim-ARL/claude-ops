@@ -334,3 +334,64 @@ def test_a_403_says_it_is_the_token():
     sub = s[s.index("async function subscribeToPush"):]
     sub = sub[:sub.index("\n    }")]
     assert "403" in sub and "토큰" in sub
+
+
+# --- what finished, not just that something did -------------------------------
+#
+# "wte 세션이 작업을 마쳤습니다" told you which session and nothing else, which
+# with fifteen pinned sessions is barely a signal. Everything needed is already
+# computed for the card: the prompt, the reply, progress, pending work.
+
+def _body(**over):
+    entry = {"name": "claude_wte", "state": "idle", "completed_at": 1.0,
+             "last_prompt": "", "last_reply": "", "work_context": "",
+             "progress": None, "pending_count": None, "context_percent": None}
+    entry.update(over)
+    return server._completion_body(entry)
+
+
+def test_the_reply_is_what_it_leads_with():
+    body = _body(last_reply="전부 완료했습니다. gates PASS, JSON 무결성 OK.")
+    assert "gates PASS" in body
+
+
+def test_the_prompt_says_which_job_this_was():
+    body = _body(last_prompt="테스트 다 돌리고 배포해줘", last_reply="배포 완료")
+    assert "테스트 다 돌리고 배포해줘" in body
+    assert body.index("테스트 다 돌리고") < body.index("배포 완료"), "ask first, outcome second"
+
+
+def test_a_tool_call_is_not_an_outcome():
+    """last_reply is sometimes the tail of a tool invocation, which says nothing
+    about what was accomplished."""
+    body = _body(last_prompt="로그 확인해줘", last_reply="Bash(cd /tmp/x && tail -n 50 out.log)")
+    assert "Bash(" not in body
+    assert "로그 확인해줘" in body
+
+
+def test_progress_and_pending_work_are_carried():
+    body = _body(last_reply="1단계 끝", progress=[2, 5], pending_count=3)
+    assert "2/5" in body
+    assert "3" in body
+
+
+def test_context_is_mentioned_only_when_it_is_nearly_full():
+    assert "ctx" not in _body(last_reply="끝", context_percent=40).lower()
+    assert "88" in _body(last_reply="끝", context_percent=88)
+
+
+def test_a_session_with_nothing_to_say_still_gets_a_body():
+    assert _body().strip()
+
+
+def test_the_body_stays_short_enough_for_a_lock_screen():
+    body = _body(last_prompt="가" * 400, last_reply="나" * 400)
+    assert len(body) < 320, "a lock screen shows a few lines, not an essay"
+
+
+def test_the_completion_push_uses_it():
+    with patch.object(server, "pinned_session_names", return_value={"claude_a"}), \
+         patch.object(push_mod, "notify", return_value=1) as notify:
+        server._push_completions([{"name": "claude_a", "state": "idle",
+                                   "completed_at": 1.0, "last_reply": "빌드 성공"}])
+    assert "빌드 성공" in notify.call_args.args[1]

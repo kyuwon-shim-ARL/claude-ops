@@ -349,6 +349,50 @@ def _probe_session(name: str) -> tuple:
             pending_count, working_since, progress, last_reply)
 
 
+# A completion notification arrives on a lock screen, where the reader has a
+# couple of lines and no context. "wte 세션이 작업을 마쳤습니다" tells them which
+# of fifteen pinned sessions rang and nothing about what happened. Everything
+# worth saying is already computed for the card.
+_TOOL_CALL_RE = re.compile(
+    r"^(Bash|Read|Edit|Write|Grep|Glob|Task|WebFetch|WebSearch|TodoWrite|"
+    r"NotebookEdit|MultiEdit)\s*\(")
+
+
+def _one_line(text: str, limit: int) -> str:
+    flat = " ".join((text or "").split())
+    return flat if len(flat) <= limit else flat[:limit - 1].rstrip() + "…"
+
+
+def _completion_body(entry: Dict[str, Any]) -> str:
+    """The ask, the outcome, and how much is left -- in a few lines."""
+    lines = []
+
+    prompt = _one_line(entry.get("last_prompt") or "", 70)
+    if prompt:
+        lines.append(f"❯ {prompt}")
+
+    reply = _one_line(entry.get("last_reply") or "", 110)
+    # A tool invocation is not an outcome; it is what the outcome was made of.
+    if reply and not _TOOL_CALL_RE.match(reply):
+        lines.append(f"● {reply}")
+
+    extras = []
+    progress = entry.get("progress")
+    if isinstance(progress, (list, tuple)) and len(progress) == 2:
+        extras.append(f"{progress[0]}/{progress[1]} 단계")
+    pending = entry.get("pending_count")
+    if pending:
+        extras.append(f"할 일 {pending}개")
+    context = entry.get("context_percent")
+    # Only when it is close enough to matter for what to do next.
+    if isinstance(context, int) and context >= 80:
+        extras.append(f"ctx {context}%")
+    if extras:
+        lines.append(" · ".join(extras))
+
+    return "\n".join(lines) or "작업을 마쳤습니다"
+
+
 # Which completion we have already pushed for, per session. Keyed by the
 # completion timestamp so the next completion of the same session pushes again.
 _pushed_completions: Dict[str, float] = {}
@@ -378,7 +422,8 @@ def _push_completions(session_list: list) -> None:
             # Logged either way: this path has failed silently in several
             # different ways, and "did a push go out" should not need a phone
             # to answer.
-            delivered = push.notify(name, f"{short} 세션이 작업을 마쳤습니다")
+            delivered = push.notify(name, _completion_body(entry),
+                                    title=f"✅ {short}")
             logger.info("Completion push for %s: delivered to %d subscriber(s)",
                         name, delivered)
     except Exception as e:
