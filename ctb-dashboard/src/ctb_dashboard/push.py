@@ -35,8 +35,25 @@ _STATE_DIR = Path.home() / ".claude-ops"
 _KEY_PATH = _STATE_DIR / "vapid.json"
 _SUBS_PATH = _STATE_DIR / "subscriptions.json"
 
-# Apple requires a contactable subject on the VAPID claim.
-_SUBJECT = os.environ.get("CTB_PUSH_SUBJECT", "mailto:admin@localhost")
+# Apple requires a contactable subject on the VAPID claim, and enforces it: a
+# sub that is not routable comes back as a flat 403 BadJwtToken. The old default
+# of mailto:admin@localhost satisfied nothing and failed exactly that way --
+# subscriptions registered, the phone showed no error, and not one push
+# arrived. So an unusable subject is refused here rather than at Apple.
+_SUBJECT = os.environ.get("CTB_PUSH_SUBJECT", "")
+
+
+def _subject_is_usable(subject: str) -> bool:
+    """A VAPID sub must be a mailto: or https: URI someone could answer."""
+    if not subject:
+        return False
+    if subject.startswith("mailto:"):
+        address = subject[len("mailto:"):]
+        host = address.rpartition("@")[2]
+        return "@" in address and "." in host and not host.endswith(".localhost")
+    if subject.startswith("https://"):
+        return len(subject) > len("https://")
+    return False
 # Where a tapped notification should land. Without an absolute origin the
 # service worker cannot focus the right client.
 _BASE_URL = os.environ.get("CTB_DASHBOARD_URL", "").rstrip("/")
@@ -164,6 +181,13 @@ def notify(session: str, body: str, title: str = "Claude 작업 완료") -> int:
     with _lock:
         subs = list(_load_subs())
     if not subs:
+        return 0
+    if not _subject_is_usable(_SUBJECT):
+        logger.error(
+            "CTB_PUSH_SUBJECT is %r, which Apple will refuse (BadJwtToken). "
+            "Set it to a mailto: or https: contact you control; no push sent.",
+            _SUBJECT,
+        )
         return 0
 
     url = f"{_BASE_URL}/?session={session}" if _BASE_URL else f"/?session={session}"
