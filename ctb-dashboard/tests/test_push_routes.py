@@ -395,3 +395,18 @@ def test_the_completion_push_uses_it():
         server._push_completions([{"name": "claude_a", "state": "idle",
                                    "completed_at": 1.0, "last_reply": "빌드 성공"}])
     assert "빌드 성공" in notify.call_args.args[1]
+
+
+def test_the_vscode_webview_says_why_it_cannot_arm_push():
+    """Its port proxy forwards only GET, so subscribe and even the failure
+    report never leave the webview — the audit log has no write from it at all.
+    'ON (등록 실패)' was the result, which explains nothing and suggests a fault
+    that could be fixed. The page can detect this context exactly:
+    acquireVsCodeApi exists only inside a webview."""
+    s = INDEX.read_text()
+    body = s[s.index("function pushBlockReason"):]
+    body = body[:body.index("\n    }\n")]
+    # Detected by the API's presence rather than the _vscodeApi const, which is
+    # declared further down the file than this runs.
+    assert "acquireVsCodeApi" in body
+    assert "VSCode" in body

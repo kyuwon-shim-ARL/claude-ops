@@ -581,6 +581,19 @@
     // `short` goes on the switch so the reason is visible without tapping —
     // "ON (화면만)" alone still left us guessing which of four causes it was.
     function pushBlockReason() {
+      // The VSCode webview reaches the dashboard through a port proxy that
+      // forwards only GET, so the subscribe POST -- and the report that would
+      // have explained the failure -- never leave the webview. The audit log
+      // has no write from it at all. Detected by the API rather than the
+      // _vscodeApi const, which is declared further down than this runs.
+      if (typeof acquireVsCodeApi === 'function') {
+        return {
+          short: 'VSCode 불가',
+          message: 'VSCode 웹뷰는 서버로 변경 요청을 보내지 못해 푸시를 등록할 수 없습니다.\n\n'
+            + '백그라운드 알림은 아이폰 홈 화면 앱이나 일반 브라우저에서 받으세요. '
+            + '여기서는 이 화면이 열려 있는 동안만 알림이 울립니다.',
+        };
+      }
       if (!window.isSecureContext || !('serviceWorker' in navigator)) {
         return {
           short: 'HTTPS 필요',
