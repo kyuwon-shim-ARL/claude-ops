@@ -375,7 +375,12 @@ def _push_completions(session_list: list) -> None:
                 continue
             _pushed_completions[name] = completed_at
             short = name.replace("claude_", "", 1)
-            push.notify(name, f"{short} 세션이 작업을 마쳤습니다")
+            # Logged either way: this path has failed silently in several
+            # different ways, and "did a push go out" should not need a phone
+            # to answer.
+            delivered = push.notify(name, f"{short} 세션이 작업을 마쳤습니다")
+            logger.info("Completion push for %s: delivered to %d subscriber(s)",
+                        name, delivered)
     except Exception as e:
         logger.warning("Completion push failed: %s", e)
 
