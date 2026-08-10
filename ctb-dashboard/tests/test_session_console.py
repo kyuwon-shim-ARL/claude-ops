@@ -449,3 +449,22 @@ def test_a_worker_left_at_the_old_scope_is_cleaned_up(index_html):
     """Phones carry the /static/ registration; it controls nothing and made
     getRegistrations() look healthy while push could not work."""
     assert "unregister" in index_html
+
+
+# --- pins are shared state, and were read once ------------------------------
+#
+# Pins set in one client did not appear in another: /api/pinned was fetched only
+# at connect. Worse, the stale cache is what a later pin action posts back, so
+# an old tab could overwrite pins made elsewhere.
+
+def test_pins_are_refreshed_after_the_initial_load(index_html):
+    assert "refreshPinned" in index_html
+    fetches = index_html.count("'/api/pinned'")
+    assert fetches >= 2, "pins must be re-read, not only fetched at connect"
+
+
+def test_a_pin_change_starts_from_server_state(index_html):
+    """Otherwise a client holding an old cache posts it back and wipes the rest."""
+    fn = index_html[index_html.index("function togglePin"):]
+    fn = fn[:fn.index("\n    }")]
+    assert "refreshPinned" in fn or "await" in fn

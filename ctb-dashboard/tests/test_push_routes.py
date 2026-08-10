@@ -309,6 +309,28 @@ def test_reporting_requires_the_control_token(client):
 
 def test_the_client_reports_what_it_caught():
     s = INDEX.read_text()
+    helper = s[s.index("function reportPushFailure"):]
+    helper = helper[:helper.index("\n    }")]
+    assert "/api/push/report" in helper, "the failure must be sent, not only shown"
+    sub = s[s.index("async function subscribeToPush"):]
+    sub = sub[:sub.index("\n    }\n")]
+    assert "reportPushFailure" in sub
+
+
+def test_a_rejected_subscribe_is_reported_too():
+    """VSCode showed ON (등록 실패) and the server received no report at all:
+    the report was only sent from the catch, so a non-ok response set the error
+    and told nobody."""
+    s = INDEX.read_text()
     sub = s[s.index("async function subscribeToPush"):]
     sub = sub[:sub.index("\n    }")]
-    assert "/api/push/report" in sub, "the failure must be sent, not only shown"
+    ok_branch = sub[sub.index("if (!res.ok)"):sub.index("} catch")]
+    assert "reportPushFailure" in ok_branch, "a refused subscribe must be reported"
+
+
+def test_a_403_says_it_is_the_token():
+    """'서버 응답 403' names a number; the reader needs the cause."""
+    s = INDEX.read_text()
+    sub = s[s.index("async function subscribeToPush"):]
+    sub = sub[:sub.index("\n    }")]
+    assert "403" in sub and "토큰" in sub

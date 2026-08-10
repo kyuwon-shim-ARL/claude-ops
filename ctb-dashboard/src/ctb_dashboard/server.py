@@ -1094,7 +1094,7 @@ async def health(request: Request):
 
 
 @app.post("/api/focus-session", dependencies=[Depends(require_control_token)])
-async def focus_session(req: FocusRequest):
+async def focus_session(req: FocusRequest, request: Request):
     """Switch the host's tmux client to the requested session.
 
     Auth is handled by require_control_token; the old inline check only fired
@@ -1228,6 +1228,12 @@ async def focus_session(req: FocusRequest):
     except Exception as e:
         logger.warning(f"Failed to write focus signal: {e}")
 
+    # Audited at the end, with the outcome: switch-client moves the terminal out
+    # from under whoever is at it, and there was no record of who asked or
+    # whether it landed.
+    _audit("focus_session", req.session,
+           request.client.host if request.client else None, tmux_ok,
+           None if tmux_ok else "no_switch")
     return {"status": "focused", "session": req.session, "tmux_switched": tmux_ok, "window_activated": window_ok, "claude_started": claude_started}
 
 

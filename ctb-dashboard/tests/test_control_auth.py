@@ -27,6 +27,30 @@ MUTATING = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def _no_real_tmux(monkeypatch):
+    """These tests check the gate, not the operation behind it.
+
+    Without this they ran the operation for real: the focus case executed
+    `tmux switch-client` against the live server -- creating a session called
+    some-session, starting Claude in it, and yanking the terminal out from
+    under whoever was working -- and the delete case removed it again. Every
+    suite run did it, which is exactly the session that kept appearing and
+    disappearing.
+    """
+    monkeypatch.setattr(_srv, "session_exists", lambda name: False)
+    monkeypatch.setattr(_srv, "get_all_claude_sessions", lambda: set())
+    monkeypatch.setattr(_srv, "send_prompt", lambda *a, **k: None)
+    monkeypatch.setattr(_srv, "send_key", lambda *a, **k: None)
+    monkeypatch.setattr(_srv, "send_interrupt", lambda *a, **k: None)
+    monkeypatch.setattr(_srv.subprocess, "run", _refuse_subprocess)
+    monkeypatch.setattr(_srv.subprocess, "Popen", _refuse_subprocess)
+
+
+def _refuse_subprocess(*a, **k):
+    raise AssertionError(f"a gate test reached the system: {a[:1]}")
+
+
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setattr(_srv, "_CONTROL_SECRET", _SECRET)

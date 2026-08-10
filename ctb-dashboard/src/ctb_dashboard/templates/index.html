@@ -482,6 +482,28 @@
       return _quadsCache;
     }
 
+    async function refreshPinned() {
+      try {
+        const r = await fetch('/api/pinned');
+        const data = await r.json();
+        if (data && data.Q1 && data.Q2 && data.Q3 && data.Q4) {
+          _quadsCache = data;
+          _pinnedLoaded = true;
+        }
+      } catch (_) { /* keep whatever we had */ }
+    }
+
+    let _pinnedCheckedAt = 0;
+    function maybeRefreshPinned() {
+      const now = Date.now();
+      if (now - _pinnedCheckedAt < 10000) return;
+      _pinnedCheckedAt = now;
+      const before = JSON.stringify(_quadsCache);
+      refreshPinned().then(function () {
+        if (JSON.stringify(_quadsCache) !== before && lastSSEData) render(lastSSEData);
+      });
+    }
+
     function saveQuadrants(q) {
       // Refuse to overwrite server state before initial load completes —
       // otherwise a render() before /api/pinned resolves would POST an empty
@@ -506,7 +528,11 @@
       return null;
     }
 
-    function togglePin(name) {
+    async function togglePin(name) {
+      // Start from what the server holds, not from a cache that may predate
+      // pins made in another client -- posting a stale set back is how pins
+      // set elsewhere disappear.
+      await refreshPinned();
       const q = _cloneQuads(_quadsCache);
       for (const qid of Object.keys(q)) {
         const idx = q[qid].indexOf(name);
@@ -635,6 +661,18 @@
       return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
     }
 
+    // Registration fails inside the browser, so the server never learns why
+    // unless we say so. Best effort: if this send is itself what failed, there
+    // is nothing further to try.
+    function reportPushFailure(stage, error) {
+      try {
+        ctbControl.send('/api/push/report', {
+          method: 'POST',
+          body: JSON.stringify({ stage: stage, error: error }),
+        }).catch(() => {});
+      } catch (_) {}
+    }
+
     async function subscribeToPush() {
       // iOS only exposes Notification inside an installed Home Screen PWA, so
       // in a Safari tab this name is not merely un-permitted, it is undefined.
@@ -670,19 +708,20 @@
           body: JSON.stringify(sub.toJSON()),
         }), 15000);
         pushSubscribed = res.ok;
-        if (!res.ok) pushLastError = '서버 응답 ' + res.status;
+        if (!res.ok) {
+          // A number alone is not a cause. 403 here means this browser has no
+          // valid control token -- which is how VSCode's webview failed, while
+          // reporting nothing because only the catch below reported.
+          pushLastError = res.status === 403
+            ? '컨트롤 토큰이 없거나 잘못되었습니다 (403). 변경 조작을 한 번 해서 토큰을 입력하세요.'
+            : '서버 응답 ' + res.status;
+          reportPushFailure('subscribe-response', pushLastError);
+        }
         return res.ok;
       } catch (e) {
         pushLastError = String((e && (e.message || e.name)) || e);
         console.warn('push subscribe failed', e);
-        // Send it: this fails inside the browser, so the server never sees it
-        // otherwise, and reading a label off a phone screen has not worked.
-        try {
-          await ctbControl.send('/api/push/report', {
-            method: 'POST',
-            body: JSON.stringify({ stage: 'subscribe', error: pushLastError }),
-          });
-        } catch (_) {}
+        reportPushFailure('subscribe', pushLastError);
         return false;
       } finally {
         pushBusy = false;
@@ -1839,6 +1878,11 @@
         try {
           const data = JSON.parse(e.data);
           render(data);
+          // Pins are shared server state, and were read once at connect: a pin
+          // made in another client stayed invisible here until a reload, which
+          // is exactly what the phone showed. Cheap enough to re-read on a
+          // timer rather than make someone refresh.
+          maybeRefreshPinned();
         } catch (err) {
           console.error('Failed to parse SSE data:', err);
         }
