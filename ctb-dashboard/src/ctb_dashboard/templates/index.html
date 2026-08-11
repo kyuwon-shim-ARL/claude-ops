@@ -488,17 +488,24 @@
     // from the same older copy and the second overwrote the first. Everything
     // that touches the set goes through one queue.
     let _pinOps = Promise.resolve();
+    // How many taps are painted but not yet acknowledged. A background read
+    // must not pull the screen back to a state the server has not been told
+    // about yet.
+    let _pinOpsPending = 0;
 
     async function _fetchPins() {
-      // Raw read. Never awaits the queue -- it runs inside it.
+      // Raw read. Never awaits the queue -- it runs inside it. Hands back what
+      // the server holds; whether to show it is the caller's decision.
       try {
         const r = await fetch('/api/pinned');
         const data = await r.json();
         if (data && data.Q1 && data.Q2 && data.Q3 && data.Q4) {
-          _quadsCache = data;
           _pinnedLoaded = true;
+          if (_pinOpsPending === 0) _quadsCache = data;
+          return data;
         }
       } catch (_) { /* keep whatever we had */ }
+      return null;
     }
 
     // VSCode webview: its port proxy forwards only GET, so a POST from inside
@@ -535,25 +542,11 @@
       // Refuse to overwrite server state before initial load completes --
       // otherwise a render() before /api/pinned resolves would POST an empty
       // cache and wipe persisted pins for every client.
-      if (!_pinnedLoaded) return;
-      // Paint immediately so the tap feels instant, but keep what the server
-      // last confirmed: a write that fails (no control token, 403, webview
-      // proxy that forwards only GET, dead network) used to leave the pin
-      // showing until the next background re-read quietly took it away --
-      // ten seconds later, with no message. Pinning one more session ran a
-      // re-read first, so the earlier phantom pin vanished right then, which
-      // is what "adding a pin kicks the old one out" actually was.
-      const confirmed = _quadsCache;
-      _quadsCache = q;
+      if (!_pinnedLoaded) return { ok: false, error: '핀 목록을 아직 읽지 못했습니다' };
       if (_vscodeApi) {
         const res = await _writePinsViaVscode(q);
-        if (!res.ok) {
-          _quadsCache = confirmed;
-          pinWriteFailed('핀 저장 실패 — ' + (res.error || '확장 호스트 오류'));
-          return;
-        }
-        if (res.data && res.data.Q1) _quadsCache = res.data;
-        return;
+        return res.ok ? { ok: true, data: res.data || q }
+                      : { ok: false, error: res.error || '확장 호스트 오류' };
       }
       let r;
       try {
@@ -562,22 +555,18 @@
           body: JSON.stringify(q),
         });
       } catch (e) {
-        _quadsCache = confirmed;
-        pinWriteFailed('네트워크 오류로 핀을 저장하지 못했습니다.');
-        return;
+        return { ok: false, error: '네트워크 오류' };
       }
       if (!r.ok) {
-        _quadsCache = confirmed;
-        pinWriteFailed(r.status === 403
-          ? '제어 토큰이 없거나 거부되어 핀이 저장되지 않았습니다.'
+        return { ok: false, error: r.status === 403
+          ? '제어 토큰이 없거나 거부되었습니다'
           : r.status === 503
-            ? '서버에서 제어 기능이 꺼져 있어 핀이 저장되지 않았습니다.'
-            : `핀 저장 실패 (HTTP ${r.status}).`);
-        return;
+            ? '서버에서 제어 기능이 꺼져 있습니다'
+            : `HTTP ${r.status}` };
       }
       // The response is the authoritative set; take it rather than assume.
       const server = await r.json().catch(() => null);
-      if (server && server.Q1) _quadsCache = server;
+      return { ok: true, data: (server && server.Q1) ? server : q };
     }
 
     // Say it on screen. alert() would block the queue and stack up on every
@@ -630,33 +619,70 @@
       return null;
     }
 
-    function togglePin(name) {
-      // Read and write inside one queued step, so a second click cannot slip
-      // between this read and this write and rebuild from the older copy.
+    function _removeFromQuads(q, name) {
+      let found = false;
+      for (const qid of Object.keys(q)) {
+        const idx = q[qid].indexOf(name);
+        if (idx !== -1) { q[qid].splice(idx, 1); found = true; }
+      }
+      return found;
+    }
+
+    // One pin change: paint it immediately, reconcile behind the tap.
+    //
+    // The wait used to be on screen -- a tap sat there through a read and a
+    // write before anything moved, which over the tailnet from a phone is most
+    // of a second of nothing. Both round trips now happen after the pin has
+    // already flipped.
+    //
+    // `apply` states the intent (pin this / unpin this / move this here)
+    // rather than a finished snapshot, so the queued half can re-apply it to
+    // whatever the server holds by then. A change another client made in
+    // between survives instead of being overwritten.
+    function _pinChange(apply) {
+      const rollback = _quadsCache;
+      _quadsCache = apply(_cloneQuads(_quadsCache));
+      if (lastSSEData) render(lastSSEData);
+      _pinOpsPending++;
       return _queuePins(async () => {
-        await _fetchPins();
-        const q = _cloneQuads(_quadsCache);
-        for (const qid of Object.keys(q)) {
-          const idx = q[qid].indexOf(name);
-          if (idx !== -1) { q[qid].splice(idx, 1); await _writePins(q); return; }
+        try {
+          const server = await _fetchPins();
+          const res = await _writePins(apply(_cloneQuads(server || rollback)));
+          // Only the last outstanding tap touches the screen, and whether this
+          // is the last one can only be answered here, at the end: taps made
+          // while this one was in flight are the whole point. Asking on the
+          // way in made the first of three rapid taps adopt a server set that
+          // knew nothing of the other two, and the pins already drawn blinked
+          // out until the third tap landed.
+          const last = _pinOpsPending === 1;
+          if (!res.ok) {
+            if (last) _quadsCache = server || rollback;
+            pinWriteFailed('핀 저장 실패 — ' + res.error);
+          } else if (last) {
+            _quadsCache = res.data;
+          }
+          if (last && lastSSEData) render(lastSSEData);
+        } finally {
+          _pinOpsPending--;
         }
-        q.Q2.push(name);
-        await _writePins(q);
+      });
+    }
+
+    function togglePin(name) {
+      const pinning = !getPinned().has(name);
+      return _pinChange((q) => {
+        _removeFromQuads(q, name);
+        if (pinning) q.Q2.push(name);
+        return q;
       });
     }
 
     function moveToQuadrant(name, targetQ) {
-      // Same queue as togglePin: a drag posts the whole set too.
-      return _queuePins(async () => {
-        await _fetchPins();
-        const q = _cloneQuads(_quadsCache);
-        for (const qid of Object.keys(q)) {
-          const idx = q[qid].indexOf(name);
-          if (idx !== -1) q[qid].splice(idx, 1);
-        }
+      return _pinChange((q) => {
+        _removeFromQuads(q, name);
         if (!q[targetQ]) q[targetQ] = [];
         q[targetQ].push(name);
-        await _writePins(q);
+        return q;
       });
     }
 
@@ -1712,13 +1738,10 @@
       const btn = e.target.closest('[data-pin-session]');
       if (!btn) return;
       e.stopPropagation();
-      // Repaint when the change has landed, not before. togglePin is queued
-      // and asynchronous now, so rendering straight after it drew the cache as
-      // it was — the pin appeared to bounce back, and clicking again (thinking
-      // it had not registered) undid it.
-      togglePin(btn.dataset.pinSession).then(() => {
-        if (lastSSEData) render(lastSSEData);
-      });
+      // No .then(render) here: togglePin paints the change itself, before it
+      // goes anywhere near the network, and repaints again once the server
+      // has confirmed it.
+      togglePin(btn.dataset.pinSession);
     });
 
     // =============================================

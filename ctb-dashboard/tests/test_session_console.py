@@ -463,8 +463,14 @@ def test_pins_are_refreshed_after_the_initial_load(index_html):
     assert fetches >= 2, "pins must be re-read, not only fetched at connect"
 
 
+def _js_function(index_html, name):
+    """The body of a top-level function in the page script."""
+    body = index_html[index_html.index(f"function {name}("):]
+    return body[:body.index("\n    }\n")]
+
+
 @pytest.mark.parametrize("fn_name", ["togglePin", "moveToQuadrant"])
-def test_a_pin_change_is_one_serialised_read_modify_write(index_html, fn_name):
+def test_every_pin_change_goes_through_the_one_queue(index_html, fn_name):
     """A pin change rewrites the whole set, so two must never overlap.
 
     Serialising only the writes was not enough: both clicks could still be
@@ -472,20 +478,44 @@ def test_a_pin_change_is_one_serialised_read_modify_write(index_html, fn_name):
     copy and the second overwrote the first — pinning a second session appeared
     to unpin the first.
     """
-    fn = index_html[index_html.index(f"function {fn_name}("):]
-    fn = fn[:fn.index("\n    }\n")]
+    fn = _js_function(index_html, fn_name)
+    assert "_pinChange" in fn, "must go through the single queued path"
+
+
+def test_a_pin_change_is_one_serialised_read_modify_write(index_html):
+    fn = _js_function(index_html, "_pinChange")
     assert "_queuePins" in fn, "must run inside the queue"
     assert "_fetchPins" in fn, "must re-read the server inside that step"
     assert fn.index("_fetchPins") < fn.index("_writePins"), "read before write"
 
 
-def test_a_pin_click_repaints_after_the_change_lands(index_html):
-    """togglePin became queued and async, so the render fired straight after it
-    still drew the old cache — the pin looked like it bounced back, and a second
-    click (thinking it had not registered) toggled it off again."""
+def test_a_pin_is_painted_before_it_is_sent(index_html):
+    """The wait used to be on screen: a tap sat through a read and a write
+    before anything moved, which over the tailnet is most of a second of
+    nothing. The paint has to happen before the queue is joined."""
+    fn = _js_function(index_html, "_pinChange")
+    assert fn.index("render(lastSSEData)") < fn.index("_queuePins("), (
+        "the tap must paint before any network work is queued"
+    )
+
+
+def test_a_pin_click_does_not_wait_on_the_network_to_repaint(index_html):
+    """The handler used to gate its repaint on the queued change landing. That
+    was right when nothing painted early, and wrong once _pinChange does."""
     start = index_html.index("// --- Pin button event delegation ---")
     handler = index_html[start:index_html.index("\n    });", start)]
-    assert "togglePin(" in handler
-    assert ".then(" in handler or "await" in handler, (
-        "the repaint must wait for the change to land"
+    code = "\n".join(l for l in handler.splitlines() if not l.strip().startswith("//"))
+    assert "togglePin(" in code
+    assert ".then(" not in code and "await " not in code, (
+        "togglePin paints on its own; waiting here only delays the repaint"
+    )
+
+
+def test_the_last_pin_in_flight_decides_the_repaint(index_html):
+    """Rapid taps: an earlier change adopting the server's set would erase the
+    taps painted after it. Which change is last can only be known after the
+    write returns, never on the way in."""
+    fn = _js_function(index_html, "_pinChange")
+    assert fn.index("_writePins") < fn.index("const last = "), (
+        "'am I the last one?' must be asked after the write, not before"
     )
