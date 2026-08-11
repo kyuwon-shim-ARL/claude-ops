@@ -152,3 +152,33 @@ def test_safe_delete_removes_merged_worktree(repo, monkeypatch):
     assert out["removed_worktree"] is True
     assert out["branch_deleted"] is True
     assert not Path(wt).exists()
+
+
+# --- the force dialog must describe what is actually destroyed ---------------
+#
+# Deleting a regular session kills tmux and leaves every file on disk; only a
+# worktree session has its directory removed. The force confirmation said
+# "저장되지 않은 변경사항이 영구히 사라집니다" for both, which is untrue for the
+# regular case and talks people out of a harmless action.
+
+from pathlib import Path
+
+_INDEX = (Path(__file__).resolve().parents[1]
+          / "src" / "ctb_dashboard" / "templates" / "index.html")
+
+
+def _force_confirm() -> str:
+    s = _INDEX.read_text()
+    fn = s[s.index("function renderForceConfirm"):]
+    return fn[:fn.index("\n    }")]
+
+
+def test_the_force_warning_depends_on_the_session_type():
+    assert "is_worktree" in _force_confirm(), (
+        "one warning for both cases means one of them is a lie"
+    )
+
+
+def test_a_regular_session_is_told_its_files_survive():
+    body = _force_confirm()
+    assert "파일" in body and "유지" in body

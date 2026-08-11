@@ -2231,9 +2231,14 @@
       _themeModal();
       const { disp } = _checkSummaryHtml(check);
       deleteModalTitle.textContent = '⚠️ 강제 삭제 확인';
+      // Only a worktree loses files. Warning about permanent loss on a regular
+      // session is untrue and talks people out of a harmless action.
+      const consequence = check.is_worktree
+        ? '작업 디렉토리가 <strong style="color:#ef4444;">삭제</strong>되어 저장되지 않은 변경사항·미푸시 커밋이 <strong>영구히 사라집니다</strong>.'
+        : 'tmux 세션만 종료합니다. <strong>파일은 디스크에 그대로 유지</strong>되며, 커밋되지 않은 변경사항도 남아 있습니다.';
       deleteModalBody.innerHTML =
         `<div><strong>${disp}</strong> 세션을 <strong style="color:#ef4444;">강제로</strong> 삭제합니다.</div>` +
-        `<div style="margin-top:8px;">저장되지 않은 변경사항·미푸시 커밋이 <strong>영구히 사라집니다</strong>. 계속하시겠습니까?</div>`;
+        `<div style="margin-top:8px;">${consequence} 계속하시겠습니까?</div>`;
       _setConfirmBtn('영구 삭제', true);
       _bindConfirm(() => performDelete(name, true));
     }
