@@ -227,3 +227,50 @@ def test_a_tracked_edit_is_uncommitted(tmp_path):
 
     from ctb_dashboard.session_delete import _has_uncommitted
     assert _has_uncommitted(str(repo)) is True
+
+
+def _repo_with_commit(root, name):
+    import subprocess as sp
+    repo = root / name
+    repo.mkdir()
+    sp.run(["git", "init", "-q", str(repo)], check=True)
+    sp.run(["git", "-C", str(repo), "config", "user.email", "t@t"], check=True)
+    sp.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
+    (repo / "a.txt").write_text("x")
+    sp.run(["git", "-C", str(repo), "add", "a.txt"], check=True)
+    sp.run(["git", "-C", str(repo), "commit", "-qm", "init"], check=True)
+    return repo
+
+
+def test_a_worktree_warns_that_untracked_files_go_with_it(tmp_path, monkeypatch):
+    """`git worktree remove` deletes the directory, untracked files included."""
+    import subprocess as sp
+    from ctb_dashboard import session_delete as sd
+
+    main = _repo_with_commit(tmp_path, "main")
+    wt = tmp_path / "wt"
+    sp.run(["git", "-C", str(main), "worktree", "add", "-q", "-b", "feature", str(wt)],
+           check=True)
+    (wt / "scratch.txt").write_text("not tracked")
+
+    monkeypatch.setattr(sd, "get_session_path", lambda name: str(wt))
+    check = sd.check_delete_safety("claude_probe")
+
+    assert check["is_worktree"] is True
+    assert check["has_untracked"] is True
+    assert any("추적하지 않는" in r for r in check["reasons"]), check["reasons"]
+
+
+def test_a_regular_session_is_not_blocked_by_untracked_files(tmp_path, monkeypatch):
+    """Nothing on disk is removed, so they are not a reason to refuse."""
+    from ctb_dashboard import session_delete as sd
+
+    repo = _repo_with_commit(tmp_path, "plain")
+    (repo / "scratch.txt").write_text("not tracked")
+
+    monkeypatch.setattr(sd, "get_session_path", lambda name: str(repo))
+    check = sd.check_delete_safety("claude_probe")
+
+    assert check["has_untracked"] is True
+    assert not any("추적하지 않는" in r for r in check["reasons"]), check["reasons"]
+    assert not any("커밋되지 않은" in r for r in check["reasons"]), check["reasons"]

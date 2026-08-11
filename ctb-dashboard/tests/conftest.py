@@ -19,6 +19,7 @@ def _reset_control_rate_limiter():
     limiter.reset()
 
 import os
+import shlex
 import subprocess
 
 
@@ -38,27 +39,60 @@ def _no_live_system(monkeypatch, tmp_path):
     hold real user state are redirected into a temporary directory. Other
     programs (node, git) still run, because tests legitimately use them.
     """
+    def _mentions_tmux(args) -> bool:
+        """Catch tmux however it is spelled.
+
+        argv[0] alone was not enough: sessions.py and state_detector.py run
+        their tmux commands with shell=True, so the whole command arrives as
+        one string and the basename check waved it through. Those reads went
+        to the live server on every suite run.
+        """
+        words = []
+        if isinstance(args, str):
+            try:
+                words = shlex.split(args)
+            except ValueError:
+                words = args.split()
+        elif isinstance(args, (list, tuple)):
+            words = [str(x) for x in args]
+        return any(os.path.basename(w) == "tmux" for w in words)
+
     for name in ("run", "Popen"):
         real = getattr(subprocess, name)
 
         def guard(args, *a, _real=real, **k):
-            argv = args if isinstance(args, (list, tuple)) else [args]
-            program = os.path.basename(str(argv[0])) if argv else ""
-            if program == "tmux":
+            if _mentions_tmux(args):
+                shown = args if isinstance(args, str) else " ".join(map(str, list(args)[:4]))
                 raise AssertionError(
-                    "a test invoked live tmux: " + " ".join(map(str, list(argv)[:4]))
+                    "a test invoked live tmux: " + str(shown)[:120]
                     + " -- stub it; this host has real sessions."
                 )
             return _real(args, *a, **k)
 
         monkeypatch.setattr(subprocess, name, guard)
 
+    _real_system = os.system
+
+    def _system_guard(cmd):
+        if _mentions_tmux(cmd):
+            raise AssertionError("a test invoked live tmux via os.system: " + str(cmd)[:120])
+        return _real_system(cmd)
+
+    monkeypatch.setattr(os, "system", _system_guard)
+
     from ctb_dashboard import server
     monkeypatch.setattr(server, "_PINNED_PERSIST_PATH", str(tmp_path / "pinned.json"))
     monkeypatch.setattr(server, "_TS_PERSIST_PATH", str(tmp_path / "timestamps.json"))
+
+    # The audit log is the user's record of who drove their sessions. Test runs
+    # were filling it -- 2726 entries at one point, which buried the handful of
+    # real ones when a fault had to be traced.
+    from ctb_dashboard import control_audit
+    monkeypatch.setattr(control_audit, "AUDIT_PATH", str(tmp_path / "audit.log"))
 
     # Endpoints read the pane before acting. Harmless defaults, so a test about
     # something else does not have to know tmux exists; tests that care set
     # their own afterwards and win, since this fixture runs first.
     monkeypatch.setattr(server, "pane_command", lambda name: "claude")
     monkeypatch.setattr(server, "pane_has_claude", lambda name: True)
+
