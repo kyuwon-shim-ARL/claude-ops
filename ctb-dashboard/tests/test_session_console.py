@@ -468,3 +468,12 @@ def test_a_pin_change_starts_from_server_state(index_html):
     fn = index_html[index_html.index("function togglePin"):]
     fn = fn[:fn.index("\n    }")]
     assert "refreshPinned" in fn or "await" in fn
+
+
+def test_dragging_to_a_quadrant_also_starts_from_server_state(index_html):
+    """togglePin was fixed and moveToQuadrant was not, so a drag still posted
+    whatever the client had cached — wiping pins made anywhere else."""
+    assert "async function moveToQuadrant" in index_html
+    fn = index_html[index_html.index("async function moveToQuadrant"):]
+    fn = fn[:fn.index("\n    }")]
+    assert "await refreshPinned()" in fn

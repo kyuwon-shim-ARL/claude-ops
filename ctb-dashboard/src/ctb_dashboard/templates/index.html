@@ -542,7 +542,11 @@
       saveQuadrants(q);
     }
 
-    function moveToQuadrant(name, targetQ) {
+    async function moveToQuadrant(name, targetQ) {
+      // Same reason as togglePin: a drag posts the whole set, so it has to
+      // start from the server's copy. Fixing only togglePin left this path
+      // still able to wipe pins made anywhere else.
+      await refreshPinned();
       const q = _cloneQuads(_quadsCache);
       for (const qid of Object.keys(q)) {
         const idx = q[qid].indexOf(name);
