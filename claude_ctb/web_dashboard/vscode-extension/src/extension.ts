@@ -117,6 +117,43 @@ function deleteSessionViaApi(session: string, force: boolean): void {
   req.end();
 }
 
+/** Save the pin set for the webview, which cannot POST through the port proxy.
+ *  Resolves with the server's authoritative set so the panel can adopt it. */
+function setPinnedViaApi(quads: unknown): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+  return new Promise((resolve) => {
+    const secret = readControlSecret();
+    if (!secret) {
+      resolve({ ok: false, error: '.env 의 CTB_CONTROL_SECRET 을 읽을 수 없습니다.' });
+      return;
+    }
+    const body = JSON.stringify(quads);
+    const headers: Record<string, string | number> = {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(body),
+      'X-CTB-Secret': secret,
+    };
+    const req = http.request(`${DASHBOARD_URL}/api/pinned`, { method: 'POST', timeout: 5000, headers }, (res) => {
+      let data = '';
+      res.on('data', (chunk: string) => { data += chunk; });
+      res.on('end', () => {
+        if (res.statusCode !== 200) {
+          resolve({ ok: false, error: `HTTP ${res.statusCode}` });
+          return;
+        }
+        try {
+          resolve({ ok: true, data: JSON.parse(data) });
+        } catch {
+          resolve({ ok: false, error: '서버 응답을 해석할 수 없습니다.' });
+        }
+      });
+    });
+    req.on('error', (e: Error) => resolve({ ok: false, error: e.message }));
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: '요청 시간초과' }); });
+    req.write(body);
+    req.end();
+  });
+}
+
 // --- Status Bar ---
 
 class StatusBarManager {
@@ -260,13 +297,21 @@ class DashboardPanel {
     DashboardPanel.panel.webview.html = await getWebviewContent(context);
 
     // Handle messages from webview (card click → terminal focus)
-    DashboardPanel.panel.webview.onDidReceiveMessage((message: { type: string; session?: string; url?: string; force?: boolean }) => {
+    DashboardPanel.panel.webview.onDidReceiveMessage((message: { type: string; session?: string; url?: string; force?: boolean; requestId?: number; quads?: unknown }) => {
       if (message.type === 'focusSession' && message.session) {
         focusOrCreateTerminalForSession(message.session);
       } else if (message.type === 'deleteSession' && message.session) {
         // VSCode webview portMapping only proxies GET; POST is blocked. Do the
         // delete from the extension host, which reaches the server directly.
         deleteSessionViaApi(message.session, !!message.force);
+      } else if (message.type === 'setPinned' && message.quads) {
+        // Same reason as delete: the webview's proxy forwards only GET, so the
+        // pin write has to leave from here. Answer either way -- a silent
+        // failure is what made pins look like they saved and then vanish.
+        const requestId = message.requestId;
+        setPinnedViaApi(message.quads).then((result) => {
+          DashboardPanel.panel?.webview.postMessage({ type: 'pinnedResult', requestId, ...result });
+        });
       } else if (message.type === 'openUrl' && message.url) {
         // Load the URL in-panel as an iframe so Projects view stays in the webview.
         // The proxy script forwards child-iframe postMessages to the extension so that

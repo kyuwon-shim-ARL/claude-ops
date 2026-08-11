@@ -501,19 +501,101 @@
       } catch (_) { /* keep whatever we had */ }
     }
 
+    // VSCode webview: its port proxy forwards only GET, so a POST from inside
+    // the panel never reaches the server -- it dies as a network error, which
+    // is why pinning worked on the phone and not here. Hand the write to the
+    // extension host, which talks to the server directly, exactly as delete
+    // already does.
+    let _pinBridgeSeq = 0;
+    const _pinBridgePending = new Map();
+    window.addEventListener('message', (e) => {
+      const m = e.data;
+      if (!m || m.type !== 'pinnedResult') return;
+      const settle = _pinBridgePending.get(m.requestId);
+      if (!settle) return;
+      _pinBridgePending.delete(m.requestId);
+      settle(m);
+    });
+
+    function _writePinsViaVscode(q) {
+      return new Promise((resolve) => {
+        const requestId = ++_pinBridgeSeq;
+        _pinBridgePending.set(requestId, resolve);
+        _vscodeApi.postMessage({ type: 'setPinned', requestId, quads: q });
+        // An extension host that never answers must not wedge the pin queue.
+        setTimeout(() => {
+          if (_pinBridgePending.delete(requestId)) {
+            resolve({ ok: false, error: '확장 호스트가 응답하지 않습니다 (8초). 확장을 최신 버전으로 올리고 창을 새로고침하세요.' });
+          }
+        }, 8000);
+      });
+    }
+
     async function _writePins(q) {
       // Refuse to overwrite server state before initial load completes --
       // otherwise a render() before /api/pinned resolves would POST an empty
       // cache and wipe persisted pins for every client.
       if (!_pinnedLoaded) return;
+      // Paint immediately so the tap feels instant, but keep what the server
+      // last confirmed: a write that fails (no control token, 403, webview
+      // proxy that forwards only GET, dead network) used to leave the pin
+      // showing until the next background re-read quietly took it away --
+      // ten seconds later, with no message. Pinning one more session ran a
+      // re-read first, so the earlier phantom pin vanished right then, which
+      // is what "adding a pin kicks the old one out" actually was.
+      const confirmed = _quadsCache;
       _quadsCache = q;
-      const r = await ctbControl.send('/api/pinned', {
-        method: 'POST',
-        body: JSON.stringify(q),
-      });
+      if (_vscodeApi) {
+        const res = await _writePinsViaVscode(q);
+        if (!res.ok) {
+          _quadsCache = confirmed;
+          pinWriteFailed('핀 저장 실패 — ' + (res.error || '확장 호스트 오류'));
+          return;
+        }
+        if (res.data && res.data.Q1) _quadsCache = res.data;
+        return;
+      }
+      let r;
+      try {
+        r = await ctbControl.send('/api/pinned', {
+          method: 'POST',
+          body: JSON.stringify(q),
+        });
+      } catch (e) {
+        _quadsCache = confirmed;
+        pinWriteFailed('네트워크 오류로 핀을 저장하지 못했습니다.');
+        return;
+      }
+      if (!r.ok) {
+        _quadsCache = confirmed;
+        pinWriteFailed(r.status === 403
+          ? '제어 토큰이 없거나 거부되어 핀이 저장되지 않았습니다.'
+          : r.status === 503
+            ? '서버에서 제어 기능이 꺼져 있어 핀이 저장되지 않았습니다.'
+            : `핀 저장 실패 (HTTP ${r.status}).`);
+        return;
+      }
       // The response is the authoritative set; take it rather than assume.
       const server = await r.json().catch(() => null);
       if (server && server.Q1) _quadsCache = server;
+    }
+
+    // Say it on screen. alert() would block the queue and stack up on every
+    // retry; this is one line that fades.
+    function pinWriteFailed(msg) {
+      let el = document.getElementById('pin-error-toast');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'pin-error-toast';
+        el.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);'
+          + 'z-index:9999;max-width:90vw;padding:10px 16px;border-radius:10px;'
+          + 'background:#7f1d1d;color:#fff;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,0.35);';
+        document.body.appendChild(el);
+      }
+      el.textContent = msg;
+      el.style.display = 'block';
+      clearTimeout(pinWriteFailed._t);
+      pinWriteFailed._t = setTimeout(() => { el.style.display = 'none'; }, 6000);
     }
 
     function _queuePins(job) {
