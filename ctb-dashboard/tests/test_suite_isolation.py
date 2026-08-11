@@ -72,3 +72,14 @@ def test_the_audit_log_is_not_the_users():
     sessions, which is the first place anyone looks when something moved."""
     from ctb_dashboard import control_audit
     assert "/.claude-ops/" not in control_audit.AUDIT_PATH, control_audit.AUDIT_PATH
+
+
+def test_the_focus_signal_file_is_not_the_real_one():
+    """The VSCode extension watches this path and calls terminal.show() on it.
+
+    A test writing it makes the user's editor jump to whatever session name the
+    test used — which is how focus kept being stolen after the tmux guard was
+    in place and the audit log said no_switch. It is a file write, so nothing
+    about tmux could have caught it.
+    """
+    assert "/tmp/ctb-focus-signal.json" not in server._FOCUS_SIGNAL_PATH

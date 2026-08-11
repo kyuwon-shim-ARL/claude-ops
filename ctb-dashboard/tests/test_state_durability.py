@@ -19,23 +19,24 @@ import pytest
 from ctb_dashboard import server
 
 
-def _shipped_paths() -> str:
-    """The defaults as written, not as the test fixture redirects them."""
+def _shipped(constant: str) -> str:
+    """One constant as written, not as the test fixture redirects it."""
     src = (Path(__file__).resolve().parents[1]
            / "src" / "ctb_dashboard" / "server.py").read_text()
-    start = src.index("_STATE_DIR = ")
-    return src[start:src.index("\n\n", start)]
+    start = src.index(f"{constant} = ")
+    return src[start:src.index("\n", start)]
 
 
-def test_pins_are_not_kept_in_tmp():
-    assert '"/tmp' not in _shipped_paths().split("_LEGACY")[0], (
-        "/tmp is swept on a timer; pins are user configuration"
-    )
+@pytest.mark.parametrize("constant", ["_PINNED_PERSIST_PATH", "_TS_PERSIST_PATH"])
+def test_state_is_not_kept_in_tmp(constant):
+    """/tmp is swept on a timer; these are user configuration."""
+    assert "/tmp" not in _shipped(constant), _shipped(constant)
 
 
-def test_state_lives_beside_the_other_dashboard_state():
+@pytest.mark.parametrize("constant", ["_PINNED_PERSIST_PATH", "_TS_PERSIST_PATH"])
+def test_state_lives_beside_the_other_dashboard_state(constant):
     """One place to look, and the one already used for keys and subscriptions."""
-    assert ".claude-ops" in _shipped_paths()
+    assert "_STATE_DIR" in _shipped(constant)
 
 
 def test_pins_written_then_loaded_survive(tmp_path, monkeypatch):

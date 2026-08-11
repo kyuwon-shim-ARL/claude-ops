@@ -211,6 +211,11 @@ _STATE_DIR = os.path.expanduser(os.environ.get("CTB_STATE_DIR", "~/.claude-ops")
 _TS_PERSIST_PATH = os.path.join(_STATE_DIR, "session-timestamps.json")
 _PINNED_PERSIST_PATH = os.path.join(_STATE_DIR, "pinned-sessions.json")
 # Where both used to live. Read once so an upgrade does not drop live pins.
+# Watched by the VSCode extension, which calls terminal.show() when it changes.
+# Module level so a test can redirect it: as a local it could not be, and test
+# runs really did move the user's editor by writing a session name into it --
+# a file write, so nothing about the tmux guard could catch it.
+_FOCUS_SIGNAL_PATH = "/tmp/ctb-focus-signal.json"
 _LEGACY_PINNED_PATH = "/tmp/ctb-pinned-sessions.json"
 _LEGACY_TS_PATH = "/tmp/ctb-session-timestamps.json"
 
@@ -1264,7 +1269,6 @@ async def focus_session(req: FocusRequest, request: Request):
 
     # 4. Write focus signal for VSCode extension (file-based IPC)
     # The extension watches this file and calls terminal.show() + focus to switch tabs
-    _FOCUS_SIGNAL_PATH = "/tmp/ctb-focus-signal.json"
     try:
         import json as _json
         import time as _time

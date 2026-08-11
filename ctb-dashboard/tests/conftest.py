@@ -83,6 +83,8 @@ def _no_live_system(monkeypatch, tmp_path):
     from ctb_dashboard import server
     monkeypatch.setattr(server, "_PINNED_PERSIST_PATH", str(tmp_path / "pinned.json"))
     monkeypatch.setattr(server, "_TS_PERSIST_PATH", str(tmp_path / "timestamps.json"))
+    # The VSCode extension watches this and focuses the terminal it names.
+    monkeypatch.setattr(server, "_FOCUS_SIGNAL_PATH", str(tmp_path / "focus-signal.json"))
 
     # The audit log is the user's record of who drove their sessions. Test runs
     # were filling it -- 2726 entries at one point, which buried the handful of
