@@ -1454,6 +1454,7 @@
 
     // T3: render() with (isDragging || _pressTimer) guard + inline SSE caching
     function render(data) {
+      lastDataAt = Date.now();
       lastSSEData = data; // T3: cache inline (no wrapper needed)
       if (isDragging || _pressTimer) return; // T3: block during drag AND long-press hold
 
@@ -1862,10 +1863,27 @@
     let evtSource = null;
     let reconnectTimer = null;
 
+    // Whether the stream is open is our business; whether the board is current
+    // is the reader's. VSCode's port proxy buffers text/event-stream so
+    // EventSource never opens there, yet the fallback poll kept every card
+    // up to date -- and the header still said Disconnected.
+    let sseOpen = false;
+    let lastDataAt = 0;
+    const SSE_DOWN_POLL_MS = 5000;   // a stale board on your own screen is worse
+    const POLL_MS = 30000;           // than one more small GET
+
     function setConnected(ok) {
+      sseOpen = ok;
+      paintConnection();
+    }
+
+    function paintConnection() {
       const t = getThemeColors();
-      connDot.className = `inline-block w-2 h-2 rounded-full ${ok ? t.connDotOk : t.connDotFail}`;
-      connStatus.lastChild.textContent = ok ? ' Connected' : ' Disconnected';
+      const fresh = lastDataAt && (Date.now() - lastDataAt) < SSE_DOWN_POLL_MS * 3;
+      const live = sseOpen || fresh;
+      connDot.className = `inline-block w-2 h-2 rounded-full ${live ? t.connDotOk : t.connDotFail}`;
+      connStatus.lastChild.textContent = sseOpen ? ' Connected'
+        : fresh ? ' 폴링 중' : ' Disconnected';
     }
 
     async function connect() {
@@ -1924,11 +1942,14 @@
     }
     setInterval(refreshRender, 10000);
     setInterval(() => {
+      // Only worth a request when the stream is not already feeding us.
+      if (sseOpen && (Date.now() - lastDataAt) < POLL_MS) return;
       fetch('/api/sessions')
         .then(r => r.json())
         .then(render)
         .catch(() => {});
-    }, 30000);
+    }, SSE_DOWN_POLL_MS);
+    setInterval(paintConnection, 2000);
 
     function pollTicketLinks() {
       const receiveTime = Date.now();

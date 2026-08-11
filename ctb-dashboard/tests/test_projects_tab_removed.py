@@ -82,3 +82,37 @@ def test_the_page_still_renders():
     r = TestClient(app).get("/")
     assert r.status_code == 200
     assert 'id="grid"' in r.text
+
+
+# --- the connection label describes data, not the SSE socket -----------------
+#
+# VSCode showed Disconnected while the phone was fine. Its port proxy buffers
+# text/event-stream, so EventSource never opens there -- but /api/sessions is a
+# plain GET, and the 30s fallback poll kept the cards current the whole time.
+# The dashboard was working; only the label said otherwise.
+
+def _index() -> str:
+    return INDEX.read_text()
+
+
+def test_there_is_a_state_between_connected_and_disconnected():
+    html = _index()
+    assert "폴링" in html, "a live-but-not-streaming state needs its own label"
+
+
+def test_the_label_is_driven_by_when_data_last_arrived():
+    html = _index()
+    assert "lastDataAt" in html
+
+
+def test_data_arrival_is_recorded_where_rendering_happens():
+    html = _index()
+    fn = html[html.index("function render("):]
+    fn = fn[:fn.index("\n    }")]
+    assert "lastDataAt" in fn
+
+
+def test_polling_speeds_up_while_the_stream_is_down():
+    """30s is a long time to look at a stale board on the machine you work on."""
+    html = _index()
+    assert "SSE_DOWN_POLL_MS" in html
