@@ -477,3 +477,15 @@ def test_a_pin_change_is_one_serialised_read_modify_write(index_html, fn_name):
     assert "_queuePins" in fn, "must run inside the queue"
     assert "_fetchPins" in fn, "must re-read the server inside that step"
     assert fn.index("_fetchPins") < fn.index("_writePins"), "read before write"
+
+
+def test_a_pin_click_repaints_after_the_change_lands(index_html):
+    """togglePin became queued and async, so the render fired straight after it
+    still drew the old cache — the pin looked like it bounced back, and a second
+    click (thinking it had not registered) toggled it off again."""
+    start = index_html.index("// --- Pin button event delegation ---")
+    handler = index_html[start:index_html.index("\n    });", start)]
+    assert "togglePin(" in handler
+    assert ".then(" in handler or "await" in handler, (
+        "the repaint must wait for the change to land"
+    )

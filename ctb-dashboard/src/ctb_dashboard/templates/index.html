@@ -1630,8 +1630,13 @@
       const btn = e.target.closest('[data-pin-session]');
       if (!btn) return;
       e.stopPropagation();
-      togglePin(btn.dataset.pinSession);
-      if (lastSSEData) render(lastSSEData);
+      // Repaint when the change has landed, not before. togglePin is queued
+      // and asynchronous now, so rendering straight after it drew the cache as
+      // it was — the pin appeared to bounce back, and clicking again (thinking
+      // it had not registered) undid it.
+      togglePin(btn.dataset.pinSession).then(() => {
+        if (lastSSEData) render(lastSSEData);
+      });
     });
 
     // =============================================
@@ -1822,7 +1827,9 @@
         if (el && _dragState) {
           const quad = el.closest('[data-quadrant]');
           if (quad) {
-            moveToQuadrant(_dragState.sessionName, quad.dataset.quadrant);
+            moveToQuadrant(_dragState.sessionName, quad.dataset.quadrant).then(() => {
+              if (lastSSEData) render(lastSSEData);
+            });
           }
         }
       }
