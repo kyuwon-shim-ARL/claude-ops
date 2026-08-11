@@ -28,7 +28,7 @@ MUTATING = [
 
 
 @pytest.fixture(autouse=True)
-def _no_real_tmux(monkeypatch):
+def _no_real_tmux(monkeypatch, tmp_path):
     """These tests check the gate, not the operation behind it.
 
     Without this they ran the operation for real: the focus case executed
@@ -45,6 +45,12 @@ def _no_real_tmux(monkeypatch):
     monkeypatch.setattr(_srv, "send_interrupt", lambda *a, **k: None)
     monkeypatch.setattr(_srv.subprocess, "run", _refuse_subprocess)
     monkeypatch.setattr(_srv.subprocess, "Popen", _refuse_subprocess)
+    # /api/pinned does not shell out, so stubbing tmux did not protect it: the
+    # gate test posts an empty body, PinnedRequest fills in four empty
+    # quadrants, and that was written straight over the real pin file. Every
+    # suite run wiped the user's pins.
+    monkeypatch.setattr(_srv, "_PINNED_PERSIST_PATH", str(tmp_path / "pinned.json"))
+    monkeypatch.setattr(_srv, "_pinned_state", {"Q1": [], "Q2": [], "Q3": [], "Q4": []})
 
 
 def _refuse_subprocess(*a, **k):

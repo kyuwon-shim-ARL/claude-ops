@@ -102,11 +102,30 @@ def _default_branch(path: str) -> Optional[str]:
 
 
 def _has_uncommitted(path: str) -> bool:
+    """Tracked changes only.
+
+    Plain `status --porcelain` lists untracked files as well, so a repo with
+    everything committed and one stray directory was reported as having
+    uncommitted changes -- which is what people read, and it was not true.
+    """
     try:
-        r = _run_git(path, ["status", "--porcelain"])
+        r = _run_git(path, ["status", "--porcelain", "--untracked-files=no"])
         return r.returncode == 0 and bool(r.stdout.strip())
     except Exception:
         return True  # fail safe: assume dirty
+
+
+def _has_untracked(path: str) -> bool:
+    """Files git is not following.
+
+    Harmless for a regular session, which leaves the disk alone; a worktree
+    removal takes them with it, so only that case treats them as a risk.
+    """
+    try:
+        r = _run_git(path, ["ls-files", "--others", "--exclude-standard"])
+        return r.returncode == 0 and bool(r.stdout.strip())
+    except Exception:
+        return True
 
 
 def _upstream_status(path: str) -> tuple[bool, int]:
@@ -150,6 +169,7 @@ def check_delete_safety(session_name: str) -> dict:
         "is_worktree": False,
         "branch": None,
         "has_uncommitted": False,
+        "has_untracked": False,
         "has_upstream": False,
         "unpushed_count": 0,
         "is_merged": None,
@@ -169,6 +189,8 @@ def check_delete_safety(session_name: str) -> dict:
 
     has_uncommitted = _has_uncommitted(path)
     result["has_uncommitted"] = has_uncommitted
+    has_untracked = _has_untracked(path)
+    result["has_untracked"] = has_untracked
 
     has_upstream, unpushed = _upstream_status(path)
     result["has_upstream"] = has_upstream
@@ -180,6 +202,11 @@ def check_delete_safety(session_name: str) -> dict:
     reasons: list[str] = []
     if has_uncommitted:
         reasons.append("커밋되지 않은 변경사항이 있습니다")
+
+    if is_wt and has_untracked:
+        # Only here do they actually go: `git worktree remove` deletes the
+        # directory. A regular session leaves every file where it is.
+        reasons.append("git이 추적하지 않는 파일이 있습니다 (워크트리 삭제 시 함께 사라집니다)")
 
     if is_wt:
         # For a worktree the durable-work question is answered by merge status:

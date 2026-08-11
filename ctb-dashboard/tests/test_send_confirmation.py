@@ -250,6 +250,8 @@ def test_confirmed_false_when_screen_is_unchanged(wire):
 
 def test_shell_session_is_refused_end_to_end(wire, monkeypatch):
     monkeypatch.setattr(_srv, "pane_command", lambda name: "bash")
+    # A bare shell has no claude under it; that is what makes it a shell.
+    monkeypatch.setattr(_srv, "pane_has_claude", lambda name: False)
     client = wire(SessionState.IDLE, [SHELL_SCREEN])
     r = client.post("/api/sessions/claude_demo/prompt",
                     json={"text": "hi"}, headers=AUTH)

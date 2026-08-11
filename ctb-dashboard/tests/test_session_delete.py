@@ -182,3 +182,48 @@ def test_the_force_warning_depends_on_the_session_type():
 def test_a_regular_session_is_told_its_files_survive():
     body = _force_confirm()
     assert "파일" in body and "유지" in body
+
+
+# --- untracked files are not uncommitted changes -----------------------------
+#
+# `git status --porcelain` lists untracked files too, so a repo where every
+# change is committed but a stray directory exists — .verify/ here — was
+# reported as "커밋되지 않은 변경사항이 있습니다". The user had committed
+# everything and was told otherwise.
+#
+# The distinction matters differently per session type: deleting a regular
+# session removes nothing from disk, while `git worktree remove` does take
+# untracked files with it.
+
+def test_untracked_files_alone_are_not_uncommitted(tmp_path):
+    import subprocess as sp
+    repo = tmp_path / "r"
+    repo.mkdir()
+    sp.run(["git", "init", "-q", str(repo)], check=True)
+    sp.run(["git", "-C", str(repo), "config", "user.email", "t@t"], check=True)
+    sp.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
+    (repo / "a.txt").write_text("x")
+    sp.run(["git", "-C", str(repo), "add", "a.txt"], check=True)
+    sp.run(["git", "-C", str(repo), "commit", "-qm", "init"], check=True)
+    (repo / "stray").mkdir()
+    (repo / "stray" / "note").write_text("untracked")
+
+    from ctb_dashboard.session_delete import _has_uncommitted, _has_untracked
+    assert _has_uncommitted(str(repo)) is False, "everything is committed"
+    assert _has_untracked(str(repo)) is True
+
+
+def test_a_tracked_edit_is_uncommitted(tmp_path):
+    import subprocess as sp
+    repo = tmp_path / "r2"
+    repo.mkdir()
+    sp.run(["git", "init", "-q", str(repo)], check=True)
+    sp.run(["git", "-C", str(repo), "config", "user.email", "t@t"], check=True)
+    sp.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
+    (repo / "a.txt").write_text("x")
+    sp.run(["git", "-C", str(repo), "add", "a.txt"], check=True)
+    sp.run(["git", "-C", str(repo), "commit", "-qm", "init"], check=True)
+    (repo / "a.txt").write_text("changed")
+
+    from ctb_dashboard.session_delete import _has_uncommitted
+    assert _has_uncommitted(str(repo)) is True

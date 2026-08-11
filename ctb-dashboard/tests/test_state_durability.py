@@ -12,26 +12,30 @@ badge -- the bug fixed in f5c4c92, reachable again by a different route.
 """
 
 import json
+from pathlib import Path
 
 import pytest
 
 from ctb_dashboard import server
 
 
+def _shipped_paths() -> str:
+    """The defaults as written, not as the test fixture redirects them."""
+    src = (Path(__file__).resolve().parents[1]
+           / "src" / "ctb_dashboard" / "server.py").read_text()
+    start = src.index("_STATE_DIR = ")
+    return src[start:src.index("\n\n", start)]
+
+
 def test_pins_are_not_kept_in_tmp():
-    assert not server._PINNED_PERSIST_PATH.startswith("/tmp/"), (
+    assert '"/tmp' not in _shipped_paths().split("_LEGACY")[0], (
         "/tmp is swept on a timer; pins are user configuration"
     )
 
 
-def test_session_timestamps_are_not_kept_in_tmp():
-    assert not server._TS_PERSIST_PATH.startswith("/tmp/")
-
-
 def test_state_lives_beside_the_other_dashboard_state():
     """One place to look, and the one already used for keys and subscriptions."""
-    for path in (server._PINNED_PERSIST_PATH, server._TS_PERSIST_PATH):
-        assert ".claude-ops" in path, path
+    assert ".claude-ops" in _shipped_paths()
 
 
 def test_pins_written_then_loaded_survive(tmp_path, monkeypatch):
@@ -75,3 +79,10 @@ def test_the_state_directory_is_created_if_absent(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "_PINNED_PERSIST_PATH", str(target))
     server._atomic_json_write(str(target), {"Q1": ["claude_a"], "Q2": [], "Q3": [], "Q4": []})
     assert json.loads(target.read_text())["Q1"] == ["claude_a"]
+
+
+def test_the_gate_tests_cannot_reach_the_real_pin_file():
+    """They post an empty pin set with a valid token; without isolation that
+    lands on the user's actual pins, and every suite run wiped them."""
+    src = (Path(__file__).resolve().parents[1] / "tests" / "test_control_auth.py").read_text()
+    assert "_PINNED_PERSIST_PATH" in src
