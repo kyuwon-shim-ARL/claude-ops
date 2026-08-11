@@ -463,17 +463,17 @@ def test_pins_are_refreshed_after_the_initial_load(index_html):
     assert fetches >= 2, "pins must be re-read, not only fetched at connect"
 
 
-def test_a_pin_change_starts_from_server_state(index_html):
-    """Otherwise a client holding an old cache posts it back and wipes the rest."""
-    fn = index_html[index_html.index("function togglePin"):]
-    fn = fn[:fn.index("\n    }")]
-    assert "refreshPinned" in fn or "await" in fn
+@pytest.mark.parametrize("fn_name", ["togglePin", "moveToQuadrant"])
+def test_a_pin_change_is_one_serialised_read_modify_write(index_html, fn_name):
+    """A pin change rewrites the whole set, so two must never overlap.
 
-
-def test_dragging_to_a_quadrant_also_starts_from_server_state(index_html):
-    """togglePin was fixed and moveToQuadrant was not, so a drag still posted
-    whatever the client had cached — wiping pins made anywhere else."""
-    assert "async function moveToQuadrant" in index_html
-    fn = index_html[index_html.index("async function moveToQuadrant"):]
-    fn = fn[:fn.index("\n    }")]
-    assert "await refreshPinned()" in fn
+    Serialising only the writes was not enough: both clicks could still be
+    inside their read when the other wrote, so each rebuilt from the same older
+    copy and the second overwrote the first — pinning a second session appeared
+    to unpin the first.
+    """
+    fn = index_html[index_html.index(f"function {fn_name}("):]
+    fn = fn[:fn.index("\n    }\n")]
+    assert "_queuePins" in fn, "must run inside the queue"
+    assert "_fetchPins" in fn, "must re-read the server inside that step"
+    assert fn.index("_fetchPins") < fn.index("_writePins"), "read before write"

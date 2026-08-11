@@ -482,7 +482,15 @@
       return _quadsCache;
     }
 
-    async function refreshPinned() {
+    // A pin change is a read-modify-write of the whole set, so two of them must
+    // never overlap. Serialising only the writes was not enough: both clicks
+    // could still be inside their read when the other wrote, so each rebuilt
+    // from the same older copy and the second overwrote the first. Everything
+    // that touches the set goes through one queue.
+    let _pinOps = Promise.resolve();
+
+    async function _fetchPins() {
+      // Raw read. Never awaits the queue -- it runs inside it.
       try {
         const r = await fetch('/api/pinned');
         const data = await r.json();
@@ -491,6 +499,30 @@
           _pinnedLoaded = true;
         }
       } catch (_) { /* keep whatever we had */ }
+    }
+
+    async function _writePins(q) {
+      // Refuse to overwrite server state before initial load completes --
+      // otherwise a render() before /api/pinned resolves would POST an empty
+      // cache and wipe persisted pins for every client.
+      if (!_pinnedLoaded) return;
+      _quadsCache = q;
+      const r = await ctbControl.send('/api/pinned', {
+        method: 'POST',
+        body: JSON.stringify(q),
+      });
+      // The response is the authoritative set; take it rather than assume.
+      const server = await r.json().catch(() => null);
+      if (server && server.Q1) _quadsCache = server;
+    }
+
+    function _queuePins(job) {
+      _pinOps = _pinOps.then(job).catch(() => {});
+      return _pinOps;
+    }
+
+    function refreshPinned() {
+      return _queuePins(_fetchPins);
     }
 
     let _pinnedCheckedAt = 0;
@@ -502,18 +534,6 @@
       refreshPinned().then(function () {
         if (JSON.stringify(_quadsCache) !== before && lastSSEData) render(lastSSEData);
       });
-    }
-
-    function saveQuadrants(q) {
-      // Refuse to overwrite server state before initial load completes —
-      // otherwise a render() before /api/pinned resolves would POST an empty
-      // cache and wipe persisted pins for every client.
-      if (!_pinnedLoaded) return;
-      _quadsCache = q;
-      ctbControl.send('/api/pinned', {
-        method: 'POST',
-        body: JSON.stringify(q)
-      }).catch(() => {});
     }
 
     function getPinned() {
@@ -528,33 +548,34 @@
       return null;
     }
 
-    async function togglePin(name) {
-      // Start from what the server holds, not from a cache that may predate
-      // pins made in another client -- posting a stale set back is how pins
-      // set elsewhere disappear.
-      await refreshPinned();
-      const q = _cloneQuads(_quadsCache);
-      for (const qid of Object.keys(q)) {
-        const idx = q[qid].indexOf(name);
-        if (idx !== -1) { q[qid].splice(idx, 1); saveQuadrants(q); return; }
-      }
-      q.Q2.push(name);
-      saveQuadrants(q);
+    function togglePin(name) {
+      // Read and write inside one queued step, so a second click cannot slip
+      // between this read and this write and rebuild from the older copy.
+      return _queuePins(async () => {
+        await _fetchPins();
+        const q = _cloneQuads(_quadsCache);
+        for (const qid of Object.keys(q)) {
+          const idx = q[qid].indexOf(name);
+          if (idx !== -1) { q[qid].splice(idx, 1); await _writePins(q); return; }
+        }
+        q.Q2.push(name);
+        await _writePins(q);
+      });
     }
 
-    async function moveToQuadrant(name, targetQ) {
-      // Same reason as togglePin: a drag posts the whole set, so it has to
-      // start from the server's copy. Fixing only togglePin left this path
-      // still able to wipe pins made anywhere else.
-      await refreshPinned();
-      const q = _cloneQuads(_quadsCache);
-      for (const qid of Object.keys(q)) {
-        const idx = q[qid].indexOf(name);
-        if (idx !== -1) q[qid].splice(idx, 1);
-      }
-      if (!q[targetQ]) q[targetQ] = [];
-      q[targetQ].push(name);
-      saveQuadrants(q);
+    function moveToQuadrant(name, targetQ) {
+      // Same queue as togglePin: a drag posts the whole set too.
+      return _queuePins(async () => {
+        await _fetchPins();
+        const q = _cloneQuads(_quadsCache);
+        for (const qid of Object.keys(q)) {
+          const idx = q[qid].indexOf(name);
+          if (idx !== -1) q[qid].splice(idx, 1);
+        }
+        if (!q[targetQ]) q[targetQ] = [];
+        q[targetQ].push(name);
+        await _writePins(q);
+      });
     }
 
     // --- Notification system ---
