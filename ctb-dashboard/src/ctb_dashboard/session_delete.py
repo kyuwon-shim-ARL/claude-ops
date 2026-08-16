@@ -216,7 +216,8 @@ def check_delete_safety(session_name: str) -> dict:
         result["is_merged"] = merged
         if merged is False:
             tgt = default_branch or "기본 브랜치"
-            reasons.append(f"'{result['branch']}' 브랜치가 {tgt}에 병합되지 않았습니다")
+            branch_label = result["branch"] or "현재 브랜치"
+            reasons.append(f"'{branch_label}' 브랜치가 {tgt}에 병합되지 않았습니다")
         elif merged is None:
             reasons.append("병합 여부를 확인할 수 없습니다")
     else:
