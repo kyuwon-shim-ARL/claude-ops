@@ -14,9 +14,15 @@ from ctb_dashboard.control_audit import limiter
 
 @pytest.fixture(autouse=True)
 def _reset_control_rate_limiter():
+    # The project-read limiter is a second global budget with the same problem:
+    # one module's reads would otherwise throttle the next module's.
+    from ctb_dashboard.server import _project_read_limiter
+
     limiter.reset()
+    _project_read_limiter.reset()
     yield
     limiter.reset()
+    _project_read_limiter.reset()
 
 import os
 import shlex

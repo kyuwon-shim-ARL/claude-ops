@@ -38,6 +38,12 @@ from .state_detector import SessionStateAnalyzer, SessionState
 from . import push
 from .sessions import get_all_claude_sessions, get_session_path, get_sessions_activity
 from .session_delete import check_delete_safety, delete_session
+from .session_create import (
+    CreateError,
+    create_session,
+    list_projects,
+    list_worktrees,
+)
 from .session_input import (
     ALLOWED_KEYS,
     pane_command,
@@ -49,6 +55,7 @@ from .session_input import (
 )
 from .dangerous_commands import is_dangerous_command
 from .session_readiness import classify_readiness, is_shell
+from .control_audit import RateLimiter as _RateLimiter
 from .control_audit import limiter as _rate_limiter, record as _audit
 
 import sys as _sys
@@ -1013,6 +1020,89 @@ async def session_delete(name: str, req: DeleteRequest, request: Request):
             status_code=409,
             media_type="application/json",
         )
+    return result
+
+
+# The project/worktree reads run git, and unlike every write they are not
+# behind the control token (the VSCode webview proxy only forwards GET). Their
+# own budget, not the control one: a read flood must not be able to starve the
+# ability to stop a session that is doing damage.
+_project_read_limiter = _RateLimiter(
+    max_events=int(os.environ.get("CTB_PROJECT_READ_RATE_MAX", "120")),
+    window=float(os.environ.get("CTB_PROJECT_READ_RATE_WINDOW", "60")),
+)
+
+
+class CreateSessionRequest(BaseModel):
+    project: str | None = None
+    new_project: str | None = None
+    worktree: str | None = None
+    git_init: bool = True
+
+
+@app.get("/api/projects")
+async def api_projects():
+    """Project folders available to start a session in."""
+    if not _project_read_limiter.allow():
+        raise HTTPException(status_code=429, detail="Too many requests")
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, list_projects)
+
+
+@app.get("/api/projects/{name}/worktrees")
+async def api_project_worktrees(name: str):
+    """Worktrees of one project (the .claude/worktrees convention)."""
+    if not _project_read_limiter.allow():
+        raise HTTPException(status_code=429, detail="Too many requests")
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(None, list_worktrees, name)
+    except CreateError as e:
+        raise HTTPException(status_code=404 if e.code == "no_project" else 422,
+                            detail=e.message)
+
+
+@app.post("/api/sessions/create", dependencies=[Depends(require_control_token)])
+async def api_create_session(req: CreateSessionRequest, request: Request):
+    """Start a Claude session: existing project, new project, or a worktree.
+
+    Behind the control token like every other write -- this one creates
+    directories and git branches on the host, so it is the furthest-reaching
+    write the dashboard has.
+    """
+    client = request.client.host if request.client else None
+    if not _rate_limiter.allow():
+        _audit("create", req.project or req.new_project or "?", client, False, "rate_limited")
+        raise HTTPException(status_code=429, detail="Too many control requests")
+
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(
+            None,
+            lambda: create_session(
+                project=req.project,
+                new_project=req.new_project,
+                worktree=req.worktree,
+                git_init=req.git_init,
+            ),
+        )
+    except CreateError as e:
+        _audit("create", req.project or req.new_project or "?", client, False, e.code)
+        status = {
+            "no_project": 404,
+            "project_exists": 409,
+            "bad_request": 400,
+            "invalid_project": 422,
+            "invalid_worktree": 422,
+            "not_git": 409,
+        }.get(e.code, 502)
+        raise HTTPException(status_code=status, detail=e.message)
+    except Exception as e:
+        logger.exception("session create failed")
+        _audit("create", req.project or req.new_project or "?", client, False, "error")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    _audit("create", result["session"], client, True, result["status"])
     return result
 
 

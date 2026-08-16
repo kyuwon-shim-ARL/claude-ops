@@ -223,6 +223,7 @@
   <!-- Alpine.js CSP build (eval-free) — vendored fallback if CDN fails -->
   <script nonce="{{ csp_nonce }}" src="/static/js/control-token.js"></script>
   <script nonce="{{ csp_nonce }}" src="/static/js/session-control.js"></script>
+  <script nonce="{{ csp_nonce }}" src="/static/js/session-create.js"></script>
   <script nonce="{{ csp_nonce }}"
           src="https://cdn.jsdelivr.net/npm/@alpinejs/csp@3/dist/cdn.min.js"
           defer
@@ -248,6 +249,7 @@
   </header>
 
   <div id="filter-bar" class="px-5 pt-3 flex flex-wrap items-center gap-2">
+    <button id="btn-new-session" class="hover:bg-white/10 text-xs px-2.5 py-0.5 rounded-full transition-colors cursor-pointer flex-shrink-0" style="background: rgba(129,140,248,0.18); border: 1px solid rgba(129,140,248,0.45);" title="새 세션 시작 (프로젝트 / 워크트리 선택)">+ 새 세션</button>
     <input id="filter-search" type="text" placeholder="🔎 세션 검색  (F / Ctrl+F)" autocomplete="off"
            class="font-mono"
            style="flex:1;min-width:180px;max-width:340px;font-size:13px;padding:6px 12px;border-radius:10px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:inherit;outline:none;">

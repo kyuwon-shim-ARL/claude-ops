@@ -180,10 +180,20 @@
         submit();
       }
     });
+    /* Mirror keydown: clears shiftHeld when Shift is released, so a prior
+     * Shift press (e.g. for a tense consonant ㄲ) does not survive until the
+     * next Enter on iOS where keydown events are sometimes skipped. */
+    input.addEventListener('keyup', function (e) {
+      shiftHeld = e.shiftKey;
+    });
     input.addEventListener('beforeinput', function (e) {
       var breaksLine = e.inputType === 'insertLineBreak'
         || (e.inputType === 'insertText' && e.data === '\n');
-      if (!breaksLine || shiftHeld) return;
+      /* Consume the flag: shift state from an earlier key must not bleed into
+       * later events when iOS skips the intervening keydown events. */
+      var held = shiftHeld;
+      shiftHeld = false;
+      if (!breaksLine || held) return;
       e.preventDefault();
       submit();
     });
