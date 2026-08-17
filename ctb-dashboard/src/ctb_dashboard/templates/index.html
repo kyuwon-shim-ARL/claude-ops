@@ -1652,6 +1652,17 @@
       });
 
       sortedSessionNames = visible.map(s => s.name);
+      /* The console's switcher strip reads this: the same order the grid shows,
+       * but flat — worktree grouping is a layout device, not an ordering. */
+      window.ctbSessionOrder = visible.map(s => {
+        const p = parseSessionName(s.name);
+        return {
+          name: s.name,
+          state: s.state,
+          label: p.display,
+          branch: p.isWorktree ? p.branch : null,
+        };
+      });
       btnCopyNames.classList.remove('hidden');
 
       const pinnedSessions = visible.filter(s => pinned.has(s.name));

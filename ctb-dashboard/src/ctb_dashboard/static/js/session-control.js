@@ -16,7 +16,7 @@
   var POLL_MS = 2000;
 
   var state = { session: null, timer: null, busy: false,
-                lines: null, selStart: null, selEnd: null };
+                lines: null, selStart: null, selEnd: null, order: null };
   var el = {};
 
   /* --- markup ------------------------------------------------------------ */
@@ -38,6 +38,18 @@
       'border-top:1px solid #1f2937',
       'box-shadow:0 -12px 40px rgba(0,0,0,0.55)',
       'font-family:ui-sans-serif,system-ui,sans-serif',
+    ].join(';');
+
+    /* Switcher strip: the sheet used to open with dead space above it, and
+     * changing session meant closing, finding the card, tapping again. Three
+     * chips fit a phone width; the rest scroll horizontally, in the grid's own
+     * order (recency/state), flat — worktrees are not grouped here. */
+    var strip = document.createElement('div');
+    strip.style.cssText = [
+      'display:flex', 'gap:6px', 'flex-shrink:0', 'margin-bottom:8px',
+      'overflow-x:auto', 'overflow-y:hidden',
+      'scroll-snap-type:x proximity', '-webkit-overflow-scrolling:touch',
+      'scrollbar-width:none',
     ].join(';');
 
     var header = document.createElement('div');
@@ -214,6 +226,7 @@
     row.appendChild(input);
     row.appendChild(send);
 
+    root.appendChild(strip);
     root.appendChild(header);
     root.appendChild(tail);
     root.appendChild(bar);
@@ -221,8 +234,15 @@
     root.appendChild(row);
     document.body.appendChild(root);
 
-    el = { root: root, title: title, status: status, tail: tail,
+    el = { root: root, strip: strip, title: title, status: status, tail: tail,
            bar: bar, barLabel: barLabel, input: input, send: send };
+
+    /* The keyboard shrinks the visual viewport, and iOS does not always fire a
+     * resize that brings it back when the keyboard closes without an edit --
+     * the sheet then stays squeezed. Re-measure after the blur settles. */
+    input.addEventListener('blur', function () {
+      setTimeout(fitViewport, 300);
+    });
 
     // The keyboard shrinks the visual viewport; sit on top of it, not under.
     if (window.visualViewport) {
@@ -256,9 +276,107 @@
   function fitViewport() {
     if (!el.root || !state.session) return;
     var vv = window.visualViewport;
-    var overlap = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
+    /* Only the textarea can raise a keyboard. With it unfocused there is no
+     * overlap by definition, so ignore a visual viewport that iOS left short
+     * after dismissing the keyboard -- otherwise the sheet stays squeezed. */
+    var typing = document.activeElement === el.input;
+    var height = typing && vv ? vv.height : window.innerHeight;
+    var overlap = typing && vv
+      ? Math.max(0, window.innerHeight - (vv.height + vv.offsetTop))
+      : 0;
     el.root.style.bottom = overlap + 'px';
-    el.root.style.maxHeight = Math.max(220, vv.height * 0.88) + 'px';
+    el.root.style.maxHeight = Math.max(220, height * 0.88) + 'px';
+  }
+
+  /* --- switcher strip ---------------------------------------------------- */
+
+  var STATE_DOT = {
+    working: '#34d399', stuck_after_agent: '#f97316', waiting: '#fbbf24',
+    error: '#ef4444', context_limit: '#a78bfa', idle: '#6b7280',
+  };
+
+  /* The dashboard publishes the order it renders; without it (a console opened
+   * before the first paint, or from a deep link) fall back to the raw snapshot,
+   * which is at least a list of live sessions. */
+  function sessionOrder() {
+    var list = window.ctbSessionOrder;
+    if (Array.isArray(list) && list.length) return list;
+    return state.order || [];
+  }
+
+  function fetchOrder() {
+    if (Array.isArray(window.ctbSessionOrder) && window.ctbSessionOrder.length) return;
+    fetch('/api/sessions', { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data || !data.sessions) return;
+        state.order = data.sessions.map(function (s) {
+          var stripped = String(s.name).replace(/^claude[_-]/, '');
+          var wt = stripped.indexOf('_wt_');
+          return {
+            name: s.name,
+            state: s.state,
+            label: wt === -1 ? stripped : stripped.slice(0, wt),
+            branch: wt === -1 ? null : stripped.slice(wt + 4),
+          };
+        });
+        renderStrip();
+      })
+      .catch(function () { /* the strip just stays empty */ });
+  }
+
+  function renderStrip() {
+    if (!el.strip) return;
+    var list = sessionOrder();
+    el.strip.textContent = '';
+    if (!list.length) {
+      el.strip.style.display = 'none';
+      return;
+    }
+    el.strip.style.display = 'flex';
+
+    var current = null;
+    list.forEach(function (item) {
+      var active = item.name === state.session;
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.setAttribute('data-switch-session', item.name);
+      chip.setAttribute('aria-label', item.label + ' 세션으로 전환');
+      if (active) chip.setAttribute('aria-current', 'true');
+      /* Three per screen: the strip is the width of the sheet, minus two gaps. */
+      chip.style.cssText = [
+        'flex:0 0 calc((100% - 12px) / 3)', 'scroll-snap-align:start',
+        'display:flex', 'align-items:center', 'gap:6px',
+        'padding:7px 9px', 'border-radius:10px', 'cursor:pointer',
+        'text-align:left', 'overflow:hidden',
+        'touch-action:manipulation',
+        'background:' + (active ? '#1e3a8a' : '#111827'),
+        'border:1px solid ' + (active ? '#3b82f6' : '#1f2937'),
+        'color:' + (active ? '#e5e7eb' : '#9ca3af'),
+      ].join(';');
+
+      var dot = document.createElement('span');
+      dot.style.cssText = 'width:7px;height:7px;border-radius:50%;flex-shrink:0;' +
+        'background:' + (STATE_DOT[item.state] || '#6b7280') + ';';
+
+      var text = document.createElement('span');
+      text.style.cssText = "min-width:0;font-family:'JetBrains Mono',monospace;" +
+        'font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;' +
+        'text-overflow:ellipsis;';
+      text.textContent = item.branch ? item.label + ' ⎇' + item.branch : item.label;
+      chip.title = item.name;
+
+      chip.appendChild(dot);
+      chip.appendChild(text);
+      el.strip.appendChild(chip);
+      if (active) current = chip;
+    });
+
+    if (current) {
+      /* Keep the open session in view without yanking the page around it. */
+      el.strip.scrollLeft = Math.max(0,
+        current.offsetLeft - el.strip.clientWidth / 2 + current.offsetWidth / 2);
+    }
   }
 
   /* --- status line ------------------------------------------------------- */
@@ -542,6 +660,8 @@
     el.tail.textContent = '불러오는 중…';
     setStatus('');
     el.root.style.display = 'flex';
+    renderStrip();
+    fetchOrder();
     fitViewport();
     startPolling();
     // Do not autofocus: on iOS that pops the keyboard before the pane is read.
@@ -571,6 +691,16 @@
     e.preventDefault();
     e.stopPropagation();
     show(trigger.getAttribute('data-console-session'));
+  });
+
+  /* Strip taps switch the console in place -- same sheet, new session. */
+  document.addEventListener('click', function (e) {
+    var chip = e.target.closest && e.target.closest('[data-switch-session]');
+    if (!chip) return;
+    e.preventDefault();
+    e.stopPropagation();
+    var name = chip.getAttribute('data-switch-session');
+    if (name && name !== state.session) show(name);
   });
 
   /* --- deep link -------------------------------------------------------- */
