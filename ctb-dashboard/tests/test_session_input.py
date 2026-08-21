@@ -159,3 +159,51 @@ def test_a_mode_char_mid_prompt_is_ordinary_text(run):
     assert run.argvs == [
         ["tmux", "send-keys", "-t", "claude_demo", "run a!b", "Enter"]
     ]
+
+
+def test_a_failed_body_send_closes_the_box_it_opened(monkeypatch):
+    """The mode char lands first. If the body send then fails, the session is
+    left in an empty shell box -- and the NEXT prompt, ordinary prose with no
+    '!', would be typed into it and executed as a shell command."""
+    calls = []
+
+    def flaky(argv, **kwargs):
+        calls.append(argv)
+
+        class R:
+            pass
+
+        r = R()
+        # the lead char and the recovery Escape succeed; the body send does not
+        r.returncode = 1 if argv[3:5] == ["claude_demo", "cf"] else 0
+        r.stdout = r.stderr = ""
+        return r
+
+    monkeypatch.setattr(session_input.subprocess, "run", flaky)
+
+    with pytest.raises(RuntimeError):
+        session_input.send_prompt("claude_demo", "!cf")
+
+    assert calls[0] == ["tmux", "send-keys", "-t", "claude_demo", "-l", "!"]
+    assert calls[-1] == ["tmux", "send-keys", "-t", "claude_demo", "Escape"], \
+        "the shell box the send opened must not be left open"
+
+
+def test_no_box_no_escape(run):
+    """A plain prompt that fails opened nothing, so nothing needs closing."""
+    run.returncode = 1
+    with pytest.raises(RuntimeError):
+        session_input.send_prompt("claude_demo", "테스트 돌려줘")
+    assert not any(a[-1] == "Escape" for a in run.argvs)
+
+
+def test_a_prompt_starting_with_a_dash_goes_through_the_buffer(run):
+    """tmux reads a leading '-' as a flag and refuses the send outright
+    ("command send-keys: invalid flag --"), and send-keys has no '--'
+    terminator. The paste path carries the text as data instead."""
+    session_input.send_prompt("claude_demo", "--force 옵션 붙여서 다시")
+
+    assert run.argvs[0][:3] == ["tmux", "load-buffer", "-b"]
+    assert run.argvs[-1] == ["tmux", "send-keys", "-t", "claude_demo", "Enter"]
+    assert not any(a[4:5] == ["--force 옵션 붙여서 다시"] for a in run.argvs), \
+        "the text must never reach tmux as an argv position that parses flags"

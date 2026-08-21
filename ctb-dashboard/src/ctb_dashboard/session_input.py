@@ -184,19 +184,38 @@ def send_prompt(name: str, text: str) -> None:
     # two separate newlines further down.
     body = body.replace("\r\n", "\n").replace("\r", "\n")
 
+    opened_a_box = False
     if body[0] in _MODE_CHARS:
         if len(body) == 1:
             raise ValueError("prompt is only a mode character")
         _send_lead_char(name, body[0])
         body = body[1:]
+        opened_a_box = True
 
-    if "\n" not in body:
-        _tmux(["tmux", "send-keys", "-t", name, body, "Enter"])
-        return
+    try:
+        # A body starting with '-' would be read by tmux as a flag ("command
+        # send-keys: invalid flag --"), and send-keys has no '--' terminator.
+        # The paste path carries text as data, so it does not care.
+        if "\n" not in body and not body.startswith("-"):
+            _tmux(["tmux", "send-keys", "-t", name, body, "Enter"])
+            return
 
-    _tmux(["tmux", "load-buffer", "-b", _BUFFER_NAME, "-"], stdin_text=body)
-    _tmux(["tmux", "paste-buffer", "-b", _BUFFER_NAME, "-t", name, "-p", "-d"])
-    _tmux(["tmux", "send-keys", "-t", name, "Enter"])
+        _tmux(["tmux", "load-buffer", "-b", _BUFFER_NAME, "-"], stdin_text=body)
+        _tmux(["tmux", "paste-buffer", "-b", _BUFFER_NAME, "-t", name, "-p", "-d"])
+        _tmux(["tmux", "send-keys", "-t", name, "Enter"])
+    except (RuntimeError, subprocess.TimeoutExpired):
+        # The mode character already landed, so the session is sitting in an
+        # open shell (or memory) box with nothing in it. Leaving it that way is
+        # worse than the failed send: the NEXT prompt -- ordinary prose, no '!'
+        # -- would be typed into that box and run as a shell command. Escape
+        # closes it. Best effort; the original failure is what the caller needs
+        # to hear.
+        if opened_a_box:
+            try:
+                _tmux(["tmux", "send-keys", "-t", name, "Escape"])
+            except Exception:
+                logger.warning("could not close the mode box on %s after a failed send", name)
+        raise
 
 
 def send_interrupt(name: str) -> None:
