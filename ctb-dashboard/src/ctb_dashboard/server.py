@@ -741,6 +741,40 @@ static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+
+@app.middleware("http")
+async def _revalidate_static(request: Request, call_next):
+    """Make the browser check /static with us before reusing its copy.
+
+    StaticFiles sends an ETag and Last-Modified but no Cache-Control, and a
+    response with neither Cache-Control nor Expires is heuristically cached:
+    the browser invents a freshness lifetime and serves the old file without
+    asking. The dashboard's JS is the app itself, so a phone can keep running
+    a previous deploy indefinitely -- which is exactly what a stale console
+    looks like. 'no-cache' does not mean 'do not store': the copy is kept and
+    revalidated, so an unchanged file still costs one 304.
+    """
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+def _asset_version() -> str:
+    """Newest mtime across the served JS, as a cache-busting query value.
+
+    Belt and braces with the header above: a URL that changes on deploy cannot
+    be answered from any cache, including a service worker's, whatever the
+    headers say.
+    """
+    newest = 0.0
+    js_dir = os.path.join(static_dir, "js")
+    if os.path.isdir(js_dir):
+        for entry in os.scandir(js_dir):
+            if entry.name.endswith(".js"):
+                newest = max(newest, entry.stat().st_mtime)
+    return str(int(newest))
+
 _templates_dir = os.path.join(os.path.dirname(__file__), "templates")
 templates = Jinja2Templates(directory=_templates_dir)
 
@@ -766,7 +800,11 @@ async def root(request: Request):
     response = templates.TemplateResponse(
         request,
         "index.html",
-        {"csp_nonce": nonce, "dashboard_url": os.environ.get("CTB_DASHBOARD_URL", "")},
+        {
+            "csp_nonce": nonce,
+            "dashboard_url": os.environ.get("CTB_DASHBOARD_URL", ""),
+            "asset_v": _asset_version(),
+        },
     )
     response.headers["Content-Security-Policy"] = csp
     # Dashboard HTML embeds its JS inline; never let a browser serve a stale

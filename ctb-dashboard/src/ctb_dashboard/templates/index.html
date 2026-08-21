@@ -221,9 +221,9 @@
     [data-session-name]:focus-visible { outline: 2px solid rgba(129,140,248,0.85); outline-offset: 2px; }
   </style>
   <!-- Alpine.js CSP build (eval-free) — vendored fallback if CDN fails -->
-  <script nonce="{{ csp_nonce }}" src="/static/js/control-token.js"></script>
-  <script nonce="{{ csp_nonce }}" src="/static/js/session-control.js"></script>
-  <script nonce="{{ csp_nonce }}" src="/static/js/session-create.js"></script>
+  <script nonce="{{ csp_nonce }}" src="/static/js/control-token.js?v={{ asset_v }}"></script>
+  <script nonce="{{ csp_nonce }}" src="/static/js/session-control.js?v={{ asset_v }}"></script>
+  <script nonce="{{ csp_nonce }}" src="/static/js/session-create.js?v={{ asset_v }}"></script>
   <script nonce="{{ csp_nonce }}"
           src="https://cdn.jsdelivr.net/npm/@alpinejs/csp@3/dist/cdn.min.js"
           defer
