@@ -16,7 +16,8 @@
   var POLL_MS = 2000;
 
   var state = { session: null, timer: null, busy: false,
-                lines: null, selStart: null, selEnd: null, order: null };
+                lines: null, selStart: null, selEnd: null, order: null,
+                drafts: {} };
   var el = {};
 
   /* --- markup ------------------------------------------------------------ */
@@ -586,10 +587,20 @@
     if (state.busy || !state.session) return;
     var text = el.input.value;
     if (!text.trim()) return;
+    /* The response can land after a switch; everything it touches is keyed to
+     * the session the send was for, not to whatever is open when it returns. */
+    var sent = state.session;
+    /* Status belongs to the console it describes: if the user has switched
+     * away by the time the answer lands, do not paint it over another
+     * session's header. Alerts still fire -- a refusal is worth interrupting
+     * for wherever you are. */
+    var say = function (text, color) {
+      if (state.session === sent) setStatus(text, color);
+    };
 
     state.busy = true;
     el.send.disabled = true;
-    setStatus('전송 중…', '#9ca3af');
+    say('전송 중…', '#9ca3af');
 
     post('/prompt', { text: text })
       .then(function (res) {
@@ -599,27 +610,28 @@
       })
       .then(function (r) {
         if (r.status === 200) {
-          el.input.value = '';
+          delete state.drafts[sent];
+          if (state.session === sent) el.input.value = '';
           // confirmed:false means tmux accepted it but the pane did not change.
           // Say so instead of implying it landed.
           if (r.body.confirmed === false) {
-            setStatus('전송됨 · 화면 변화 없음', '#fbbf24');
+            say('전송됨 · 화면 변화 없음', '#fbbf24');
           } else {
-            setStatus('전송됨', '#34d399');
+            say('전송됨', '#34d399');
           }
           pollTail();
         } else if (r.status === 409) {
-          setStatus('거부: ' + (r.body.reason || ''), '#fbbf24');
+          say('거부: ' + (r.body.reason || ''), '#fbbf24');
           if (r.body.message) window.alert(r.body.message);
         } else if (r.status === 400) {
-          setStatus('차단됨', '#ef4444');
+          say('차단됨', '#ef4444');
           window.alert('위험 명령 패턴으로 차단되었습니다.');
         } else {
-          setStatus('실패 (' + r.status + ')', '#ef4444');
+          say('실패 (' + r.status + ')', '#ef4444');
           if (r.body.detail) window.alert(String(r.body.detail));
         }
       })
-      .catch(function () { setStatus('네트워크 오류', '#ef4444'); })
+      .catch(function () { say('네트워크 오류', '#ef4444'); })
       .then(function () {
         state.busy = false;
         el.send.disabled = false;
@@ -654,6 +666,18 @@
 
   function show(name) {
     build();
+    /* A half-typed prompt belongs to the session it was written for. Switching
+     * used to leave it in the box, so the next 전송 would deliver it to whoever
+     * was open now -- a prompt meant for one session landing in another. Park
+     * the draft under its own session and restore that session's draft. */
+    if (el.input) {
+      if (state.session && state.session !== name) {
+        state.drafts[state.session] = el.input.value;
+      }
+      if (state.session !== name) {
+        el.input.value = state.drafts[name] || '';
+      }
+    }
     state.session = name;
     state.selStart = null;
     state.selEnd = null;
@@ -672,6 +696,7 @@
 
   function hide() {
     stopPolling();
+    if (el.input && state.session) state.drafts[state.session] = el.input.value;
     state.session = null;
     state.selStart = null;
     state.selEnd = null;
