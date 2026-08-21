@@ -118,3 +118,44 @@ def test_tmux_failure_raises(monkeypatch):
     monkeypatch.setattr(session_input.subprocess, "run", FakeRun(returncode=1))
     with pytest.raises(RuntimeError):
         session_input.send_prompt("claude_demo", "hello")
+
+
+def test_bash_mode_char_is_sent_as_its_own_keystroke(run):
+    """'!cf' in one send-keys arrives as one 4-byte read, which a chunk-reading
+    TUI treats as a paste: the '!' lands as literal text and the bash box never
+    opens. Alone it is a keypress, and the mode switches."""
+    session_input.send_prompt("claude_demo", "!cf")
+
+    assert run.argvs == [
+        ["tmux", "send-keys", "-t", "claude_demo", "-l", "!"],
+        ["tmux", "send-keys", "-t", "claude_demo", "cf", "Enter"],
+    ]
+
+
+def test_memory_mode_char_too(run):
+    session_input.send_prompt("claude_demo", "#기억해둘 것")
+
+    assert run.argvs[0] == ["tmux", "send-keys", "-t", "claude_demo", "-l", "#"]
+
+
+def test_mode_char_before_a_multiline_body(run):
+    session_input.send_prompt("claude_demo", "!ls\nsecond")
+
+    assert run.argvs[0] == ["tmux", "send-keys", "-t", "claude_demo", "-l", "!"]
+    assert run.argvs[1][:3] == ["tmux", "load-buffer", "-b"]
+    assert run.argvs[-1] == ["tmux", "send-keys", "-t", "claude_demo", "Enter"]
+
+
+def test_a_bare_mode_char_is_refused(run):
+    """Nothing to run: it would leave the session sitting in an empty bash box."""
+    with pytest.raises(ValueError):
+        session_input.send_prompt("claude_demo", "!")
+    assert run.argvs == []
+
+
+def test_a_mode_char_mid_prompt_is_ordinary_text(run):
+    session_input.send_prompt("claude_demo", "run a!b")
+
+    assert run.argvs == [
+        ["tmux", "send-keys", "-t", "claude_demo", "run a!b", "Enter"]
+    ]

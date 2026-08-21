@@ -152,6 +152,28 @@ def _validate(text: str) -> str:
     return stripped
 
 
+# Characters Claude Code reads as a mode switch rather than as text: '!' opens
+# the bash box, '#' the memory box. Both are consumed at keypress time, so they
+# only work when they arrive alone -- see _send_lead_char.
+_MODE_CHARS = ("!", "#")
+
+
+def _send_lead_char(name: str, char: str) -> None:
+    """Deliver a mode-switch character as its own keystroke.
+
+    ``send-keys -t s '!cf' Enter`` reaches the pane as a single 4-byte read
+    (verified against a raw-mode reader), and a TUI that reads stdin in chunks
+    treats a multi-byte chunk as a paste -- inserted as literal text, with no
+    keypress for the '!' to act on. So a phone typing '!cf' got the string
+    '!cf' in the prompt box instead of the bash box.
+
+    Sent on its own the character arrives in its own read and switches the mode.
+    Consecutive send-keys calls do not coalesce in the pty (checked back to
+    back, ~4ms apart), so this needs no delay.
+    """
+    _tmux(["tmux", "send-keys", "-t", name, "-l", char])
+
+
 def send_prompt(name: str, text: str) -> None:
     """Type `text` into the session and submit it.
 
@@ -161,6 +183,12 @@ def send_prompt(name: str, text: str) -> None:
     # Normalise line endings so CRLF from a browser textarea does not read as
     # two separate newlines further down.
     body = body.replace("\r\n", "\n").replace("\r", "\n")
+
+    if body[0] in _MODE_CHARS:
+        if len(body) == 1:
+            raise ValueError("prompt is only a mode character")
+        _send_lead_char(name, body[0])
+        body = body[1:]
 
     if "\n" not in body:
         _tmux(["tmux", "send-keys", "-t", name, body, "Enter"])
