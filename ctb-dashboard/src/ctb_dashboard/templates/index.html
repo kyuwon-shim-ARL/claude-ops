@@ -231,8 +231,8 @@
 </head>
 <body class="min-h-screen" style="background: radial-gradient(ellipse 80% 50% at 50% 0%, #1a1530 0%, #0f0d14 60%), #0f0d14; color: #e2dff0;">
 
-  <header id="app-header" class="px-4 py-3 flex items-center justify-between" style="background: linear-gradient(180deg, rgba(22,18,31,0.95) 0%, rgba(15,13,20,0.8) 100%); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255,255,255,0.06); transition: background 0.4s ease, border-color 0.4s ease;">
-    <div class="flex items-center gap-3">
+  <header id="app-header" class="px-4 py-3 flex flex-wrap items-center justify-between gap-y-2" style="background: linear-gradient(180deg, rgba(22,18,31,0.95) 0%, rgba(15,13,20,0.8) 100%); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255,255,255,0.06); transition: background 0.4s ease, border-color 0.4s ease;">
+    <div class="flex items-center gap-3 min-w-0">
       <h1 id="app-title" class="text-lg font-semibold tracking-tight">Claude-CTB Dashboard</h1>
       <span id="badge-count" class="text-xs px-2.5 py-0.5 rounded-full" style="background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.1); transition: background 0.3s, border-color 0.3s, color 0.3s;">0 sessions</span>
       <button id="btn-copy-names" class="hidden hover:bg-white/10 text-xs px-2.5 py-0.5 rounded-full transition-colors cursor-pointer" style="background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.1);" title="Copy session names to clipboard">Copy Names</button>
