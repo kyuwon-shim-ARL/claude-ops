@@ -30,13 +30,16 @@
     root.setAttribute('aria-modal', 'true');
     root.setAttribute('aria-label', '세션 콘솔');
     root.style.cssText = [
-      'position:fixed', 'left:0', 'right:0', 'bottom:0', 'z-index:60',
+      /* Full-bleed, not a peeking bottom sheet: the band of dashboard that
+       * used to show above it served nothing -- no backdrop, no tap-to-close --
+       * and a tap there hit the card underneath and opened a second console.
+       * Session switching now lives in the strip inside the sheet instead. */
+      'position:fixed', 'left:0', 'right:0', 'top:0', 'bottom:0', 'z-index:60',
       'display:none', 'flex-direction:column',
-      'max-height:88vh', 'padding:10px 12px 14px',
-      'border-radius:18px 18px 0 0',
+      /* Standalone PWA: top:0 is under the status bar / notch, so inset. */
+      'padding:calc(10px + env(safe-area-inset-top)) 12px' +
+        ' calc(14px + env(safe-area-inset-bottom))',
       'background:#0b1220', 'color:#e5e7eb',
-      'border-top:1px solid #1f2937',
-      'box-shadow:0 -12px 40px rgba(0,0,0,0.55)',
       'font-family:ui-sans-serif,system-ui,sans-serif',
     ].join(';');
 
@@ -280,12 +283,12 @@
      * overlap by definition, so ignore a visual viewport that iOS left short
      * after dismissing the keyboard -- otherwise the sheet stays squeezed. */
     var typing = document.activeElement === el.input;
-    var height = typing && vv ? vv.height : window.innerHeight;
     var overlap = typing && vv
       ? Math.max(0, window.innerHeight - (vv.height + vv.offsetTop))
       : 0;
+    /* top:0 pins the head; moving the foot up by the keyboard overlap is what
+     * shrinks the box, and the tail (flex:1) gives back the space. */
     el.root.style.bottom = overlap + 'px';
-    el.root.style.maxHeight = Math.max(220, height * 0.88) + 'px';
   }
 
   /* --- switcher strip ---------------------------------------------------- */
