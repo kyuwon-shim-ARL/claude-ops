@@ -125,7 +125,8 @@
 
   function inputCss() {
     return [
-      'width:100%', 'box-sizing:border-box', 'font-size:13px', 'padding:8px 11px',
+      /* 16px: anything smaller makes iOS zoom in on focus and stay there. */
+      'width:100%', 'box-sizing:border-box', 'font-size:16px', 'padding:8px 11px',
       'border-radius:10px', 'background:rgba(255,255,255,0.06)',
       'border:1px solid rgba(255,255,255,0.12)', 'color:inherit', 'outline:none',
     ].join(';') + ';';

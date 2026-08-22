@@ -172,7 +172,13 @@
     input.style.cssText = [
       'flex:1', 'resize:none', 'padding:9px 10px', 'border-radius:10px',
       'background:#020617', 'color:#e5e7eb', 'border:1px solid #374151',
-      'font-size:15px', // >=16px avoids iOS zoom-on-focus; 15 + no-zoom meta is fine
+      /* 16px, and not a pixel less. Below that, iOS zooms the page in when the
+       * field takes focus -- and it does not zoom back out when focus leaves,
+       * so every tap on the box left the user pinching to get the screen back.
+       * The comment this replaces assumed a no-zoom viewport meta; there is
+       * none (index.html sends width=device-width, initial-scale=1 only), and
+       * Safari ignores user-scalable=no anyway. */
+      'font-size:16px',
       'line-height:1.4', 'font-family:inherit',
     ].join(';');
     /* Sending is decided on the line break, not on the key.
