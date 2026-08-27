@@ -347,6 +347,7 @@ def _probe_session(name: str) -> tuple:
     pending_count = _state_analyzer.extract_pending_task_count(screen_content)
     progress = _state_analyzer.extract_screen_progress(screen_content)
     last_reply = _state_analyzer.extract_last_reply(screen_content)
+    recap = _state_analyzer.extract_recap(screen_content)
 
     # Stall detection: track when WORKING state started
     if state == SessionState.WORKING:
@@ -358,7 +359,7 @@ def _probe_session(name: str) -> tuple:
         working_since = None
 
     return (name, state.value, path, context_percent, last_prompt, work_context,
-            pending_count, working_since, progress, last_reply)
+            pending_count, working_since, progress, last_reply, recap)
 
 
 # A completion notification arrives on a lock screen, where the reader has a
@@ -383,10 +384,16 @@ def _completion_body(entry: Dict[str, Any]) -> str:
     if prompt:
         lines.append(f"❯ {prompt}")
 
-    reply = _one_line(entry.get("last_reply") or "", 110)
-    # A tool invocation is not an outcome; it is what the outcome was made of.
-    if reply and not _TOOL_CALL_RE.match(reply):
-        lines.append(f"● {reply}")
+    # Claude's own recap says what the session is about far better than the
+    # first line of the last reply; fall back to the reply when absent.
+    recap = _one_line(entry.get("recap") or "", 200)
+    if recap:
+        lines.append(f"※ {recap}")
+    else:
+        reply = _one_line(entry.get("last_reply") or "", 110)
+        # A tool invocation is not an outcome; it is what the outcome was made of.
+        if reply and not _TOOL_CALL_RE.match(reply):
+            lines.append(f"● {reply}")
 
     extras = []
     progress = entry.get("progress")
@@ -455,7 +462,7 @@ def _poll_sessions() -> Dict[str, Any]:
 
     session_list = []
     for (name, state_val, path, context_percent, last_prompt, work_context,
-         pending_count, working_since, progress, last_reply) in results:
+         pending_count, working_since, progress, last_reply, recap) in results:
         # Only update timestamp when state actually changes
         prev_ts = _prev_session_timestamps.get(name, 0)
         prev_state = None
@@ -504,6 +511,7 @@ def _poll_sessions() -> Dict[str, Any]:
             "work_context": work_context or "",   # always string (frontend shows placeholder)
             "progress": list(progress) if progress else None,  # [n, m] from [Stage n/m]
             "last_reply": last_reply or "",
+            "recap": recap or "",                 # Claude Code's own session recap (preferred summary)
             "pending_count": pending_count,       # null=no TodoWrite, 0=all done, N=pending tasks
             "working_since": working_since,       # epoch float when WORKING started, null otherwise
             "last_activity": activity_map.get(name, 0),  # tmux session_activity epoch (staleness filter)
@@ -515,7 +523,8 @@ def _poll_sessions() -> Dict[str, Any]:
     # Content hash for SSE change detection (includes dynamic fields for real-time updates)
     content_key = json.dumps([
         (s["name"], s["state"], bool(s.get("completed_at")),
-         s.get("context_percent"), s.get("last_prompt", ""), s.get("work_context", ""))
+         s.get("context_percent"), s.get("last_prompt", ""), s.get("work_context", ""),
+         s.get("recap", ""))
         for s in session_list
     ], sort_keys=True)
     content_hash = hashlib.md5(content_key.encode()).hexdigest()[:8]

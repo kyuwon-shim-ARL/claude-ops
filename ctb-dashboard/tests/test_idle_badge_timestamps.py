@@ -36,8 +36,8 @@ def clean_state():
 
 def _probe(name, state="idle"):
     """A _probe_session return tuple: (name, state, path, ctx, prompt,
-    work_context, pending, working_since, progress, last_reply)."""
-    return (name, state, "/tmp/x", 10, "", "", None, None, None, "")
+    work_context, pending, working_since, progress, last_reply, recap)."""
+    return (name, state, "/tmp/x", 10, "", "", None, None, None, "", "")
 
 
 def _poll(sessions, activity, probes, tmpdir=None):

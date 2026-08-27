@@ -1038,6 +1038,40 @@ class SessionStateAnalyzer:
                     return text[:100]
         return None
 
+    # Claude Code prints a session recap above the prompt a while after work
+    # finishes: "※ recap: <one or two sentences> (disable recaps in /config)".
+    # It is a far better card summary than the first line of the last reply,
+    # so prefer it when present. Continuation lines are indented under the ※.
+    _RECAP_RE = re.compile(r'^\u203b\s*recap:\s*(.*)$')
+    _RECAP_TAIL_RE = re.compile(r'\(disable recaps in /config\)\s*$')
+
+    def extract_recap(self, screen_content: Optional[str]) -> Optional[str]:
+        """Claude Code's own session recap, joined into one line."""
+        if not screen_content:
+            return None
+        lines = screen_content.split("\n")
+        start = None
+        first = ""
+        for i in range(len(lines) - 1, -1, -1):
+            m = self._RECAP_RE.match(lines[i].strip())
+            if m:
+                start = i
+                first = m.group(1).strip()
+                break
+        if start is None:
+            return None
+        parts = [first] if first else []
+        for line in lines[start + 1:]:
+            # Continuation lines are indented; anything else ends the block.
+            if not line.startswith("  "):
+                break
+            stripped = line.strip()
+            if not stripped or stripped.startswith(("\u276f", "\u2500", "[OMC#", "\u23f5")):
+                break
+            parts.append(stripped)
+        text = self._RECAP_TAIL_RE.sub("", " ".join(parts)).strip()
+        return text[:300] or None
+
     def extract_pending_task_count(self, screen_content: str) -> int | None:
         """Count unchecked TodoWrite tasks visible on screen.
 
