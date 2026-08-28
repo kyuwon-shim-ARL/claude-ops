@@ -45,9 +45,10 @@
     ].join(';');
 
     /* Switcher strip: the sheet used to open with dead space above it, and
-     * changing session meant closing, finding the card, tapping again. Three
-     * chips fit a phone width; the rest scroll horizontally, in the grid's own
-     * order (recency/state), flat — worktrees are not grouped here. */
+     * changing session meant closing, finding the card, tapping again. Chips
+     * are sized to their names and the rail scrolls horizontally, in the grid's
+     * own order (recency/state), flat — worktrees are not grouped here.
+     * makePannable() adds the wheel and drag affordances a mouse needs. */
     var strip = document.createElement('div');
     strip.style.cssText = [
       'display:flex', 'gap:6px', 'flex-shrink:0', 'margin-bottom:8px',
@@ -55,6 +56,7 @@
       'scroll-snap-type:x proximity', '-webkit-overflow-scrolling:touch',
       'scrollbar-width:none',
     ].join(';');
+    makePannable(strip);
 
     var header = document.createElement('div');
     header.style.cssText =
@@ -298,6 +300,91 @@
     el.root.style.bottom = overlap + 'px';
   }
 
+  /* --- panning the switcher rail ----------------------------------------- */
+
+  /* A mouse has no horizontal wheel and the rail has no visible scrollbar, so
+   * on a desktop the sessions past the edge were unreachable without a
+   * trackpad. Vertical wheel pans the rail, and dragging it works like grabbing
+   * the row itself. Both are desktop affordances: touch already pans natively,
+   * so pointer dragging is bound for mouse input only -- claiming touch here
+   * would fight the native scroll it is imitating.
+   */
+  var DRAG_SLOP = 5;  /* px before a press counts as a drag rather than a tap */
+
+  function makePannable(rail) {
+    rail.addEventListener('wheel', function (e) {
+      /* A trackpad's horizontal gesture already works; only translate when the
+       * vertical axis dominates, and only while there is somewhere to go --
+       * otherwise the sheet below can no longer be scrolled over the rail. */
+      if (e.deltaX !== 0 || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      var max = rail.scrollWidth - rail.clientWidth;
+      if (max <= 0) return;
+      var next = Math.min(max, Math.max(0, rail.scrollLeft + e.deltaY));
+      if (next === rail.scrollLeft) return;
+      rail.scrollLeft = next;
+      e.preventDefault();
+    }, { passive: false });
+
+    var origin = null;
+
+    rail.addEventListener('pointerdown', function (e) {
+      if (e.pointerType !== 'mouse' || e.button !== 0) return;
+      if (rail.scrollWidth <= rail.clientWidth) return;
+      origin = { x: e.clientX, scroll: rail.scrollLeft, dragging: false };
+    });
+
+    rail.addEventListener('pointermove', function (e) {
+      if (!origin) return;
+      var moved = e.clientX - origin.x;
+      if (!origin.dragging) {
+        if (Math.abs(moved) < DRAG_SLOP) return;
+        origin.dragging = true;
+        /* Snap fights a drag: the rail jumps to the nearest chip mid-gesture. */
+        rail.style.scrollSnapType = 'none';
+        rail.style.cursor = 'grabbing';
+        rail.style.userSelect = 'none';
+        /* Keep receiving moves when the cursor leaves the rail. */
+        if (rail.setPointerCapture) rail.setPointerCapture(e.pointerId);
+      }
+      rail.scrollLeft = origin.scroll - moved;
+      e.preventDefault();
+    });
+
+    function endDrag(e) {
+      if (!origin) return;
+      var dragged = origin.dragging;
+      origin = null;
+      rail.style.scrollSnapType = 'x proximity';
+      rail.style.cursor = '';
+      rail.style.userSelect = '';
+      if (e && e.pointerId != null && rail.releasePointerCapture) {
+        try { rail.releasePointerCapture(e.pointerId); } catch (err) { /* already gone */ }
+      }
+      /* A drag that ends over a chip must not also switch session. The click
+       * fires after pointerup, so swallow exactly that one in the capture
+       * phase, before the document-level switch handler sees it. */
+      if (dragged) {
+        var swallow = function (ev) {
+          ev.stopPropagation();
+          ev.preventDefault();
+          done();
+        };
+        var done = function () {
+          window.removeEventListener('click', swallow, true);
+          clearTimeout(timer);
+        };
+        /* A drag that ends off a clickable target produces no click at all.
+         * Without the timer that listener would survive to eat an unrelated
+         * click somewhere else in the sheet. */
+        var timer = setTimeout(done, 300);
+        window.addEventListener('click', swallow, true);
+      }
+    }
+
+    rail.addEventListener('pointerup', endDrag);
+    rail.addEventListener('pointercancel', endDrag);
+  }
+
   /* --- switcher strip ---------------------------------------------------- */
 
   var STATE_DOT = {
@@ -353,11 +440,13 @@
       chip.setAttribute('data-switch-session', item.name);
       chip.setAttribute('aria-label', item.label + ' 세션으로 전환');
       if (active) chip.setAttribute('aria-current', 'true');
-      /* Three per screen: the strip is the width of the sheet, minus two gaps. */
+      /* Content-sized, not one-third of the sheet: three fixed slots wasted the
+       * row on short names and forced a scroll to reach the fourth session.
+       * Capped so one long name cannot take the whole bar. */
       chip.style.cssText = [
-        'flex:0 0 calc((100% - 12px) / 3)', 'scroll-snap-align:start',
-        'display:flex', 'align-items:center', 'gap:6px',
-        'padding:7px 9px', 'border-radius:10px', 'cursor:pointer',
+        'flex:0 0 auto', 'max-width:45%', 'scroll-snap-align:start',
+        'display:flex', 'align-items:center', 'gap:5px',
+        'padding:5px 8px', 'border-radius:9px', 'cursor:pointer',
         'text-align:left', 'overflow:hidden',
         'touch-action:manipulation',
         'background:' + (active ? '#1e3a8a' : '#111827'),
