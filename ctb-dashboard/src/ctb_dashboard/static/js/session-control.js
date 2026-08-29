@@ -271,7 +271,26 @@
     tailWrap.appendChild(tail);
     tailWrap.appendChild(frozen);
 
-    root.appendChild(strip);
+    /* The rail needs a positioned parent so the number hints can hang under it
+     * without taking layout space -- pressing the modifier must not resize the
+     * tail underneath. */
+    var stripWrap = document.createElement('div');
+    stripWrap.style.cssText = 'position:relative;flex-shrink:0;';
+
+    var hints = document.createElement('div');
+    hints.style.cssText = [
+      'display:none', 'position:absolute', 'top:100%', 'left:0', 'right:0',
+      'z-index:5', 'margin-top:-2px', 'padding:7px 8px',
+      'flex-wrap:wrap', 'gap:5px',
+      'border-radius:10px', 'background:rgba(2,6,23,0.97)',
+      'border:1px solid #334155', 'box-shadow:0 10px 30px rgba(0,0,0,0.55)',
+      'backdrop-filter:blur(6px)', '-webkit-backdrop-filter:blur(6px)',
+    ].join(';');
+
+    stripWrap.appendChild(strip);
+    stripWrap.appendChild(hints);
+
+    root.appendChild(stripWrap);
     root.appendChild(header);
     root.appendChild(tailWrap);
     root.appendChild(bar);
@@ -279,9 +298,9 @@
     root.appendChild(row);
     document.body.appendChild(root);
 
-    el = { root: root, strip: strip, title: title, status: status, tail: tail,
-           frozen: frozen, bar: bar, barLabel: barLabel, input: input,
-           send: send };
+    el = { root: root, strip: strip, hints: hints, title: title,
+           status: status, tail: tail, frozen: frozen, bar: bar,
+           barLabel: barLabel, input: input, send: send };
 
     /* The keyboard shrinks the visual viewport, and iOS does not always fire a
      * resize that brings it back when the keyboard closes without an edit --
@@ -511,6 +530,103 @@
         current.offsetLeft - el.strip.clientWidth / 2 + current.offsetWidth / 2);
     }
   }
+
+  /* --- number shortcuts -------------------------------------------------- */
+
+  /* Hold the accelerator and the first ten sessions -- rail order, left to
+   * right -- are numbered 1..9,0; pressing the digit switches to that one.
+   *
+   * Platform convention decides the accelerator: Cmd on a Mac, Ctrl elsewhere,
+   * which is what every tabbed app on each platform uses. Alt (Option) is bound
+   * as well, and is the one that always arrives: a browser TAB reserves
+   * Ctrl/Cmd+1..8 for its own tab switching and the page never gets to act on
+   * it. An installed PWA window has no tab strip, so there the documented
+   * chord works. Alt is reserved by nobody, so it covers the tab case.
+   */
+  var IS_MAC = /Mac|iPhone|iPad|iPod/.test(
+    (navigator.userAgentData && navigator.userAgentData.platform) ||
+    navigator.platform || navigator.userAgent);
+  var HINT_MAX = 10;
+
+  function accelHeld(e) {
+    return (IS_MAC ? e.metaKey : e.ctrlKey) || e.altKey;
+  }
+
+  /* '0' is the tenth, the convention terminals and editors use. */
+  function slotOf(key) {
+    if (key === '0') return 9;
+    if (key >= '1' && key <= '9') return key.charCodeAt(0) - 49;
+    return -1;
+  }
+
+  function hintsVisible() {
+    return el.hints && el.hints.style.display !== 'none';
+  }
+
+  function showHints() {
+    if (!el.hints || !state.session || hintsVisible()) return;
+    var list = sessionOrder().slice(0, HINT_MAX);
+    if (!list.length) return;
+    el.hints.textContent = '';
+    list.forEach(function (item, i) {
+      var active = item.name === state.session;
+      var pill = document.createElement('span');
+      pill.style.cssText = [
+        'display:inline-flex', 'align-items:center', 'gap:5px',
+        'padding:3px 8px', 'border-radius:8px', 'max-width:100%',
+        'font-size:11px', 'overflow:hidden',
+        'background:' + (active ? '#1e3a8a' : '#0f172a'),
+        'border:1px solid ' + (active ? '#3b82f6' : '#1f2937'),
+        'color:' + (active ? '#e5e7eb' : '#9ca3af'),
+      ].join(';');
+
+      var num = document.createElement('b');
+      num.textContent = i === 9 ? '0' : String(i + 1);
+      num.style.cssText = "font-family:'JetBrains Mono',monospace;font-size:10px;" +
+        'font-weight:700;color:#fbbf24;flex-shrink:0;';
+
+      var name = document.createElement('span');
+      name.textContent = item.label;
+      name.style.cssText = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+
+      pill.appendChild(num);
+      pill.appendChild(name);
+      el.hints.appendChild(pill);
+    });
+    el.hints.style.display = 'flex';
+  }
+
+  function hideHints() {
+    if (el.hints) el.hints.style.display = 'none';
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (!state.session) return;
+    if (e.key === 'Control' || e.key === 'Meta' || e.key === 'Alt') {
+      /* Only the accelerator for THIS platform opens the panel, so a stray
+       * Ctrl on a Mac does not advertise shortcuts that will not fire. */
+      if (e.key === 'Alt' || (IS_MAC ? e.key === 'Meta' : e.key === 'Control')) {
+        showHints();
+      }
+      return;
+    }
+    if (!accelHeld(e) || e.shiftKey) return;
+    var slot = slotOf(e.key);
+    if (slot === -1) return;
+    var item = sessionOrder()[slot];
+    hideHints();
+    if (!item) return;          /* fewer sessions than the digit pressed */
+    e.preventDefault();
+    if (item.name !== state.session) show(item.name);
+  });
+
+  document.addEventListener('keyup', function (e) {
+    if (!hintsVisible()) return;
+    if (e.key === 'Control' || e.key === 'Meta' || e.key === 'Alt') hideHints();
+  });
+
+  /* Alt-tabbing away leaves the modifier "held" forever otherwise. */
+  window.addEventListener('blur', hideHints);
 
   /* --- status line ------------------------------------------------------- */
 
@@ -844,6 +960,7 @@
     state.lines = null;
     if (el.bar) el.bar.style.display = 'none';
     setFrozen(false);
+    hideHints();
     if (el.root) el.root.style.display = 'none';
   }
 
