@@ -232,6 +232,11 @@
       e.preventDefault();
       submit();
     });
+    input.addEventListener('input', function () {
+      if (!state.session) return;
+      state.drafts[state.session] = input.value;
+      saveDrafts();
+    });
     // Keep the input visible when the on-screen keyboard opens.
     input.addEventListener('focus', function () {
       setTimeout(function () {
@@ -271,26 +276,7 @@
     tailWrap.appendChild(tail);
     tailWrap.appendChild(frozen);
 
-    /* The rail needs a positioned parent so the number hints can hang under it
-     * without taking layout space -- pressing the modifier must not resize the
-     * tail underneath. */
-    var stripWrap = document.createElement('div');
-    stripWrap.style.cssText = 'position:relative;flex-shrink:0;';
-
-    var hints = document.createElement('div');
-    hints.style.cssText = [
-      'display:none', 'position:absolute', 'top:100%', 'left:0', 'right:0',
-      'z-index:5', 'margin-top:-2px', 'padding:7px 8px',
-      'flex-wrap:wrap', 'gap:5px',
-      'border-radius:10px', 'background:rgba(2,6,23,0.97)',
-      'border:1px solid #334155', 'box-shadow:0 10px 30px rgba(0,0,0,0.55)',
-      'backdrop-filter:blur(6px)', '-webkit-backdrop-filter:blur(6px)',
-    ].join(';');
-
-    stripWrap.appendChild(strip);
-    stripWrap.appendChild(hints);
-
-    root.appendChild(stripWrap);
+    root.appendChild(strip);
     root.appendChild(header);
     root.appendChild(tailWrap);
     root.appendChild(bar);
@@ -298,9 +284,9 @@
     root.appendChild(row);
     document.body.appendChild(root);
 
-    el = { root: root, strip: strip, hints: hints, title: title,
-           status: status, tail: tail, frozen: frozen, bar: bar,
-           barLabel: barLabel, input: input, send: send };
+    el = { root: root, strip: strip, title: title, status: status, tail: tail,
+           frozen: frozen, bar: bar, barLabel: barLabel, input: input,
+           send: send };
 
     /* The keyboard shrinks the visual viewport, and iOS does not always fire a
      * resize that brings it back when the keyboard closes without an edit --
@@ -486,7 +472,7 @@
     el.strip.style.display = 'flex';
 
     var current = null;
-    list.forEach(function (item) {
+    list.forEach(function (item, index) {
       var active = item.name === state.session;
       var chip = document.createElement('button');
       chip.type = 'button';
@@ -519,6 +505,17 @@
       chip.title = item.name;
 
       chip.appendChild(dot);
+      if (index < HINT_MAX) {
+        var num = document.createElement('b');
+        num.setAttribute('data-numhint', '');
+        num.textContent = index === 9 ? '0' : String(index + 1);
+        num.style.cssText = "font-family:'JetBrains Mono',monospace;" +
+          'font-size:9px;font-weight:700;color:#fbbf24;flex-shrink:0;' +
+          'padding:0 3px;border-radius:4px;background:rgba(245,158,11,0.16);' +
+          'border:1px solid rgba(245,158,11,0.4);' +
+          'display:' + (accelDown ? 'inline-block' : 'none') + ';';
+        chip.appendChild(num);
+      }
       chip.appendChild(text);
       el.strip.appendChild(chip);
       if (active) current = chip;
@@ -559,45 +556,34 @@
     return -1;
   }
 
+  /* The number is drawn on the chip that already carries the name -- a separate
+   * panel repeated every label for no gain. renderStrip() builds the badges
+   * hidden and paintHints() is what reveals them, so a refresh landing mid-hold
+   * does not drop them. */
+  var accelDown = false;
+
   function hintsVisible() {
-    return el.hints && el.hints.style.display !== 'none';
+    return accelDown;
+  }
+
+  function paintHints() {
+    if (!el.strip) return;
+    var badges = el.strip.querySelectorAll('[data-numhint]');
+    for (var i = 0; i < badges.length; i++) {
+      badges[i].style.display = accelDown ? 'inline-block' : 'none';
+    }
   }
 
   function showHints() {
-    if (!el.hints || !state.session || hintsVisible()) return;
-    var list = sessionOrder().slice(0, HINT_MAX);
-    if (!list.length) return;
-    el.hints.textContent = '';
-    list.forEach(function (item, i) {
-      var active = item.name === state.session;
-      var pill = document.createElement('span');
-      pill.style.cssText = [
-        'display:inline-flex', 'align-items:center', 'gap:5px',
-        'padding:3px 8px', 'border-radius:8px', 'max-width:100%',
-        'font-size:11px', 'overflow:hidden',
-        'background:' + (active ? '#1e3a8a' : '#0f172a'),
-        'border:1px solid ' + (active ? '#3b82f6' : '#1f2937'),
-        'color:' + (active ? '#e5e7eb' : '#9ca3af'),
-      ].join(';');
-
-      var num = document.createElement('b');
-      num.textContent = i === 9 ? '0' : String(i + 1);
-      num.style.cssText = "font-family:'JetBrains Mono',monospace;font-size:10px;" +
-        'font-weight:700;color:#fbbf24;flex-shrink:0;';
-
-      var name = document.createElement('span');
-      name.textContent = item.label;
-      name.style.cssText = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-
-      pill.appendChild(num);
-      pill.appendChild(name);
-      el.hints.appendChild(pill);
-    });
-    el.hints.style.display = 'flex';
+    if (!state.session || accelDown) return;
+    accelDown = true;
+    paintHints();
   }
 
   function hideHints() {
-    if (el.hints) el.hints.style.display = 'none';
+    if (!accelDown) return;
+    accelDown = false;
+    paintHints();
   }
 
   document.addEventListener('keydown', function (e) {
@@ -867,6 +853,7 @@
       .then(function (r) {
         if (r.status === 200) {
           delete state.drafts[sent];
+          saveDrafts();
           if (state.session === sent) el.input.value = '';
           // confirmed:false means tmux accepted it but the pane did not change.
           // Say so instead of implying it landed.
@@ -918,10 +905,38 @@
       .catch(function () { setStatus('네트워크 오류', '#ef4444'); });
   }
 
+  /* --- drafts ------------------------------------------------------------ */
+
+  /* Drafts survived a session switch but not a reload: they lived only in
+   * state.drafts. On a phone the console is closed by the OS as often as by
+   * the user, so a half-typed instruction was routinely lost. Persisted per
+   * session, written as it is typed rather than only on switch. */
+  var DRAFT_KEY = 'ctb_console_drafts';
+
+  function loadDrafts() {
+    try {
+      var raw = JSON.parse(localStorage.getItem(DRAFT_KEY));
+      if (raw && typeof raw === 'object') state.drafts = raw;
+    } catch (e) { /* unreadable or unavailable; start empty */ }
+  }
+
+  function saveDrafts() {
+    try {
+      /* Empty entries are not drafts, and would otherwise accumulate one key
+       * per session ever opened. */
+      var out = {};
+      Object.keys(state.drafts).forEach(function (k) {
+        if (state.drafts[k]) out[k] = state.drafts[k];
+      });
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(out));
+    } catch (e) { /* quota or private mode: the in-memory copy still works */ }
+  }
+
   /* --- open / close ----------------------------------------------------- */
 
   function show(name) {
     build();
+    loadDrafts();
     /* A half-typed prompt belongs to the session it was written for. Switching
      * used to leave it in the box, so the next 전송 would deliver it to whoever
      * was open now -- a prompt meant for one session landing in another. Park
@@ -933,6 +948,7 @@
       if (state.session !== name) {
         el.input.value = state.drafts[name] || '';
       }
+      saveDrafts();
     }
     state.session = name;
     state.selStart = null;
@@ -953,7 +969,10 @@
 
   function hide() {
     stopPolling();
-    if (el.input && state.session) state.drafts[state.session] = el.input.value;
+    if (el.input && state.session) {
+      state.drafts[state.session] = el.input.value;
+      saveDrafts();
+    }
     state.session = null;
     state.selStart = null;
     state.selEnd = null;
