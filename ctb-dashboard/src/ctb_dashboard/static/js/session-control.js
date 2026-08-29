@@ -195,20 +195,31 @@
      * without Shift is the send gesture.
      *
      * beforeinput carries no modifier state, so the keydown records it. */
+    /* Armed by an Enter keydown ONLY -- never by an ordinary keystroke.
+     *
+     * It used to record e.shiftKey on every keydown, cleared by the following
+     * beforeinput or keyup. When either was missed (iOS coalesces them; an IME
+     * swallows them) the stale 'true' survived to the next line break, which
+     * then read as Shift+Enter: a newline appeared and nothing was sent. Korean
+     * made that routine rather than rare -- ㄲㄸㅃㅆㅉ and ㅒㅖ are all Shift
+     * combinations, so typing "했어" arms the flag mid-word.
+     *
+     * Narrowed this way, an ordinary keystroke cannot arm it at all. A soft
+     * keyboard that reports no Enter keydown leaves it false, so the line break
+     * sends -- which is the intent: Shift+Enter is a hardware-keyboard gesture. */
     var shiftHeld = false;
     input.addEventListener('keydown', function (e) {
-      shiftHeld = e.shiftKey;
       var imeIsHandlingIt = e.isComposing || e.keyCode === 229;
+      /* Not `|| keyCode === 229`: during Hangul composition every key reports
+       * 229, so arming on it would bring the stale flag straight back. */
+      if (e.key === 'Enter') shiftHeld = e.shiftKey;
       if (e.key === 'Enter' && !e.shiftKey && !imeIsHandlingIt) {
         e.preventDefault();
         submit();
       }
     });
-    /* Mirror keydown: clears shiftHeld when Shift is released, so a prior
-     * Shift press (e.g. for a tense consonant ㄲ) does not survive until the
-     * next Enter on iOS where keydown events are sometimes skipped. */
     input.addEventListener('keyup', function (e) {
-      shiftHeld = e.shiftKey;
+      if (e.key === 'Enter' || e.key === 'Shift') shiftHeld = e.shiftKey;
     });
     input.addEventListener('beforeinput', function (e) {
       var breaksLine = e.inputType === 'insertLineBreak'
