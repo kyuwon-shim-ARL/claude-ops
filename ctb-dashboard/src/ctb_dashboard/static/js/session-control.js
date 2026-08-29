@@ -238,16 +238,39 @@
     row.appendChild(input);
     row.appendChild(send);
 
+    /* The pause a selection causes was invisible: the tail simply stopped
+     * growing, which reads as a dead console rather than a held one. The badge
+     * sits over the tail, where the eye already is -- the bar's own
+     * "(갱신 일시정지)" text is below the fold of attention. */
+    var tailWrap = document.createElement('div');
+    tailWrap.style.cssText =
+      'position:relative;display:flex;flex-direction:column;flex:1;min-height:0;';
+
+    var frozen = document.createElement('div');
+    frozen.textContent = '\u23f8 \uac31\uc2e0 \uc815\uc9c0\ub428';
+    frozen.style.cssText = [
+      'display:none', 'position:absolute', 'top:6px', 'right:10px',
+      'padding:3px 9px', 'border-radius:99px', 'pointer-events:none',
+      'font-size:10px', 'font-weight:700', 'letter-spacing:0.02em',
+      'background:rgba(245,158,11,0.16)', 'color:#fbbf24',
+      'border:1px solid rgba(245,158,11,0.5)',
+      'backdrop-filter:blur(4px)', '-webkit-backdrop-filter:blur(4px)',
+    ].join(';');
+
+    tailWrap.appendChild(tail);
+    tailWrap.appendChild(frozen);
+
     root.appendChild(strip);
     root.appendChild(header);
-    root.appendChild(tail);
+    root.appendChild(tailWrap);
     root.appendChild(bar);
     root.appendChild(keys);
     root.appendChild(row);
     document.body.appendChild(root);
 
     el = { root: root, strip: strip, title: title, status: status, tail: tail,
-           bar: bar, barLabel: barLabel, input: input, send: send };
+           frozen: frozen, bar: bar, barLabel: barLabel, input: input,
+           send: send };
 
     /* The keyboard shrinks the visual viewport, and iOS does not always fire a
      * resize that brings it back when the keyboard closes without an edit --
@@ -608,13 +631,23 @@
     updateBar();
   }
 
+  /* Called from every path that starts or ends a selection -- clearing it,
+   * switching session, closing the sheet -- so none of them can leave the
+   * console looking frozen while it is in fact live. */
+  function setFrozen(on) {
+    if (el.frozen) el.frozen.style.display = on ? 'block' : 'none';
+    if (el.tail) el.tail.style.borderColor = on ? 'rgba(245,158,11,0.55)' : '#1f2937';
+  }
+
   function updateBar() {
     var range = selectionRange();
     if (!range) {
       el.bar.style.display = 'none';
+      setFrozen(false);
       return;
     }
     el.bar.style.display = 'flex';
+    setFrozen(true);
     var count = range[1] - range[0] + 1;
     el.barLabel.textContent = state.selEnd === null
       ? '\uc2dc\uc791 \uc9c0\uc815\ub428 \u2014 \ub05d\ub098\ub294 \uc904\uc744 \ud0ed\ud558\uc138\uc694 (\uac31\uc2e0 \uc77c\uc2dc\uc815\uc9c0)'
@@ -633,6 +666,7 @@
     state.selEnd = null;
     if (el.tail) paintSelection();
     if (el.bar) el.bar.style.display = 'none';
+    setFrozen(false);
     /* Selection was what paused the tail; resume now. */
     if (state.session && !state.timer) startPolling();
   }
@@ -778,6 +812,7 @@
     state.selEnd = null;
     state.lines = null;
     if (el.bar) el.bar.style.display = 'none';
+    setFrozen(false);
     el.title.textContent = name.replace(/^claude[_-]/, '');
     el.tail.textContent = '불러오는 중…';
     setStatus('');
@@ -797,6 +832,7 @@
     state.selEnd = null;
     state.lines = null;
     if (el.bar) el.bar.style.display = 'none';
+    setFrozen(false);
     if (el.root) el.root.style.display = 'none';
   }
 
