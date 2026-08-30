@@ -604,7 +604,7 @@
     hideHints();
     if (!item) return;          /* fewer sessions than the digit pressed */
     e.preventDefault();
-    if (item.name !== state.session) show(item.name);
+    if (item.name !== state.session) show(item.name, true);
   });
 
   document.addEventListener('keyup', function (e) {
@@ -829,7 +829,23 @@
   function submit() {
     if (state.busy || !state.session) return;
     var text = el.input.value;
-    if (!text.trim()) return;
+    /* An empty box means the gesture was not "send this text" but "press
+     * Enter" -- answering a prompt, accepting a default, nudging a pane. It
+     * used to do nothing at all.
+     *
+     * It also makes a swallowed send self-correcting: when a line break lands
+     * as a newline instead of a send, the box holds only whitespace, so the
+     * next Enter is a plain Enter into the session. The whitespace is cleared
+     * with it so it cannot pile up or be saved as a draft. */
+    if (!text.trim()) {
+      if (text) {
+        el.input.value = '';
+        delete state.drafts[state.session];
+        saveDrafts();
+      }
+      sendKey('Enter');
+      return;
+    }
     /* The response can land after a switch; everything it touches is keyed to
      * the session the send was for, not to whatever is open when it returns. */
     var sent = state.session;
@@ -935,7 +951,11 @@
 
   /* --- open / close ----------------------------------------------------- */
 
-  function show(name) {
+  /* focusInput: a session switch the user drove -- a chip click, a number
+   * shortcut -- should leave them able to type immediately. Opening the
+   * console does NOT pass it: on iOS the keyboard would cover the pane before
+   * it has been read, which is why there is no autofocus on open. */
+  function show(name, focusInput) {
     build();
     loadDrafts();
     /* A half-typed prompt belongs to the session it was written for. Switching
@@ -965,7 +985,14 @@
     fetchOrder();
     fitViewport();
     startPolling();
-    // Do not autofocus: on iOS that pops the keyboard before the pane is read.
+    // Do not autofocus on open: on iOS that pops the keyboard before the pane
+    // is read. A deliberate switch is different -- see focusInput.
+    if (focusInput && el.input) {
+      /* Cursor after any restored draft, not before it. */
+      el.input.focus();
+      var end = el.input.value.length;
+      try { el.input.setSelectionRange(end, end); } catch (e) { /* not focusable yet */ }
+    }
   }
 
   function hide() {
@@ -1001,13 +1028,19 @@
   });
 
   /* Strip taps switch the console in place -- same sheet, new session. */
+  /* click carries no pointer type, so record it from the press that precedes. */
+  var lastPointerType = '';
+  document.addEventListener('pointerdown', function (e) {
+    lastPointerType = e.pointerType || '';
+  }, true);
+
   document.addEventListener('click', function (e) {
     var chip = e.target.closest && e.target.closest('[data-switch-session]');
     if (!chip) return;
     e.preventDefault();
     e.stopPropagation();
     var name = chip.getAttribute('data-switch-session');
-    if (name && name !== state.session) show(name);
+    if (name && name !== state.session) show(name, lastPointerType !== 'touch');
   });
 
   /* --- deep link -------------------------------------------------------- */
