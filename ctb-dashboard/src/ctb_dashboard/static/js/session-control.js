@@ -508,7 +508,7 @@
       if (index < HINT_MAX) {
         var num = document.createElement('b');
         num.setAttribute('data-numhint', '');
-        num.textContent = index === 9 ? '0' : String(index + 1);
+        num.textContent = String(index + 1);
         num.style.cssText = "font-family:'JetBrains Mono',monospace;" +
           'font-size:9px;font-weight:700;color:#fbbf24;flex-shrink:0;' +
           'padding:0 3px;border-radius:4px;background:rgba(245,158,11,0.16);' +
@@ -543,15 +543,16 @@
   var IS_MAC = /Mac|iPhone|iPad|iPod/.test(
     (navigator.userAgentData && navigator.userAgentData.platform) ||
     navigator.platform || navigator.userAgent);
-  var HINT_MAX = 10;
+  /* Nine, not ten: Ctrl/Cmd+0 resets the browser zoom, which is how you undo an
+   * accidental wheel-zoom. Taking it for a tenth session would cost more than
+   * it gives. */
+  var HINT_MAX = 9;
 
   function accelHeld(e) {
     return (IS_MAC ? e.metaKey : e.ctrlKey) || e.altKey;
   }
 
-  /* '0' is the tenth, the convention terminals and editors use. */
   function slotOf(key) {
-    if (key === '0') return 9;
     if (key >= '1' && key <= '9') return key.charCodeAt(0) - 49;
     return -1;
   }
