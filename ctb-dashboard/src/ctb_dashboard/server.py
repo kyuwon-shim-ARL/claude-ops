@@ -849,11 +849,17 @@ async def session_stream():
     return EventSourceResponse(_session_event_generator())
 
 
+# The console deepens this on demand as the reader scrolls back. Bounded so a
+# crafted request cannot ask tmux for an unbounded capture and ship it back.
+_MAX_LOG_LINES = 5000
+
+
 @app.get("/api/sessions/{name}/log")
 async def get_session_log(name: str, lines: int = 50):
     """Return recent tmux pane output for a session."""
     if not _SESSION_NAME_RE.match(name):
         raise HTTPException(status_code=422, detail="Invalid session name")
+    lines = max(1, min(_MAX_LOG_LINES, lines))
     try:
         result = subprocess.run(
             # -J joins pane-width-wrapped lines back into their original form.

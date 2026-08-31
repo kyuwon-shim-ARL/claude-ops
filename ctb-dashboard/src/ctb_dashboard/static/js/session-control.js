@@ -13,10 +13,17 @@
   'use strict';
 
   var TAIL_LINES = 40;
+  /* Scrollback grows on demand: 40 lines is the right live window, but a long
+   * answer runs past it and used to be simply unreachable. Reaching the top
+   * asks for more. tmux keeps 50k lines per pane, so the ceiling here is about
+   * what is worth shipping and re-rendering, not what exists. */
+  var TAIL_STEP = 400;
+  var MAX_TAIL_LINES = 5000;
   var POLL_MS = 2000;
 
   var state = { session: null, timer: null, busy: false,
                 lines: null, selStart: null, selEnd: null, order: null,
+                depth: TAIL_LINES, growing: false, exhausted: false,
                 drafts: {} };
   var el = {};
 
@@ -300,6 +307,17 @@
       window.visualViewport.addEventListener('resize', fitViewport);
       window.visualViewport.addEventListener('scroll', fitViewport);
     }
+    /* Reaching the top is the request for more history -- no button to find,
+     * and it matches how every chat scrollback behaves. */
+    tail.addEventListener('scroll', function () {
+      if (tail.scrollTop > 24) return;
+      /* Opening a session empties the tail to show '불러오는 중…', which drops
+       * scrollTop to 0 and fires this -- a scroll the user never made, which
+       * used to deepen the window before the first line had even arrived.
+       * A tail with nothing to scroll cannot have been scrolled. */
+      if (!state.lines || tail.scrollHeight <= tail.clientHeight + 8) return;
+      growTail();
+    });
     /* Delegated: 'click' (not touchstart) so a scroll gesture never selects. */
     tail.addEventListener('click', function (e) {
       var line = e.target.closest && e.target.closest('[data-line]');
@@ -788,7 +806,7 @@
   function pollTail() {
     if (!state.session) return;
     var name = state.session;
-    fetch('/api/sessions/' + encodeURIComponent(name) + '/log?lines=' + TAIL_LINES, {
+    fetch('/api/sessions/' + encodeURIComponent(name) + '/log?lines=' + state.depth, {
       headers: { 'Accept': 'application/json' },
     })
       .then(function (r) { return r.ok ? r.json() : null; })
@@ -803,6 +821,44 @@
         if (atBottom) el.tail.scrollTop = el.tail.scrollHeight;
       })
       .catch(function () { /* transient; next tick retries */ });
+  }
+
+  /* Deepen the window and redraw, keeping the line the user is looking at
+   * where it was: the new lines arrive ABOVE, so anchoring to the distance
+   * from the bottom is what holds the view still. */
+  function growTail() {
+    if (!state.session || state.growing || state.exhausted) return;
+    if (state.selStart !== null) return;   /* a frozen selection stays frozen */
+    if (state.depth >= MAX_TAIL_LINES) return;
+
+    var name = state.session;
+    var was = state.depth;
+    state.depth = Math.min(MAX_TAIL_LINES, state.depth + TAIL_STEP);
+    state.growing = true;
+    setStatus('이전 내용 불러오는 중…', '#9ca3af');
+
+    fetch('/api/sessions/' + encodeURIComponent(name) + '/log?lines=' + state.depth, {
+      headers: { 'Accept': 'application/json' },
+    })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data || state.session !== name) return;
+        var before = state.lines ? state.lines.length : 0;
+        var fromBottom = el.tail.scrollHeight - el.tail.scrollTop;
+        renderTail(data.log || '');
+        el.tail.scrollTop = el.tail.scrollHeight - fromBottom;
+        var gained = (state.lines ? state.lines.length : 0) - before;
+        if (gained <= 0) {
+          /* The pane has no more history: stop asking on every scroll. */
+          state.exhausted = true;
+          state.depth = was;
+          setStatus('더 이상 이전 내용이 없습니다', '#9ca3af');
+        } else {
+          setStatus('이전 ' + gained + '줄 불러옴', '#34d399');
+        }
+      })
+      .catch(function () { setStatus('불러오기 실패', '#ef4444'); })
+      .then(function () { state.growing = false; });
   }
 
   function startPolling() {
@@ -975,6 +1031,9 @@
     state.selStart = null;
     state.selEnd = null;
     state.lines = null;
+    state.depth = TAIL_LINES;
+    state.growing = false;
+    state.exhausted = false;
     if (el.bar) el.bar.style.display = 'none';
     setFrozen(false);
     el.title.textContent = name.replace(/^claude[_-]/, '');
