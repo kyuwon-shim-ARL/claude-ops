@@ -316,10 +316,25 @@
       window.visualViewport.addEventListener('resize', fitViewport);
       window.visualViewport.addEventListener('scroll', fitViewport);
     }
-    /* Reaching the top is the request for more history -- no button to find,
-     * and it matches how every chat scrollback behaves. */
+    /* Scrolling up is the request for more history -- no button to find, and it
+     * matches how every chat scrollback behaves.
+     *
+     * A screenful early, not at the very top. Waiting for the top meant the
+     * reader hit the wall first, and on a phone that is what the jump was: the
+     * fling is pinned dead at scrollTop 0, then 400 lines land underneath it
+     * and the leftover momentum, no longer clamped, carries the view hundreds
+     * of lines up in one throw. Loading before the wall arrives means there is
+     * never a wall to hit -- the content is simply already there.
+     *
+     * Only on the way up. The scroll to the bottom that opening a session
+     * performs would otherwise trip this on a pane barely taller than the box,
+     * and that is not a scroll the reader made. */
+    var lastTop = 0;
     tail.addEventListener('scroll', function () {
-      if (tail.scrollTop > 24) return;
+      var top = tail.scrollTop;
+      var goingUp = top < lastTop;
+      lastTop = top;
+      if (!goingUp || top > tail.clientHeight) return;
       /* Opening a session empties the tail to show '불러오는 중…', which drops
        * scrollTop to 0 and fires this -- a scroll the user never made, which
        * used to deepen the window before the first line had even arrived.
