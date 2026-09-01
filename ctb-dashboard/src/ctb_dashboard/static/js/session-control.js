@@ -297,6 +297,7 @@
     root.appendChild(bar);
     root.appendChild(keys);
     root.appendChild(row);
+    keepCaret(root, input);
     document.body.appendChild(root);
 
     el = { root: root, strip: strip, title: title, status: status, tail: tail,
@@ -367,6 +368,20 @@
         if (state.selStart !== null) clearSelection();
         else hide();
       }
+    });
+  }
+
+  /* A button in the sheet never needs the caret: it does its work on click and
+   * has nothing to type into. Letting it take focus meant that answering a
+   * prompt with 'y', or sending, or copying a selection, dropped you out of the
+   * box you were writing in -- the same cost the tail click used to have, on
+   * the controls you press most. Delegated on the root so every button here is
+   * covered, and inert unless the box actually has focus to lose. */
+  function keepCaret(root, input) {
+    root.addEventListener('mousedown', function (e) {
+      if (document.activeElement !== input) return;
+      var btn = e.target.closest && e.target.closest('button');
+      if (btn) e.preventDefault();
     });
   }
 
