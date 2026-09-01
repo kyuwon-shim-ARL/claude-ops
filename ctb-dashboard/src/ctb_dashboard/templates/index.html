@@ -2105,6 +2105,21 @@
     }, SSE_DOWN_POLL_MS);
     setInterval(paintConnection, 2000);
 
+    /* Coming back to the page must not mean waiting for a timer.
+     *
+     * A hidden tab has its intervals throttled to about one a minute, and a
+     * VSCode webview that is not the visible panel is suspended outright. In a
+     * browser the stream catches up the moment it resumes, but the webview has
+     * no stream at all -- its port proxy buffers text/event-stream, so
+     * EventSource never opens there and the 5s poll is the only thing feeding
+     * the board. Switch to the panel and you were looking at whatever it last
+     * managed to fetch, which is how a session that is working shows as idle in
+     * VSCode while the browser has it right. */
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) return;
+      fetch('/api/sessions').then(r => r.json()).then(render).catch(() => {});
+    });
+
     function pollTicketLinks() {
       const receiveTime = Date.now();
       fetch('/api/session-ticket-links')
