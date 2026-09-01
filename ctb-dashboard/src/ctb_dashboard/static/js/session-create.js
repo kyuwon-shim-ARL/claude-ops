@@ -17,6 +17,13 @@
 (function () {
   'use strict';
 
+  /* The VSCode webview is a different origin: the extension hands it this
+   * page's markup as a string, so a relative '/api/...' resolves against
+   * vscode-webview:// and never reaches the server. The extension sets
+   * CTB_API_BASE; in a browser it is unset and nothing changes. */
+  function api(path) { return (window.CTB_API_BASE || '') + path; }
+
+
   /* --- pure logic (tested through node; see test_session_create_js.py) ---- */
 
   var PROJECT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -456,7 +463,7 @@
   /* --- data -------------------------------------------------------------- */
 
   function loadProjects() {
-    return fetch('/api/projects')
+    return fetch(api('/api/projects'))
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         if (!d) throw new Error('projects');
@@ -479,7 +486,7 @@
   }
 
   function loadWorktrees(project) {
-    return fetch('/api/projects/' + encodeURIComponent(project) + '/worktrees')
+    return fetch(api('/api/projects/' + encodeURIComponent(project) + '/worktrees'))
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         if (!d) {

@@ -77,20 +77,28 @@
     return false;
   }
 
+  /* The VSCode webview is a different origin: the extension hands it this
+   * page's markup as a string, so a relative '/api/...' resolves against
+   * vscode-webview:// and never reaches the server. The extension sets
+   * CTB_API_BASE; in a browser it is unset and nothing changes. */
+  function api(path) { return (window.CTB_API_BASE || '') + path; }
+
   /* fetch wrapper: attaches the token and retries once after a 403 re-prompt. */
   function send(url, options) {
+    var target = api(url);
     var opts = Object.assign({}, options || {});
     opts.headers = headers(opts.headers);
-    return fetch(url, opts).then(function (res) {
+    return fetch(target, opts).then(function (res) {
       if (res.status !== 403 && res.status !== 503) return res;
       if (!recover(res)) return res;
       var retry = Object.assign({}, options || {});
       retry.headers = headers(retry.headers);
-      return fetch(url, retry);
+      return fetch(target, retry);
     });
   }
 
   window.ctbControl = {
+    api: api,
     token: token,
     headers: headers,
     recover: recover,

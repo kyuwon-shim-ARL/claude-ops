@@ -352,6 +352,18 @@ function applyUrlRewrites(html: string): string {
   // origin and 403 inside the panel.
   html = html.replace(/fetch\(`\/api/g, 'fetch(`' + DASHBOARD_URL + '/api');
   html = html.replace(/EventSource\('\/api/g, `EventSource('${DASHBOARD_URL}/api`);
+  // The page's JS lives in <script src="/static/js/...">, and the webview
+  // resolves that against vscode-webview:// -- all three files 404'd, which
+  // silently took the session console, the 1..9 session chords and the new-
+  // session dialog with them. Point them at the server, and tell them where
+  // the API is: an external file's own fetch('/api/...') still resolves
+  // against the webview document, so the inline rewrites above cannot reach
+  // it. Each file reads window.CTB_API_BASE, unset (and inert) in a browser.
+  html = html.replace(/(<script\b[^>]*\ssrc=")\/static\//g, `$1${DASHBOARD_URL}/static/`);
+  html = html.replace(
+    '</head>',
+    `<script>window.CTB_API_BASE = ${JSON.stringify(DASHBOARD_URL)};</script></head>`
+  );
   return html;
 }
 

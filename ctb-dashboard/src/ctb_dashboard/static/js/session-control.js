@@ -12,6 +12,13 @@
 (function () {
   'use strict';
 
+  /* The VSCode webview is a different origin: the extension hands it this
+   * page's markup as a string, so a relative '/api/...' resolves against
+   * vscode-webview:// and never reaches the server. The extension sets
+   * CTB_API_BASE; in a browser it is unset and nothing changes. */
+  function api(path) { return (window.CTB_API_BASE || '') + path; }
+
+
   var TAIL_LINES = 40;
   /* Scrollback grows on demand: 40 lines is the right live window, but a long
    * answer runs past it and used to be simply unreachable. Reaching the top
@@ -472,7 +479,7 @@
 
   function fetchOrder() {
     if (Array.isArray(window.ctbSessionOrder) && window.ctbSessionOrder.length) return;
-    fetch('/api/sessions', { headers: { 'Accept': 'application/json' } })
+    fetch(api('/api/sessions'), { headers: { 'Accept': 'application/json' } })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         if (!data || !data.sessions) return;
@@ -580,6 +587,9 @@
    * it gives. */
   var HINT_MAX = 9;
 
+  /* acquireVsCodeApi exists only inside a VSCode webview. */
+  var IS_VSCODE = typeof acquireVsCodeApi === 'function';
+
   function accelHeld(e) {
     return (IS_MAC ? e.metaKey : e.ctrlKey) || e.altKey;
   }
@@ -686,6 +696,13 @@
     hideHints();
     if (!item) return;          /* fewer sessions than the digit pressed */
     e.preventDefault();
+    /* In the VSCode webview, switching means bringing that session's terminal
+     * up -- the page's own card click already does that, and the console is
+     * read-only there because the webview's port proxy forwards only GET.
+     * With a console already open the digit switches the console, as
+     * everywhere else: that is the surface the user is looking at. */
+    if (!state.session && IS_VSCODE && window.ctbFocusSession
+        && window.ctbFocusSession(item.name)) return;
     if (item.name !== state.session) show(item.name, true);
   });
 
@@ -882,7 +899,7 @@
   function pollTail() {
     if (!state.session) return;
     var name = state.session;
-    fetch('/api/sessions/' + encodeURIComponent(name) + '/log?lines=' + state.depth, {
+    fetch(api('/api/sessions/' + encodeURIComponent(name) + '/log?lines=' + state.depth), {
       headers: { 'Accept': 'application/json' },
     })
       .then(function (r) { return r.ok ? r.json() : null; })
@@ -913,7 +930,7 @@
     state.growing = true;
     setStatus('이전 내용 불러오는 중…', '#9ca3af');
 
-    fetch('/api/sessions/' + encodeURIComponent(name) + '/log?lines=' + state.depth, {
+    fetch(api('/api/sessions/' + encodeURIComponent(name) + '/log?lines=' + state.depth), {
       headers: { 'Accept': 'application/json' },
     })
       .then(function (r) { return r.ok ? r.json() : null; })

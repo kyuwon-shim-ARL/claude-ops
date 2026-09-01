@@ -2248,6 +2248,19 @@
         });
     }
 
+    /* The number chords live in session-control.js, which has no reach into
+     * this scope. Inside the VSCode webview they have to focus the terminal
+     * rather than open a console -- the webview's port proxy forwards only GET,
+     * so a console there can be read but never typed into, which is not what
+     * "switch to session 3" means. Same action a card click performs. */
+    window.ctbFocusSession = function (name) {
+      const cards = Array.from(grid.querySelectorAll('[data-session-name]'));
+      const card = cards.find(c => c.dataset.sessionName === name);
+      if (!card) return false;
+      focusSession(card, name);
+      return true;
+    };
+
     // --- Card tap handler: mobile=console, desktop=focus ---
     // The card action is whatever that device can actually do with a session.
     // On a phone that is the console (there is no terminal to focus); on a
