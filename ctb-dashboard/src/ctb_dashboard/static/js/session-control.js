@@ -30,7 +30,7 @@
 
   var state = { session: null, prev: null, timer: null, busy: false,
                 lines: null, selStart: null, selEnd: null, order: null,
-                fitted: false,
+                fitted: false, fails: 0, warned: false,
                 depth: TAIL_LINES, growing: false, exhausted: false,
                 drafts: {} };
   var el = {};
@@ -970,16 +970,60 @@
     return '&fit=' + cols;
   }
 
+  /* A poll that never comes back is worse than one that fails: fetch has no
+   * timeout of its own, so a request left hanging -- the phone changed network,
+   * a keep-alive connection died under Tailscale, the server restarted
+   * mid-flight -- never settles and never retries. The tick keeps opening more,
+   * and once ~6 of them are stuck the browser's per-host connection pool is
+   * full and every later request queues behind them. That is what a console
+   * sitting on '불러오는 중…' for minutes actually is, and why it looks like it
+   * picked on one session: the one you opened after the pool jammed.
+   *
+   * Cut them loose, and say so. */
+  var FETCH_TIMEOUT_MS = 8000;
+
+  function getJSON(path) {
+    var ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function () { ctl.abort(); }, FETCH_TIMEOUT_MS) : null;
+    var opts = { headers: { 'Accept': 'application/json' } };
+    if (ctl) opts.signal = ctl.signal;
+    function done(v) { if (timer) clearTimeout(timer); return v; }
+    return fetch(api(path), opts).then(
+      function (r) { done(); return r.ok ? r.json() : null; },
+      function (e) { done(); throw e; }
+    );
+  }
+
+  /* Silence used to be the only report: the catch was empty and a bad status
+   * returned early, so a console that could not load looked exactly like one
+   * that was still loading -- forever. */
+  function pollFailed() {
+    state.fails += 1;
+    if (state.fails < 3) return;        /* one blip is not an outage */
+    state.warned = true;
+    if (!state.lines) {
+      el.tail.textContent = '불러오지 못했습니다 — 다시 시도하는 중…';
+    } else {
+      setStatus('연결 끊김 — 다시 시도하는 중…', '#fbbf24');
+    }
+  }
+
+  function pollOk() {
+    state.fails = 0;
+    if (!state.warned) return;
+    state.warned = false;
+    setStatus('');
+  }
+
   function pollTail() {
     if (!state.session) return;
     var name = state.session;
-    fetch(api('/api/sessions/' + encodeURIComponent(name) + '/log?lines=' + state.depth
-              + fitParam()), {
-      headers: { 'Accept': 'application/json' },
-    })
-      .then(function (r) { return r.ok ? r.json() : null; })
+    getJSON('/api/sessions/' + encodeURIComponent(name) + '/log?lines=' + state.depth
+            + fitParam())
       .then(function (data) {
-        if (!data || state.session !== name) return;
+        if (state.session !== name) return;
+        if (!data) { pollFailed(); return; }
+        pollOk();
         /* A live selection wins over a refresh: repainting would move the
          * chosen lines out from under the user. */
         if (state.selStart !== null) return;
@@ -988,7 +1032,9 @@
         renderTail(data.log || '');
         if (atBottom) el.tail.scrollTop = el.tail.scrollHeight;
       })
-      .catch(function () { /* transient; next tick retries */ });
+      .catch(function () {
+        if (state.session === name) pollFailed();
+      });
   }
 
   /* Deepen the window and redraw, keeping the line the user is looking at
@@ -1005,10 +1051,7 @@
     state.growing = true;
     setStatus('이전 내용 불러오는 중…', '#9ca3af');
 
-    fetch(api('/api/sessions/' + encodeURIComponent(name) + '/log?lines=' + state.depth), {
-      headers: { 'Accept': 'application/json' },
-    })
-      .then(function (r) { return r.ok ? r.json() : null; })
+    getJSON('/api/sessions/' + encodeURIComponent(name) + '/log?lines=' + state.depth)
       .then(function (data) {
         if (!data || state.session !== name) return;
         var before = state.lines ? state.lines.length : 0;
@@ -1204,6 +1247,8 @@
     state.lines = null;
     state.depth = TAIL_LINES;
     state.fitted = false;
+    state.fails = 0;
+    state.warned = false;
     state.growing = false;
     state.exhausted = false;
     if (el.bar) el.bar.style.display = 'none';
