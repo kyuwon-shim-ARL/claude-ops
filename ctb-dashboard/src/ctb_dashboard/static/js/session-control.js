@@ -352,8 +352,20 @@
     var overlap = typing && vv
       ? Math.max(0, window.innerHeight - (vv.height + vv.offsetTop))
       : 0;
-    /* top:0 pins the head; moving the foot up by the keyboard overlap is what
-     * shrinks the box, and the tail (flex:1) gives back the space. */
+    /* A hardware keyboard raises no soft keyboard but still takes a strip at
+     * the foot -- iOS shows its own ↑ ↓ / 완료 accessory bar -- and to keep the
+     * focused box clear of it Safari scrolls the *visual* viewport down inside
+     * an unchanged layout viewport. position:fixed follows the layout
+     * viewport, so the sheet did not come along: its head, the session strip,
+     * slid off the top of the screen and the user lost the navigation.
+     *
+     * Following offsetTop pins the head to the top of what is actually
+     * on screen; with the foot already lifted by the overlap the sheet is
+     * exactly the visible rectangle. */
+    var offsetTop = typing && vv ? Math.max(0, vv.offsetTop) : 0;
+    /* Moving the foot up by the keyboard overlap is what shrinks the box, and
+     * the tail (flex:1) gives back the space. */
+    el.root.style.top = offsetTop + 'px';
     el.root.style.bottom = overlap + 'px';
   }
 
