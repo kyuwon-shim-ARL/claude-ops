@@ -30,6 +30,7 @@
 
   var state = { session: null, prev: null, timer: null, busy: false,
                 lines: null, selStart: null, selEnd: null, order: null,
+                fitted: false,
                 depth: TAIL_LINES, growing: false, exhausted: false,
                 drafts: {} };
   var el = {};
@@ -896,10 +897,39 @@
     if (state.session && !state.timer) startPolling();
   }
 
+  /* How many columns of this font fit across the tail. The server uses it to
+   * widen a detached pane so tmux stops wrapping lines far short of the screen
+   * -- on a desktop the console is roughly twice the 80 columns a session
+   * nobody attached to sits at. */
+  function tailCols() {
+    if (!el.tail) return 0;
+    var probe = document.createElement('span');
+    probe.style.cssText =
+      'position:absolute;visibility:hidden;white-space:pre;font:inherit;';
+    probe.textContent = new Array(101).join('0');
+    el.tail.appendChild(probe);
+    var per = probe.getBoundingClientRect().width / 100;
+    probe.remove();
+    var inner = el.tail.clientWidth - 16;   /* the pre's own 8px padding */
+    if (!per || inner <= 0) return 0;
+    return Math.floor(inner / per);
+  }
+
+  /* Sent once per session, not on every tick: a resize is a repaint for the
+   * program in the pane, and the width does not change between polls. */
+  function fitParam() {
+    if (state.fitted) return '';
+    var cols = tailCols();
+    if (!cols) return '';
+    state.fitted = true;
+    return '&fit=' + cols;
+  }
+
   function pollTail() {
     if (!state.session) return;
     var name = state.session;
-    fetch(api('/api/sessions/' + encodeURIComponent(name) + '/log?lines=' + state.depth), {
+    fetch(api('/api/sessions/' + encodeURIComponent(name) + '/log?lines=' + state.depth
+              + fitParam()), {
       headers: { 'Accept': 'application/json' },
     })
       .then(function (r) { return r.ok ? r.json() : null; })
@@ -1128,6 +1158,7 @@
     state.selEnd = null;
     state.lines = null;
     state.depth = TAIL_LINES;
+    state.fitted = false;
     state.growing = false;
     state.exhausted = false;
     if (el.bar) el.bar.style.display = 'none';

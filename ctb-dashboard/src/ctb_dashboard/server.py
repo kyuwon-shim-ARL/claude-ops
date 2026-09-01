@@ -854,12 +854,62 @@ async def session_stream():
 _MAX_LOG_LINES = 5000
 
 
+# tmux keeps a pane at the width of whatever client last attached, and a
+# session nobody ever attached to sits at the 80-column default. That width --
+# not the browser's -- is what breaks the console's lines, and it is why they
+# come out ragged: the sessions here are anywhere between 80 and 159 columns.
+# capture-pane -J rejoins tmux's own soft wraps, but Claude's TUI hard-wraps its
+# output at the pane width itself, and those breaks are real newlines that
+# nothing downstream can undo.
+#
+# So widen the pane instead, and only when nobody is watching it in a terminal.
+# resize-window flips the window to a manual size, which would leave a later
+# attach mis-fitted, so the option is handed straight back: the new width holds
+# while the session is detached, and the next client to attach re-fits it.
+#
+# Only what tmux draws from here on is wide -- scrollback keeps the wrapping it
+# was written with.
+_MIN_FIT_COLS = 80
+_MAX_FIT_COLS = 400
+
+
+def _fit_pane(name: str, cols: int) -> None:
+    cols = max(_MIN_FIT_COLS, min(_MAX_FIT_COLS, cols))
+    try:
+        probe = subprocess.run(
+            ["tmux", "display", "-p", "-t", name,
+             "#{session_attached} #{window_width} #{window_height}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if probe.returncode != 0:
+            return
+        attached, width, height = probe.stdout.split()
+        if attached != "0" or int(width) >= cols:
+            return
+        subprocess.run(
+            ["tmux", "resize-window", "-t", name, "-x", str(cols), "-y", height],
+            capture_output=True, text=True, timeout=5,
+        )
+        subprocess.run(
+            ["tmux", "set", "-w", "-t", name, "-u", "window-size"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (subprocess.TimeoutExpired, ValueError):
+        return
+
+
 @app.get("/api/sessions/{name}/log")
-async def get_session_log(name: str, lines: int = 50):
-    """Return recent tmux pane output for a session."""
+async def get_session_log(name: str, lines: int = 50, fit: int = 0):
+    """Return recent tmux pane output for a session.
+
+    fit: columns the console can show. Sent when a session is opened, not on
+    every poll -- a resize is a repaint for the program in the pane.
+    """
     if not _SESSION_NAME_RE.match(name):
         raise HTTPException(status_code=422, detail="Invalid session name")
     lines = max(1, min(_MAX_LOG_LINES, lines))
+    if fit:
+        _fit_pane(name, fit)
     try:
         result = subprocess.run(
             # -J joins pane-width-wrapped lines back into their original form.
