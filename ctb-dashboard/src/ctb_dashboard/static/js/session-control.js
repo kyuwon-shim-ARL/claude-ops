@@ -332,6 +332,36 @@
       if (line) onLineTap(parseInt(line.getAttribute('data-line'), 10));
     });
 
+    /* Reading the pane should not cost you the caret. A click in the tail blurs
+     * the prompt box, so picking a line to copy meant clicking back into the
+     * box before the next word -- and mid-sentence that is the whole gesture
+     * again.
+     *
+     * Focus is handed BACK on the way out rather than never let go: swallowing
+     * the mousedown would keep the caret but kill the drag-select the tail is
+     * made of. So the tap runs its course, and only then, if it left nothing
+     * selected, does the box take focus again -- with its own caret intact,
+     * since a textarea remembers where it was.
+     *
+     *   - a drag that selected text keeps the selection; focusing a textarea
+     *     would collapse it, which is the opposite of what the drag asked for
+     *   - a pointer that was not already in the box is not pulled into it
+     *   - coarse pointers opt out entirely: there, focus means the on-screen
+     *     keyboard, and a tap on the tail is how you get it out of the way to
+     *     read. Restoring it would fight the reason for the tap. */
+    var FINE_POINTER = !!(window.matchMedia
+      && window.matchMedia('(pointer: fine)').matches);
+    var hadCaret = false;
+    tail.addEventListener('pointerdown', function () {
+      hadCaret = document.activeElement === input;
+    });
+    tail.addEventListener('click', function () {
+      if (!FINE_POINTER || !hadCaret) return;
+      var sel = window.getSelection && window.getSelection();
+      if (sel && !sel.isCollapsed) return;
+      input.focus();
+    });
+
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && state.session) {
         if (state.selStart !== null) clearSelection();
