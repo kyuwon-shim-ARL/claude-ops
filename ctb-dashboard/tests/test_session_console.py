@@ -68,8 +68,16 @@ def test_no_eval_or_new_function(console_js):
 # --- bounded polling (M3: one capture-pane per tick, not one per card) ------
 
 def test_single_poll_timer(console_js):
-    """Exactly one interval, so the poll cost cannot scale with card count."""
-    assert console_js.count("setInterval(") == 1
+    """One interval talks to the server, so poll cost cannot scale with cards.
+
+    Counting every setInterval used to stand in for this. It stopped being the
+    same question once the accelerator's badge repaint added a second timer
+    that touches nothing but the DOM, so the check now names the callbacks: one
+    poll, and nothing else allowed to appear without being read here first.
+    """
+    callbacks = re.findall(r"setInterval\(\s*([A-Za-z_$][\w$]*)", console_js)
+    assert callbacks.count("pollTail") == 1
+    assert set(callbacks) <= {"pollTail", "paintHints"}, callbacks
 
 
 def test_polling_targets_only_the_open_session(console_js):

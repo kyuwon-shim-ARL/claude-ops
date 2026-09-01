@@ -1336,6 +1336,46 @@ async def health(request: Request):
     }
 
 
+# Which tmux client to move -- and, far more importantly, which ones to leave
+# alone.
+#
+# This used to switch EVERY attached client to the requested session. The
+# comment defending it was about reconnects: a VSCode SSH terminal comes back
+# with a new client name, so "the most recent client" could be a stale one.
+# The cure was worse than the disease. Every VSCode terminal is its own tmux
+# client on its own session, so one tap on a card in the browser dragged all of
+# them onto that session at once -- and a terminal's VSCode tab keeps the name
+# it was created with, so the tab still labelled 'omc-research-skills' now
+# showed 'ops'. Observed with five clients sitting on the same session, each
+# with the same client_last_session, having started on five different ones.
+#
+# So: if a client is already on that session, there is nothing to switch -- the
+# terminal exists, and step 1 has already raised the window. Otherwise move the
+# single most recently used client, which is by definition a live one, so the
+# reconnect case the old loop was worried about still works.
+_ALREADY_THERE = object()
+
+
+def _pick_client(list_clients_output: str, session: str):
+    """Return _ALREADY_THERE, a client name to switch, or None if no clients."""
+    best = None
+    best_activity = -1
+    for line in list_clients_output.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2 or not parts[0].strip():
+            continue
+        name, current = parts[0].strip(), parts[1].strip()
+        if current == session:
+            return _ALREADY_THERE
+        try:
+            activity = int(parts[2]) if len(parts) > 2 else 0
+        except ValueError:
+            activity = 0
+        if activity > best_activity:
+            best, best_activity = name, activity
+    return best
+
+
 @app.post("/api/focus-session", dependencies=[Depends(require_control_token)])
 async def focus_session(req: FocusRequest, request: Request):
     """Switch the host's tmux client to the requested session.
@@ -1384,26 +1424,24 @@ async def focus_session(req: FocusRequest, request: Request):
     except Exception:
         pass  # xdotool not available or no X11 display — non-fatal
 
-    # 2. Try tmux switch-client for direct terminal focus.
-    # Enumerate all currently attached clients so that a freshly reconnected
-    # VSCode SSH terminal (which gets a new client name like /dev/pts/7) is
-    # also switched correctly.  Without -c the command targets the "most recent
-    # client" which may no longer match after a reconnect.
+    # 2. Try tmux switch-client for direct terminal focus -- for ONE client.
     tmux_ok = False
     try:
         clients_result = subprocess.run(
-            ["tmux", "list-clients", "-F", "#{client_name}"],
+            ["tmux", "list-clients", "-F",
+             "#{client_name}\t#{client_session}\t#{client_activity}"],
             capture_output=True, text=True, timeout=3,
         )
-        clients = [c.strip() for c in clients_result.stdout.split('\n') if c.strip()]
-        if clients:
-            for client in clients:
-                r = subprocess.run(
-                    ["tmux", "switch-client", "-c", client, "-t", req.session],
-                    capture_output=True, timeout=3,
-                )
-                if r.returncode == 0:
-                    tmux_ok = True
+        rows = clients_result.stdout
+        target = _pick_client(rows, req.session)
+        if target is _ALREADY_THERE:
+            tmux_ok = True
+        elif target:
+            r = subprocess.run(
+                ["tmux", "switch-client", "-c", target, "-t", req.session],
+                capture_output=True, timeout=3,
+            )
+            tmux_ok = r.returncode == 0
         else:
             # Fallback: no explicit client list (e.g. running headless), try default
             result = subprocess.run(
