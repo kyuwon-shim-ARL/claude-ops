@@ -560,8 +560,10 @@
 
   /* --- number shortcuts -------------------------------------------------- */
 
-  /* Hold the accelerator and the first ten sessions -- rail order, left to
-   * right -- are numbered 1..9,0; pressing the digit switches to that one.
+  /* Hold the accelerator and the first nine sessions -- grid order, which the
+   * rail also follows -- are numbered 1..9; pressing the digit opens that one.
+   * Works with the console open (numbers on the chips) and closed (numbers on
+   * the dashboard cards), since the grid is where the choice is usually made.
    *
    * Platform convention decides the accelerator: Cmd on a Mac, Ctrl elsewhere,
    * which is what every tabbed app on each platform uses. Alt (Option) is bound
@@ -598,27 +600,77 @@
   }
 
   function paintHints() {
-    if (!el.strip) return;
-    var badges = el.strip.querySelectorAll('[data-numhint]');
-    for (var i = 0; i < badges.length; i++) {
-      badges[i].style.display = accelDown ? 'inline-block' : 'none';
+    if (el.strip) {
+      var badges = el.strip.querySelectorAll('[data-numhint]');
+      for (var i = 0; i < badges.length; i++) {
+        badges[i].style.display = accelDown ? 'inline-block' : 'none';
+      }
+    }
+    paintGridHints();
+  }
+
+  /* The same numbers, on the dashboard's own cards, so the chord does not need
+   * a console open first -- the grid is where you are when you decide which
+   * session to go to. The badges are drawn onto the cards rather than built
+   * into them: the grid re-renders its whole markup on every poll, and a badge
+   * baked into that string would have to be threaded through a template that
+   * knows nothing about a key being held. Drawn here they cost nothing when no
+   * one is holding anything. */
+  function clearGridHints() {
+    var old = document.querySelectorAll('[data-ctb-gridhint]');
+    for (var i = 0; i < old.length; i++) old[i].remove();
+  }
+
+  function paintGridHints() {
+    clearGridHints();
+    /* With the console open the strip carries the numbers, and the grid behind
+     * it is not on screen anyway. */
+    if (!accelDown || state.session) return;
+    var list = sessionOrder();
+    for (var i = 0; i < list.length && i < HINT_MAX; i++) {
+      var card = cardFor(list[i].name);
+      if (!card) continue;
+      var b = document.createElement('b');
+      b.setAttribute('data-ctb-gridhint', '');
+      b.textContent = String(i + 1);
+      /* Bottom-left, not beside the pin: up there it sat on the first letters
+       * of the session name, which is the one thing you are reading when you
+       * pick a number. Down here it covers a corner of the idle timer. */
+      b.style.cssText = "position:absolute;bottom:6px;left:6px;z-index:7;" +
+        "font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;" +
+        'color:#fbbf24;padding:2px 7px;border-radius:7px;pointer-events:none;' +
+        'background:rgba(15,13,20,0.92);border:1px solid rgba(245,158,11,0.55);';
+      card.appendChild(b);
     }
   }
 
+  function cardFor(name) {
+    var cards = document.querySelectorAll('[data-session-name]');
+    for (var i = 0; i < cards.length; i++) {
+      if (cards[i].getAttribute('data-session-name') === name) return cards[i];
+    }
+    return null;
+  }
+
+  /* A poll landing mid-hold rewrites the grid and takes the badges with it.
+   * Repainting while the key is down is cheaper than watching the DOM. */
+  var hintTimer = null;
+
   function showHints() {
-    if (!state.session || accelDown) return;
+    if (accelDown) return;
     accelDown = true;
     paintHints();
+    if (!hintTimer) hintTimer = setInterval(paintHints, 400);
   }
 
   function hideHints() {
     if (!accelDown) return;
     accelDown = false;
+    if (hintTimer) { clearInterval(hintTimer); hintTimer = null; }
     paintHints();
   }
 
   document.addEventListener('keydown', function (e) {
-    if (!state.session) return;
     if (e.key === 'Control' || e.key === 'Meta' || e.key === 'Alt') {
       /* Only the accelerator for THIS platform opens the panel, so a stray
        * Ctrl on a Mac does not advertise shortcuts that will not fire. */
