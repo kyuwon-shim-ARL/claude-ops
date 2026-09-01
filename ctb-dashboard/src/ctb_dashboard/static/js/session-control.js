@@ -21,7 +21,7 @@
   var MAX_TAIL_LINES = 5000;
   var POLL_MS = 2000;
 
-  var state = { session: null, timer: null, busy: false,
+  var state = { session: null, prev: null, timer: null, busy: false,
                 lines: null, selStart: null, selEnd: null, order: null,
                 depth: TAIL_LINES, growing: false, exhausted: false,
                 drafts: {} };
@@ -637,6 +637,18 @@
     if (item.name !== state.session) show(item.name, true);
   });
 
+  /* Shift+Tab bounces between the last two sessions, the way Alt+Tab does.
+   * Bare, with no accelerator: inside the sheet Tab has no job worth keeping --
+   * moving focus backwards out of the prompt box leads nowhere useful -- and
+   * the ⇥ that the pane needs is sent by its own button, not by the key. */
+  document.addEventListener('keydown', function (e) {
+    if (!state.session || e.key !== 'Tab' || !e.shiftKey) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    e.preventDefault();
+    if (!state.prev || state.prev === state.session) return;
+    show(state.prev, true);
+  });
+
   document.addEventListener('keyup', function (e) {
     if (!hintsVisible()) return;
     if (e.key === 'Control' || e.key === 'Meta' || e.key === 'Alt') hideHints();
@@ -1039,6 +1051,9 @@
       }
       saveDrafts();
     }
+    /* Remember where we came from so Shift+Tab can bounce back -- the pair you
+     * are actually working in is almost always two sessions, not nine. */
+    if (state.session && state.session !== name) state.prev = state.session;
     state.session = name;
     state.selStart = null;
     state.selEnd = null;
