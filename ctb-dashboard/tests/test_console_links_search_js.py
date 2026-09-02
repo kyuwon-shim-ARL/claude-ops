@@ -450,3 +450,55 @@ def test_a_cut_marked_by_an_astral_letter_or_a_combining_mark_is_seen():
     assert links("https://ex.com/path\U00020000tail") == []   # outside the BMP
     assert links("https://ex.com/a\u0301b") == []             # decomposed 'á'
     assert links("https://ex.com/path가") == []                # the BMP case
+
+
+# --- telling a prefilled command from your own typing ------------------------
+
+# Claude Code draws its input box as: a horizontal rule, the ❯ line, a rule.
+# Its menus use the same ❯ as a selection cursor, with plain lines around it --
+# which is why the rule above is the whole test.
+RULE = "─" * 40
+
+
+def pending(lines):
+    return _call("_findPendingInput", lines)
+
+
+def test_text_waiting_in_the_input_box_is_found():
+    lines = ["● done", RULE, "❯ /exit", RULE, "  branch:main"]
+    assert pending(lines) == {"index": 2, "text": "/exit"}
+
+
+def test_an_empty_input_box_is_not_pending_input():
+    """The box always exists; only something in it is worth marking."""
+    assert pending(["● done", RULE, "❯ \u00a0", RULE]) is None
+
+
+def test_a_menu_cursor_is_not_pending_input():
+    """Verbatim from a live pane: the folder-trust prompt.
+
+    ❯ marks the highlighted choice here. Painting it as unsent input would say
+    a keystroke is waiting when what is waiting is an answer.
+    """
+    lines = [
+        " Quick safety check: Is this a project you created or one you trust?",
+        "",
+        " ❯ No, exit",
+        "   Yes, I trust this folder",
+        "",
+        " Enter to confirm · Esc to cancel",
+    ]
+    assert pending(lines) is None
+
+
+def test_the_last_box_wins_when_the_scrollback_holds_older_ones():
+    lines = [RULE, "❯ old command", RULE, "● ran it", RULE, "❯ new command", RULE]
+    assert pending(lines) == {"index": 5, "text": "new command"}
+
+
+def test_trailing_padding_is_not_content():
+    assert pending([RULE, "❯ hi\u00a0   ", RULE]) == {"index": 1, "text": "hi"}
+
+
+def test_a_prompt_with_no_rule_above_it_is_left_alone():
+    assert pending(["● done", "❯ something", RULE]) is None

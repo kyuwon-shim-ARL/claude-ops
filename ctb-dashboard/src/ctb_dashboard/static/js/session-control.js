@@ -31,6 +31,7 @@
   var state = { session: null, prev: null, timer: null, busy: false,
                 lines: null, selStart: null, selEnd: null, order: null,
                 fitted: false, fails: 0, warned: false, cols: 0,
+                pending: null, sent: null,
                 depth: TAIL_LINES, growing: false, exhausted: false,
                 drafts: {} };
   var el = {};
@@ -1542,9 +1543,43 @@
     return linkifyLines([line], 0)[0];
   }
 
+  /* Which line is the box you type into, and is something sitting in it.
+   *
+   * Claude Code prefills its own input -- a command it is proposing, left
+   * there for you to press Enter on. Seen through this console, hours later,
+   * that is indistinguishable from something you typed and forgot to send,
+   * and pressing Enter on the wrong one of those is not recoverable.
+   *
+   * The input box has a shape: a horizontal rule, the ❯ line, a horizontal
+   * rule. A menu has the same ❯ -- it is the selection cursor too -- but its
+   * siblings are ordinary lines and there is no rule above it. That
+   * distinction is the whole test, and it is what keeps "❯ No, exit" on a
+   * trust prompt from being painted as unsent input.
+   *
+   * -> {index, text} for the pending input, or null. Pure; tested. */
+  var PROMPT_RE = /^[\s\u00a0]*\u276f[\s\u00a0]*(.*)$/;
+  var RULE_RE = /^[\s\u00a0]*[\u2500-\u257f]{10,}[\s\u00a0]*$/;
+
+  function findPendingInput(lines) {
+    /* From the bottom: the input box is the last thing drawn. Bounded, so a
+     * deep scrollback does not get walked on every render. */
+    var floor = Math.max(0, lines.length - 40);
+    for (var i = lines.length - 1; i >= floor; i--) {
+      var m = PROMPT_RE.exec(lines[i]);
+      if (!m) continue;
+      var text = m[1].replace(/[\s\u00a0]+$/, '');
+      if (!text) return null;          /* an empty box is not pending input */
+      /* The rule above, skipping nothing -- the box is drawn tight. */
+      if (i === 0 || !RULE_RE.test(lines[i - 1])) return null;
+      return { index: i, text: text };
+    }
+    return null;
+  }
+
   function renderTail(text) {
     var lines = text.split('\n');
     state.lines = lines;
+    state.pending = findPendingInput(lines);
     el.tail.textContent = '';
     var frag = document.createDocumentFragment();
     var segments = linkifyLines(lines, state.cols);
@@ -1579,6 +1614,22 @@
     paintSelection();
   }
 
+  /* What the console can honestly say about text it finds in the box. It knows
+   * one thing for certain -- whether it put it there itself -- and that is the
+   * question being asked. Anything else is unattributable: Claude Code's own
+   * prefill and a line typed at the terminal look identical from here, so the
+   * wording does not pretend to tell them apart. */
+  function pendingHint(text) {
+    var sent = state.sent;
+    var mine = sent && sent.session === state.session
+      && sent.text.trim() === String(text).trim();
+    return mine
+      ? '\ubbf8\uc804\uc1a1 \u2014 \ubc29\uae08 \uc774 \ub300\uc2dc\ubcf4\ub4dc\uc5d0\uc11c \ubcf4\ub0b8 \ub0b4\uc6a9\uc785\ub2c8\ub2e4.'
+      : '\ubbf8\uc804\uc1a1 \u2014 \uc774 \ub300\uc2dc\ubcf4\ub4dc\uc5d0\uc11c \ubcf4\ub0b8 \uac83\uc774 \uc544\ub2d9\ub2c8\ub2e4.\n'
+        + 'Claude Code\uac00 \ubbf8\ub9ac \ucc44\uc6cc\ub454 \uba85\ub839\uc77c \uc218 \uc788\uc73c\ub2c8 '
+        + 'Enter \uc804\uc5d0 \ud655\uc778\ud558\uc138\uc694.';
+  }
+
   function selectionRange() {
     if (state.selStart === null) return null;
     var end = state.selEnd === null ? state.selStart : state.selEnd;
@@ -1587,11 +1638,27 @@
 
   function paintSelection() {
     var range = selectionRange();
+    var pending = state.pending;
     var nodes = el.tail.querySelectorAll('[data-line]');
     for (var i = 0; i < nodes.length; i++) {
       var inRange = range && i >= range[0] && i <= range[1];
-      nodes[i].style.background = inRange ? 'rgba(52,211,153,0.18)' : '';
-      nodes[i].style.boxShadow = inRange ? 'inset 2px 0 0 #34d399' : '';
+      /* A copy range the reader made outranks the marking: it is the thing
+       * they are doing right now. */
+      if (inRange) {
+        nodes[i].style.background = 'rgba(52,211,153,0.18)';
+        nodes[i].style.boxShadow = 'inset 2px 0 0 #34d399';
+        nodes[i].title = '';
+        continue;
+      }
+      if (pending && i === pending.index) {
+        nodes[i].style.background = 'rgba(245,158,11,0.14)';
+        nodes[i].style.boxShadow = 'inset 3px 0 0 #f59e0b';
+        nodes[i].title = pendingHint(pending.text);
+        continue;
+      }
+      nodes[i].style.background = '';
+      nodes[i].style.boxShadow = '';
+      nodes[i].title = '';
     }
   }
 
@@ -1860,6 +1927,11 @@
     state.busy = true;
     el.send.disabled = true;
     say('전송 중…', '#9ca3af');
+    /* Remembered so the pending-input marking can say "this one is yours".
+     * Only the last: what is sitting in the box now can only be the last thing
+     * that went in, and a longer history would let an old send claim a line
+     * that is no longer the same text. */
+    state.sent = { session: sent, text: text };
 
     post('/prompt', { text: text })
       .then(function (res) {
@@ -2098,6 +2170,7 @@
     _openFromQuery: openFromQuery,
     _cleanLines: cleanLines,
     _splitLinks: splitLinks,
+    _findPendingInput: findPendingInput,
     _linkifyLines: linkifyLines,
     _displayWidth: displayWidth,
     _matchSessions: matchSessions,
