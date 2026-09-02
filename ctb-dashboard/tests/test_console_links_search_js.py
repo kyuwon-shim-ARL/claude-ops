@@ -50,6 +50,21 @@ def _call(fn, *args):
     return json.loads(result.stdout)
 
 
+def seg_lines(lines, cols=0):
+    """Segments for a whole block, as the tail renders it."""
+    return _call("_linkifyLines", lines, cols)
+
+
+def urls_in(lines, cols=0):
+    """Every distinct href the block would produce, in order."""
+    out = []
+    for line in seg_lines(lines, cols):
+        for part in line:
+            if part["url"] and (not out or out[-1] != part["url"]):
+                out.append(part["url"])
+    return out
+
+
 def links(line):
     """Just the URLs the tail would turn into anchors."""
     return [p["url"] for p in _call("_splitLinks", line) if p["url"]]
@@ -156,3 +171,103 @@ def test_the_shared_claude_prefix_is_not_searchable():
 
 def test_matching_ignores_case():
     assert match("ALPHA") == ["claude_alpha"]
+
+
+# --- URLs the pane hard-wrapped ----------------------------------------------
+
+# A pane 40 columns wide. capture-pane -J trims the padding, so a row that is
+# exactly 40 characters is the only kind that can have been cut at the margin;
+# pad() here is a no-op kept for readability of the short rows.
+COLS = 40
+
+
+def pad(line):
+    return line
+
+
+def test_a_url_wrapped_across_two_rows_becomes_one_link():
+    """The case that made most artifact links unfollowable on a phone."""
+    url = "https://claude.ai/code/artifact/67b095b6-2541-42dc-a5f0-98c25c251f3a"
+    head, tail = url[:COLS], url[COLS:]
+    assert len(head) == COLS
+    assert urls_in([head, pad(tail)], COLS) == [url]
+
+
+def test_the_joined_link_is_drawn_on_both_rows():
+    """Rows stay rows -- selection and copy still count in lines."""
+    url = "https://claude.ai/code/artifact/67b095b6-2541-42dc-a5f0-98c25c251f3a"
+    rows = seg_lines([url[:COLS], pad(url[COLS:])], COLS)
+    assert [p["url"] for p in rows[0]] == [url]
+    assert rows[1][0]["url"] == url
+    # and the text still reproduces each row exactly
+    assert "".join(p["text"] for p in rows[0]) == url[:COLS]
+    assert "".join(p["text"] for p in rows[1]) == pad(url[COLS:])
+
+
+def test_a_url_wrapped_across_three_rows_is_joined_whole():
+    url = "https://example.com/" + "a" * 70
+    rows = [url[:COLS], url[COLS:2 * COLS], pad(url[2 * COLS:])]
+    assert len(rows[0]) == len(rows[1]) == COLS
+    assert urls_in(rows, COLS) == [url]
+
+
+def test_an_indented_next_line_is_not_glued_on():
+    """Claude Code indents its output; only the terminal writes at column 0."""
+    head = "x" * (COLS - 20) + "https://example.com/"
+    assert len(head) == COLS
+    assert urls_in([head, pad("  and then some prose")], COLS) == ["https://example.com/"]
+
+
+def test_a_url_that_stops_short_of_the_margin_takes_no_continuation():
+    """Padding proves the row was not full, so there is nothing to rejoin."""
+    assert urls_in([pad("see https://example.com/x"), pad("next line here")], COLS) == [
+        "https://example.com/x"
+    ]
+
+
+def test_punctuation_on_the_continuation_row_is_still_dropped():
+    url = "https://example.com/" + "b" * 30
+    head, tail = url[:COLS], url[COLS:]
+    assert urls_in([head, pad(tail + ".")], COLS) == [url]
+
+
+def test_a_continuation_row_of_pure_punctuation_is_not_part_of_the_link():
+    """Trimming may empty the whole second row; it is then plain text."""
+    url = "https://example.com/" + "c" * 20
+    assert len(url) == COLS
+    rows = seg_lines([url, pad(".")], COLS)
+    assert [p["url"] for p in rows[0]] == [url]
+    assert all(p["url"] is None for p in rows[1])
+
+
+def test_a_full_row_of_ordinary_text_starts_no_link():
+    assert urls_in([pad("nothing here at all"), "x" * COLS], COLS) == []
+
+
+def test_a_log_line_ending_in_a_url_is_not_glued_to_the_next_line():
+    """The shape that made the width check necessary.
+
+    Taken from a live monitor pane: line after line ends with a URL and the
+    next one starts at column 0 with a timestamp. Nothing here filled the
+    pane, so nothing here was wrapped.
+    """
+    rows = [
+        "09:46:45 - httpx - INFO - POST https://api.telegram.org/botX/getUpdates",
+        "09:46:55 - httpx - INFO - done",
+    ]
+    assert urls_in(rows, 159) == ["https://api.telegram.org/botX/getUpdates"]
+
+
+def test_the_join_stops_at_the_first_row_that_was_not_full():
+    """A short row ends where its author ended it, even mid-chain."""
+    head = "https://example.com/" + "e" * 20
+    assert len(head) == COLS
+    # 'abcd' is all URL characters but only 4 columns wide -- not a wrap.
+    assert urls_in([head, "abcd", "efgh"], COLS) == [head + "abcd"]
+
+
+def test_without_a_pane_width_nothing_is_joined():
+    """An older server sends no width; a wrong address is worse than a plain one."""
+    url = "https://example.com/" + "d" * 20
+    assert len(url) == COLS
+    assert urls_in([url, "more-of-it"], 0) == [url]

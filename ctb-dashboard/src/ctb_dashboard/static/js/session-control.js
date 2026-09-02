@@ -30,7 +30,7 @@
 
   var state = { session: null, prev: null, timer: null, busy: false,
                 lines: null, selStart: null, selEnd: null, order: null,
-                fitted: false, fails: 0, warned: false,
+                fitted: false, fails: 0, warned: false, cols: 0,
                 depth: TAIL_LINES, growing: false, exhausted: false,
                 drafts: {} };
   var el = {};
@@ -1101,18 +1101,15 @@
    *
    * Trailing punctuation is prose, not the address -- '...see http://x/y.' --
    * so it is trimmed off. A closing bracket is kept only when the URL opened
-   * one itself, which is what a wiki-style path needs.
-   *
-   * Per line, deliberately: tmux hard-wraps at the pane width, so a URL long
-   * enough to wrap arrives as two unrelated lines with no marker joining them.
-   * Guessing that a line ending mid-token continues into the next one would
-   * splice ordinary text together as often as it would repair a link. The
-   * console asks the server to fit the pane to its own width, which is what
-   * keeps the wrap rare. */
-  var URL_RE = /https?:\/\/[^\s<>"'`\u2500-\u257f]+/g;
+   * one itself, which is what a wiki-style path needs. */
+  var URL_RE = /https?:\/\/[^\s<>"'`─-╿]+/g;
+
+  /* What a hard-wrapped continuation may be made of: the same characters, from
+   * column 0. Anchored, because that is the whole signal. */
+  var CONT_RE = /^[^\s<>"'`─-╿]+/;
 
   function trimUrl(url) {
-    var out = url.replace(/[.,;:!?'"\u201c\u201d\u2018\u2019]+$/, '');
+    var out = url.replace(/[.,;:!?'"“”‘’]+$/, '');
     while (/[)\]}]$/.test(out)) {
       var close = out.charAt(out.length - 1);
       var open = close === ')' ? '(' : (close === ']' ? '[' : '{');
@@ -1127,23 +1124,104 @@
     return out;
   }
 
-  /* -> [{text, url}] with url null for the plain stretches. Pure; tested. */
-  function splitLinks(line) {
+  /* Rejoining what tmux broke.
+   *
+   * A pane has no soft wrap: a line longer than the pane is stored as two
+   * rows, and capture-pane hands them over with nothing marking the seam. A
+   * link long enough to wrap -- which is most artifact URLs on a phone --
+   * therefore arrived as two half-links, neither of them followable.
+   *
+   * The seam has a signature, and it has to be narrow, because the shape it
+   * resembles is everywhere: a log line ending in a URL, followed by the next
+   * log line. So two conditions, together. The row must be filled to its last
+   * column -- the pane width, which the server reports, since capture-pane -J
+   * trims the padding that would otherwise show it -- and the next row must
+   * begin at column 0, no indent, with more URL characters. Claude Code
+   * indents its own wrapped output by two columns and so never qualifies; only
+   * a break the terminal made at the margin does.
+   *
+   * Without a width (an older server, a session tmux will not describe) nothing
+   * is joined. A missing link is a nuisance; a link silently glued to the next
+   * line's timestamp is a wrong address that looks right.
+   *
+   * The joined address is one link, but it is drawn as one anchor per row, so
+   * the rows stay the rows: line tap-to-select, the copy range, and the
+   * scroll anchoring all still count in lines and know nothing about this.
+   *
+   * -> one array of {text, url} segments per input line. Pure; tested. */
+  function linkifyLines(lines, cols) {
+    var marks = lines.map(function () { return []; });
+    var width = cols > 0 ? cols : 0;   /* 0 = unknown: join nothing */
+
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      URL_RE.lastIndex = 0;
+      var m;
+      while ((m = URL_RE.exec(line)) !== null) {
+        var pieces = [{ line: i, start: m.index, end: m.index + m[0].length }];
+        var full = m[0];
+        var row = i;
+        var endsFlush = !!width && line.length === width
+                        && pieces[0].end === line.length;
+
+        while (endsFlush && row + 1 < lines.length) {
+          var cont = CONT_RE.exec(lines[row + 1]);
+          if (!cont) break;
+          row += 1;
+          pieces.push({ line: row, start: 0, end: cont[0].length });
+          full += cont[0];
+          endsFlush = lines[row].length === width
+                      && cont[0].length === lines[row].length;
+        }
+
+        /* Trim the prose punctuation off the tail, giving back whatever rows
+         * that empties -- a row holding nothing but a full stop is text. */
+        var drop = full.length - trimUrl(full).length;
+        while (drop > 0 && pieces.length) {
+          var last = pieces[pieces.length - 1];
+          var span = last.end - last.start;
+          if (drop >= span) { pieces.pop(); drop -= span; }
+          else { last.end -= drop; drop = 0; }
+        }
+
+        var url = trimUrl(full);
+        if (url && pieces.length) {
+          pieces.forEach(function (pc) {
+            marks[pc.line].push({ start: pc.start, end: pc.end, url: url });
+          });
+        }
+
+        /* Resume after whatever was consumed on THIS row. A continuation row
+         * is scanned again on its own turn; anything it finds inside a span
+         * already claimed by the joined link is dropped by toSegments, which
+         * is the one place that keeps a row's marks from overlapping. */
+        if (row !== i) break;
+        URL_RE.lastIndex = Math.max(m.index + 1,
+                                    pieces.length ? pieces[0].end : m.index + m[0].length);
+      }
+    }
+
+    return lines.map(function (line, i) { return toSegments(line, marks[i]); });
+  }
+
+  function toSegments(line, marks) {
     var out = [];
     var last = 0;
-    var m;
-    URL_RE.lastIndex = 0;
-    while ((m = URL_RE.exec(line)) !== null) {
-      var url = trimUrl(m[0]);
-      if (!url) continue;
-      if (m.index > last) out.push({ text: line.slice(last, m.index), url: null });
-      out.push({ text: url, url: url });
-      last = m.index + url.length;
-      URL_RE.lastIndex = last;
-    }
+    marks.sort(function (a, b) { return a.start - b.start; });
+    marks.forEach(function (mk) {
+      if (mk.start < last) return;          /* overlap: first one wins */
+      if (mk.start > last) out.push({ text: line.slice(last, mk.start), url: null });
+      out.push({ text: line.slice(mk.start, mk.end), url: mk.url });
+      last = mk.end;
+    });
     if (last < line.length) out.push({ text: line.slice(last), url: null });
     if (!out.length) out.push({ text: line, url: null });
     return out;
+  }
+
+  /* One line on its own -- the shape the tests and the single-line case use. */
+  function splitLinks(line) {
+    return linkifyLines([line], 0)[0];
   }
 
   function renderTail(text) {
@@ -1151,11 +1229,12 @@
     state.lines = lines;
     el.tail.textContent = '';
     var frag = document.createDocumentFragment();
+    var segments = linkifyLines(lines, state.cols);
     lines.forEach(function (line, i) {
       var div = document.createElement('div');
       div.setAttribute('data-line', String(i));
       div.style.cssText = 'padding:1px 3px;border-radius:3px;min-height:1.45em;';
-      var parts = splitLinks(line);
+      var parts = segments[i];
       if (parts.length === 1 && !parts[0].url) {
         div.textContent = line;
       } else {
@@ -1340,6 +1419,7 @@
         /* A live selection wins over a refresh: repainting would move the
          * chosen lines out from under the user. */
         if (state.selStart !== null) return;
+        state.cols = data.cols || 0;
         var atBottom =
           el.tail.scrollTop + el.tail.clientHeight >= el.tail.scrollHeight - 24;
         renderTail(data.log || '');
@@ -1367,6 +1447,7 @@
     getJSON('/api/sessions/' + encodeURIComponent(name) + '/log?lines=' + state.depth)
       .then(function (data) {
         if (!data || state.session !== name) return;
+        state.cols = data.cols || 0;
         var before = state.lines ? state.lines.length : 0;
         var fromBottom = el.tail.scrollHeight - el.tail.scrollTop;
         renderTail(data.log || '');
@@ -1558,6 +1639,9 @@
     state.selStart = null;
     state.selEnd = null;
     state.lines = null;
+    /* Another session, another pane width -- and the console is about to
+     * resize this one. Nothing is joined until the next poll says how wide. */
+    state.cols = 0;
     state.depth = TAIL_LINES;
     state.fitted = false;
     state.fails = 0;
@@ -1671,6 +1755,7 @@
     _openFromQuery: openFromQuery,
     _cleanLines: cleanLines,
     _splitLinks: splitLinks,
+    _linkifyLines: linkifyLines,
     _matchSessions: matchSessions,
     SESSION_NAME_RE: SESSION_NAME_RE,
     POLL_MS: POLL_MS,

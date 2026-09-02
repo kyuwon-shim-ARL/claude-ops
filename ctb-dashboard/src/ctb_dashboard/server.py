@@ -898,6 +898,29 @@ def _fit_pane(name: str, cols: int) -> None:
         return
 
 
+def _pane_cols(name: str) -> int:
+    """The pane's width, so the console can tell a wrapped line from a whole one.
+
+    -J rejoins tmux's own wrapping and trims the trailing padding with it, so
+    from the text alone every line looks deliberately ended -- a log line that
+    happens to finish with a URL is indistinguishable from the first half of a
+    wrapped one. The width is the difference: only a row filled to the last
+    column can have been cut there.
+
+    0 when tmux will not say, which the console reads as "do not guess".
+    """
+    try:
+        probe = subprocess.run(
+            ["tmux", "display", "-p", "-t", name, "#{window_width}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if probe.returncode != 0:
+            return 0
+        return int(probe.stdout.strip() or 0)
+    except (subprocess.TimeoutExpired, ValueError):
+        return 0
+
+
 @app.get("/api/sessions/{name}/log")
 async def get_session_log(name: str, lines: int = 50, fit: int = 0):
     """Return recent tmux pane output for a session.
@@ -920,7 +943,7 @@ async def get_session_log(name: str, lines: int = 50, fit: int = 0):
         )
         if result.returncode != 0:
             raise HTTPException(status_code=404, detail="Session not found")
-        return {"session": name, "log": result.stdout}
+        return {"session": name, "log": result.stdout, "cols": _pane_cols(name)}
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="tmux timeout")
 
