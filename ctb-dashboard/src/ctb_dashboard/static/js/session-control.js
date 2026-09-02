@@ -194,13 +194,17 @@
     keys.style.cssText =
       'display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;flex-shrink:0;';
     [
+      /* Answering, then moving, then editing. The keys are grouped by what you
+       * are doing with them rather than by how the pane reads them, and the
+       * destructive end of the row is the far end: ⌫ ⇥ ↵ esc sit past the
+       * arrows, and 입력 지우기 past those. */
       ['y', 'y', '예'], ['n', 'n', '아니오'],
       ['1', '1', '1번'], ['2', '2', '2번'], ['3', '3', '3번'],
       ['4', '4', '4번'], ['5', '5', '5번'],
-      ['↵', 'Enter', 'Enter'], ['esc', 'Escape', 'Escape'],
-      ['⇥', 'Tab', 'Tab'], ['⌫', 'BSpace', '한 글자 지우기'],
       ['↑', 'Up', '위'], ['↓', 'Down', '아래'],
       ['←', 'Left', '왼쪽'], ['→', 'Right', '오른쪽'],
+      ['⌫', 'BSpace', '한 글자 지우기'], ['⇥', 'Tab', 'Tab'],
+      ['↵', 'Enter', 'Enter'], ['esc', 'Escape', 'Escape'],
     ].forEach(function (spec) {
       var b = document.createElement('button');
       b.type = 'button';
@@ -918,6 +922,51 @@
     if (!state.session && IS_VSCODE && window.ctbFocusSession
         && window.ctbFocusSession(item.name)) return;
     if (item.name !== state.session) show(item.name, true);
+  });
+
+  /* Ctrl/Cmd+` walks DOWN the numbers: 9 → 8 → … → 1 → 9.
+   *
+   * The digits are for jumping to a session you can see; this is for working
+   * through them. The board sorts what needs attention to the top, so starting
+   * at the bottom of the numbered range and stepping down means the queue is
+   * taken in order, without choosing at each step -- and with nothing open it
+   * starts at the last numbered session rather than the first, which is where
+   * that walk begins.
+   *
+   * The order is the same frozen snapshot the digits use, and this handler
+   * deliberately does NOT release it: holding the accelerator and pressing `
+   * repeatedly walks one list, instead of re-deriving the numbering from a
+   * board that re-sorts under every step. */
+  function stepDownSession() {
+    var list = hintOrder || sessionOrder();
+    var slots = Math.min(list.length, HINT_MAX);
+    if (!slots) return null;
+    var here = -1;
+    for (var i = 0; i < slots; i++) {
+      if (list[i].name === state.session) { here = i; break; }
+    }
+    /* Not in the numbered range -- nothing open, or a session past the ninth
+     * -- so begin at the bottom of it. */
+    var next = here === -1 ? slots - 1 : (here - 1 + slots) % slots;
+    return list[next];
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (searchOpen() || e.shiftKey) return;
+    /* `code` as well as `key`: a layout where the key is not backquote still
+     * reports Backquote for the physical key, and a dead-key layout may give
+     * no `key` at all. */
+    if (e.key !== '`' && e.code !== 'Backquote') return;
+    if (!accelHeld(e)) return;
+    e.preventDefault();
+    var item = stepDownSession();
+    if (!item || (hintOrder && !inCatalog(item.name))) return;
+    if (item.name === state.session) return;
+    /* Closed console in the VSCode webview: the same rule the digits follow --
+     * bring that session's terminal up, since the console there is read-only. */
+    if (!state.session && IS_VSCODE && window.ctbFocusSession
+        && window.ctbFocusSession(item.name)) return;
+    show(item.name, true);
   });
 
   /* Ctrl/Cmd+Tab sends a Tab to the pane from anywhere in the sheet -- the
@@ -2171,6 +2220,7 @@
     _cleanLines: cleanLines,
     _splitLinks: splitLinks,
     _findPendingInput: findPendingInput,
+    _stepDownSession: stepDownSession,
     _linkifyLines: linkifyLines,
     _displayWidth: displayWidth,
     _matchSessions: matchSessions,
