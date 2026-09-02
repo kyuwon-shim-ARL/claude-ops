@@ -418,6 +418,7 @@
       var top = tail.scrollTop;
       var goingUp = top < lastTop;
       lastTop = top;
+      noteScrolling();
       if (!goingUp || top > tail.clientHeight) return;
       /* Opening a session empties the tail to show '불러오는 중…', which drops
        * scrollTop to 0 and fires this -- a scroll the user never made, which
@@ -426,6 +427,11 @@
       if (!state.lines || tail.scrollHeight <= tail.clientHeight + 8) return;
       growTail();
     });
+    /* A finger on the glass counts as scrolling even between events: the
+     * fling that follows a lift has not started firing yet. */
+    tail.addEventListener('touchstart', function () { touching = true; noteScrolling(); }, { passive: true });
+    tail.addEventListener('touchend', function () { touching = false; noteScrolling(); }, { passive: true });
+    tail.addEventListener('touchcancel', function () { touching = false; noteScrolling(); }, { passive: true });
     /* Delegated: 'click' (not touchstart) so a scroll gesture never selects. */
     tail.addEventListener('click', function (e) {
       /* A link click is a navigation, not the start of a copy range: without
@@ -1901,12 +1907,55 @@
         state.cols = data.cols || 0;
         var atBottom =
           el.tail.scrollTop + el.tail.clientHeight >= el.tail.scrollHeight - 24;
+        /* Scrolled up into history: leave the view alone. The window is a
+         * fixed number of lines off the end of the pane, so a repaint with
+         * fresh output shifts everything above the bottom, and a repaint
+         * mid-fling on iOS throws the view (see whenSettled). The reader gets
+         * the live tail back the moment they return to the bottom -- the
+         * next poll sees atBottom and paints. */
+        if (!atBottom || scrollInFlight()) return;
         renderTail(data.log || '');
-        if (atBottom) el.tail.scrollTop = el.tail.scrollHeight;
+        el.tail.scrollTop = el.tail.scrollHeight;
       })
       .catch(function () {
         if (state.session === name) pollFailed();
       });
+  }
+
+  /* Is the tail still moving? iOS keeps a fling going for a second or more
+   * after the finger lifts, and it drives that animation from the geometry it
+   * captured at lift-off. Rebuild the tail underneath it -- 400 lines landing
+   * on top, scrollTop reassigned -- and the animation carries on toward its
+   * old target in the new coordinate space, which is the throw hundreds of
+   * lines up that a reader on a phone kept hitting. So nothing is redrawn
+   * while a scroll is in flight: work that arrives mid-fling waits for the
+   * tail to come to rest. A scroll event every frame while moving, then
+   * silence; SETTLE_MS of silence with no finger down is "at rest". */
+  var SETTLE_MS = 120;
+  var touching = false;
+  var settleTimer = null;
+  var onSettled = null;
+
+  function noteScrolling() {
+    if (settleTimer) clearTimeout(settleTimer);
+    settleTimer = setTimeout(function () {
+      settleTimer = null;
+      if (touching || !onSettled) return;
+      var fn = onSettled;
+      onSettled = null;
+      fn();
+    }, SETTLE_MS);
+  }
+
+  function scrollInFlight() {
+    return touching || settleTimer !== null;
+  }
+
+  /* Run now if the tail is at rest, otherwise once it is. Only the latest
+   * caller is kept: two redraws queued behind one fling would fight. */
+  function whenSettled(fn) {
+    if (!scrollInFlight()) { fn(); return; }
+    onSettled = fn;
   }
 
   /* Deepen the window and redraw, keeping the line the user is looking at
@@ -1925,25 +1974,32 @@
 
     getJSON('/api/sessions/' + encodeURIComponent(name) + '/log?lines=' + state.depth)
       .then(function (data) {
-        if (!data || state.session !== name) return;
-        if (data.__status) { setStatus('불러오기 실패', '#ef4444'); return; }
-        state.cols = data.cols || 0;
-        var before = state.lines ? state.lines.length : 0;
-        var fromBottom = el.tail.scrollHeight - el.tail.scrollTop;
-        renderTail(data.log || '');
-        el.tail.scrollTop = el.tail.scrollHeight - fromBottom;
-        var gained = (state.lines ? state.lines.length : 0) - before;
-        if (gained <= 0) {
-          /* The pane has no more history: stop asking on every scroll. */
-          state.exhausted = true;
-          state.depth = was;
-          setStatus('더 이상 이전 내용이 없습니다', '#9ca3af');
-        } else {
-          setStatus('이전 ' + gained + '줄 불러옴', '#34d399');
-        }
+        if (!data || state.session !== name) { state.growing = false; return; }
+        if (data.__status) { state.growing = false; setStatus('불러오기 실패', '#ef4444'); return; }
+        /* Fetched at once so the lines are ready early, applied only once the
+         * fling has stopped (see whenSettled). `growing` stays up until then:
+         * a second request behind a fling still in flight would only queue a
+         * redraw that displaces this one. */
+        whenSettled(function () {
+          state.growing = false;
+          if (state.session !== name || state.selStart !== null) return;
+          state.cols = data.cols || 0;
+          var before = state.lines ? state.lines.length : 0;
+          var fromBottom = el.tail.scrollHeight - el.tail.scrollTop;
+          renderTail(data.log || '');
+          el.tail.scrollTop = el.tail.scrollHeight - fromBottom;
+          var gained = (state.lines ? state.lines.length : 0) - before;
+          if (gained <= 0) {
+            /* The pane has no more history: stop asking on every scroll. */
+            state.exhausted = true;
+            state.depth = was;
+            setStatus('더 이상 이전 내용이 없습니다', '#9ca3af');
+          } else {
+            setStatus('이전 ' + gained + '줄 불러옴', '#34d399');
+          }
+        });
       })
-      .catch(function () { setStatus('불러오기 실패', '#ef4444'); })
-      .then(function () { state.growing = false; });
+      .catch(function () { state.growing = false; setStatus('불러오기 실패', '#ef4444'); });
   }
 
   function startPolling() {
@@ -2117,7 +2173,7 @@
       }
       saveDrafts();
     }
-    /* Remember where we came from so Shift+Tab can bounce back -- the pair you
+    /* Remember where we came from so Ctrl+Tab can bounce back -- the pair you
      * are actually working in is almost always two sessions, not nine. */
     if (state.session && state.session !== name) state.prev = state.session;
     state.session = name;
@@ -2247,6 +2303,10 @@
     _findPendingInput: findPendingInput,
     _stepDownSession: stepDownSession,
     _linkifyLines: linkifyLines,
+    _whenSettled: whenSettled,
+    _noteScrolling: noteScrolling,
+    _scrollInFlight: scrollInFlight,
+    _setTouching: function (v) { touching = !!v; },
     _displayWidth: displayWidth,
     _matchSessions: matchSessions,
     SESSION_NAME_RE: SESSION_NAME_RE,

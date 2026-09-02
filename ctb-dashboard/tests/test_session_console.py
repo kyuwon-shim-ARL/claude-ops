@@ -226,8 +226,13 @@ def test_tap_range_selection_exists(console_js):
 def test_selection_uses_click_not_touchstart(console_js):
     """touchstart would fire mid-scroll and select lines the user was passing."""
     assert "tail.addEventListener('click'" in console_js
-    # Match the listener registration, not the word in the explanatory comment.
-    assert "addEventListener('touchstart'" not in console_js
+    # The one touchstart listener on the tail only flags a scroll in flight
+    # (passive, no selection): a touch must never pick a line.
+    import re
+    regs = re.findall(r"addEventListener\('touchstart',([^\n]*)", console_js)
+    assert len(regs) == 1, regs
+    assert "touching = true" in regs[0] and "passive: true" in regs[0]
+    assert "onLineTap" not in regs[0]
 
 
 def test_tail_refresh_is_frozen_while_selecting(console_js):
