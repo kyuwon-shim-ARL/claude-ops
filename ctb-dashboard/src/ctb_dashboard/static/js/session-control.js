@@ -1298,8 +1298,19 @@
     [0xffe0, 0xffe6], [0x1f300, 0x1f64f], [0x1f900, 0x1f9ff],
     [0x20000, 0x2fffd], [0x30000, 0x3fffd],
   ];
+  /* Zero-width is the direction that has to be right. Under-counting a row can
+   * only fail to recognise it as full, which loses a rejoin; over-counting one
+   * -- a combining mark or a conjoining jamo billed as a column -- makes a row
+   * that is NOT full measure as full, and that is what invents a link or drops
+   * a good one. So the marks are enumerated, and the emoji presentation
+   * selector's widening effect (⚠ is one column, ⚠️ is two) is knowingly left
+   * out: it errs the safe way. */
   var ZERO = [
-    [0x0300, 0x036f], [0x200b, 0x200f], [0x2060, 0x2064], [0xfe00, 0xfe0f],
+    [0x0300, 0x036f],    /* combining diacritics -- a decomposed 'á' */
+    [0x0483, 0x0489], [0x0591, 0x05bd], [0x0610, 0x061a], [0x064b, 0x065f],
+    [0x1160, 0x11ff],    /* conjoining Hangul jamo -- decomposed Korean */
+    [0x200b, 0x200f], [0x2060, 0x2064], [0x20d0, 0x20ff],
+    [0xfe00, 0xfe0f], [0xfe20, 0xfe2f],
   ];
 
   function inRanges(cp, ranges) {

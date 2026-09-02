@@ -363,6 +363,19 @@ def test_an_emoji_counts_as_two_columns():
     assert _call("_displayWidth", "a🔥b") == 4
 
 
+def test_a_mark_that_occupies_no_column_is_counted_as_none():
+    """Over-counting is the dangerous direction.
+
+    A row billed wider than it is can measure as full when it is not, and that
+    is what invents a link or drops a good one. Under-counting only loses a
+    rejoin, which is why the emoji presentation selector (⚠ vs ⚠️) is left
+    erring the safe way.
+    """
+    assert _call("_displayWidth", "a\u0301") == 1        # decomposed 'á'
+    assert _call("_displayWidth", "\u1100\u1161") == 2  # jamo: lead + vowel
+    assert _call("_displayWidth", "a\u200bb") == 2       # zero-width space
+
+
 def test_a_shell_quote_after_a_url_is_not_part_of_it():
     """RFC 3986 allows an apostrophe; a terminal almost never means one.
 

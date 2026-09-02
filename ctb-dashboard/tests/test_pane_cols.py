@@ -73,6 +73,15 @@ def test_the_remembered_width_expires(monkeypatch):
     assert len(calls_after) == 1
 
 
+def test_the_lifetime_is_short_enough_to_matter():
+    """The test above passes for any TTL, including one of a thousand years.
+
+    The point of the expiry is that a width nobody told us about heals on its
+    own, and it only does that if the number is small.
+    """
+    assert _srv._PANE_COLS_TTL <= 60
+
+
 def test_a_resize_drops_the_remembered_width(monkeypatch):
     """_fit_pane widens the pane; the next poll must not describe the old one."""
     _probe(monkeypatch, stdout="80\n")
