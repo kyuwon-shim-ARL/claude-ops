@@ -969,38 +969,38 @@
     show(item.name, true);
   });
 
-  /* Ctrl/Cmd+Tab sends a Tab to the pane from anywhere in the sheet -- the
-   * same key the prompt box sends, for when the caret is not in it.
+  /* Ctrl/Cmd+Tab bounces between the last two sessions, the way Alt+Tab does.
+   * It sits on the same modifier as the Ctrl+` walk on purpose: moving between
+   * sessions is one gesture with the accelerator held down, and the hand never
+   * has to swap modifiers mid-thought to get back to where it was.
    *
    * A browser tab keeps this chord for its own tab switching and the page
    * never sees it; an installed PWA window and the VSCode webview have no tab
-   * strip, so there it arrives. That is why the box's own bare Tab exists: it
-   * is the one that always gets through. */
+   * strip, so there it arrives. In a plain browser tab the Ctrl+` walk is the
+   * one that always gets through. */
   document.addEventListener('keydown', function (e) {
     if (!state.session || searchOpen() || e.key !== 'Tab') return;
     if (e.shiftKey || e.altKey) return;
     if (!(e.ctrlKey || e.metaKey)) return;
     if (e.isComposing || e.keyCode === 229) return;   /* the IME's key, not ours */
     e.preventDefault();
-    sendKey('Tab');
+    if (!state.prev || state.prev === state.session) return;
+    show(state.prev, true);
   });
 
-  /* Shift+Tab bounces between the last two sessions, the way Alt+Tab does.
-   * Bare, with no accelerator: inside the sheet Tab has no job worth keeping --
-   * moving focus backwards out of the prompt box leads nowhere useful -- and
-   * the ⇥ that the pane needs is sent by its own button, not by the key. */
+  /* Shift+Tab sends a Tab to the pane from anywhere in the sheet -- the same
+   * key the prompt box's bare Tab sends, for when the caret is not in it. */
   document.addEventListener('keydown', function (e) {
     if (!state.session || searchOpen() || e.key !== 'Tab' || !e.shiftKey) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    /* Not from the prompt box. Bare Tab there now goes to the pane, so this is
-     * the only key left that can move focus onto the sheet's own controls --
-     * ⛔ 중단, the key pad, ✕ -- and taking it for the session toggle would
-     * make every one of them mouse-only. Everywhere else in the sheet it is
-     * still the toggle. */
+    if (e.isComposing || e.keyCode === 229) return;   /* the IME's key, not ours */
+    /* Not from the prompt box. Bare Tab there goes to the pane already, so
+     * Shift+Tab is the only key left that can move focus onto the sheet's own
+     * controls -- ⛔ 중단, the key pad, ✕ -- and taking it here would make
+     * every one of them mouse-only. */
     if (el.input && e.target === el.input) return;
     e.preventDefault();
-    if (!state.prev || state.prev === state.session) return;
-    show(state.prev, true);
+    sendKey('Tab');
   });
 
   document.addEventListener('keyup', function (e) {
