@@ -180,7 +180,7 @@
     clearLine.type = 'button';
     clearLine.textContent = '⌧ 입력 지우기';
     clearLine.title = '세션에 입력 중인 내용 지우기 (Ctrl+U · 진행 중 작업은 그대로)';
-    clearLine.setAttribute('aria-label', '세션 입력 지우기');
+    clearLine.setAttribute('aria-label', '세션 입력 지우기 키 전송');
     clearLine.style.cssText = btnCss('#111827', 'auto') + 'padding:6px 11px;';
     clearLine.addEventListener('click', function () { sendKey('C-u'); });
     keys.appendChild(clearLine);
@@ -239,18 +239,25 @@
      * sends -- which is the intent: Shift+Enter is a hardware-keyboard gesture. */
     var shiftHeld = false;
     input.addEventListener('keydown', function (e) {
+      var imeIsHandlingIt = e.isComposing || e.keyCode === 229;
       /* Tab goes to the session, not to the next widget.
        *
        * Accepting a completion and pressing Enter is one gesture, and it was
        * two trips to the ⇥ button with a click in between -- which also cost
-       * the caret. Moving focus out of this box, which is what Tab did here,
-       * leads nowhere useful: the sheet is modal and Escape is the way out. */
-      if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+       * the caret.
+       *
+       * Not while an IME is composing: a Hangul or Japanese keyboard uses Tab
+       * to commit or cycle a candidate, so taking it there would leave the
+       * half-typed word uncommitted in the box AND drop a stray Tab into a
+       * live pane. Shift+Tab is left alone as the way out of this box -- it is
+       * the only one, since the sheet's own buttons are otherwise unreachable
+       * from here by keyboard. */
+      if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey
+          && !imeIsHandlingIt) {
         e.preventDefault();
         sendKey('Tab');
         return;
       }
-      var imeIsHandlingIt = e.isComposing || e.keyCode === 229;
       /* Not `|| keyCode === 229`: during Hangul composition every key reports
        * 229, so arming on it would bring the stale flag straight back. */
       if (e.key === 'Enter') shiftHeld = e.shiftKey;
@@ -824,6 +831,7 @@
     if (!state.session || searchOpen() || e.key !== 'Tab') return;
     if (e.shiftKey || e.altKey) return;
     if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.isComposing || e.keyCode === 229) return;   /* the IME's key, not ours */
     e.preventDefault();
     sendKey('Tab');
   });
@@ -835,6 +843,12 @@
   document.addEventListener('keydown', function (e) {
     if (!state.session || searchOpen() || e.key !== 'Tab' || !e.shiftKey) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    /* Not from the prompt box. Bare Tab there now goes to the pane, so this is
+     * the only key left that can move focus onto the sheet's own controls --
+     * ⛔ 중단, the key pad, ✕ -- and taking it for the session toggle would
+     * make every one of them mouse-only. Everywhere else in the sheet it is
+     * still the toggle. */
+    if (el.input && e.target === el.input) return;
     e.preventDefault();
     if (!state.prev || state.prev === state.session) return;
     show(state.prev, true);
@@ -1049,6 +1063,13 @@
       e.preventDefault();
       var hit = search.hits[search.cursor];
       if (hit) pick(hit.name);
+      return;
+    }
+    if (e.key === 'Tab') {
+      /* Modal: there is nowhere to tab to. Without this the caret left for
+       * whatever sits behind the z-80 overlay, and the palette stayed up with
+       * its arrows, its Enter and its typing all dead. */
+      e.preventDefault();
       return;
     }
     if (e.key === 'Escape') {
