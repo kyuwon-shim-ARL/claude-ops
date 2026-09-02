@@ -1048,6 +1048,30 @@
       return AGE_OPTIONS.find(o => o.id === _filterAge) || AGE_OPTIONS[0];
     }
 
+    // One ordering and one shape for both published lists — the visible one the
+    // grid and strip follow, and the complete one the console's search reads.
+    const _STATE_ORDER = { working: 0, stuck_after_agent: 1, waiting: 2,
+                           context_limit: 3, error: 4, idle: 5, unknown: 6 };
+
+    function _bySessionOrder(a, b) {
+      const pinned = getPinned();
+      const tierDiff = (pinned.has(a.name) ? 0 : 1) - (pinned.has(b.name) ? 0 : 1);
+      if (tierDiff !== 0) return tierDiff;
+      const stateDiff = (_STATE_ORDER[a.state] ?? 9) - (_STATE_ORDER[b.state] ?? 9);
+      if (stateDiff !== 0) return stateDiff;
+      return (b.updated_at || 0) - (a.updated_at || 0);
+    }
+
+    function _toOrderItem(s) {
+      const p = parseSessionName(s.name);
+      return {
+        name: s.name,
+        state: s.state,
+        label: p.display,
+        branch: p.isWorktree ? p.branch : null,
+      };
+    }
+
     // Filters apply to ALL sessions including pinned — so stale pinned sessions
     // can be surfaced/hidden and cleaned up too.
     function applyFilters(sessions, pinned) {
@@ -1642,6 +1666,15 @@
       const filterCountEl = document.getElementById('filter-count');
       filterCountEl.textContent = filterActive ? `${visible.length} / ${sessions.length} 표시` : '';
 
+      /* Everything, filtered or not, in the grid's own order — the console's
+       * search reads this. The palette must be able to reach a session the
+       * filter box is hiding: that box sits behind the full-bleed console
+       * sheet, so from in there its query is invisible and unclearable, and a
+       * search that silently inherited it answered "일치하는 세션 없음" for a
+       * session that plainly exists. Published before the empty-filter early
+       * return below, so a filter matching nothing cannot leave a stale list. */
+      window.ctbSessionAll = [...sessions].sort(_bySessionOrder).map(_toOrderItem);
+
       if (visible.length === 0) {
         Array.from(grid.children).forEach(el => { if (el !== emptyState) el.remove(); });
         emptyState.classList.remove('hidden');
@@ -1652,27 +1685,12 @@
       }
       emptyState.textContent = 'No sessions detected. Start a Claude session to see it here.';
 
-      const order = { working: 0, stuck_after_agent: 1, waiting: 2, context_limit: 3, error: 4, idle: 5, unknown: 6 };
-      visible.sort((a, b) => {
-        const tierDiff = (pinned.has(a.name) ? 0 : 1) - (pinned.has(b.name) ? 0 : 1);
-        if (tierDiff !== 0) return tierDiff;
-        const stateDiff = (order[a.state] ?? 9) - (order[b.state] ?? 9);
-        if (stateDiff !== 0) return stateDiff;
-        return (b.updated_at || 0) - (a.updated_at || 0);
-      });
+      visible.sort(_bySessionOrder);
 
       sortedSessionNames = visible.map(s => s.name);
       /* The console's switcher strip reads this: the same order the grid shows,
        * but flat — worktree grouping is a layout device, not an ordering. */
-      window.ctbSessionOrder = visible.map(s => {
-        const p = parseSessionName(s.name);
-        return {
-          name: s.name,
-          state: s.state,
-          label: p.display,
-          branch: p.isWorktree ? p.branch : null,
-        };
-      });
+      window.ctbSessionOrder = visible.map(_toOrderItem);
       btnCopyNames.classList.remove('hidden');
 
       const pinnedSessions = visible.filter(s => pinned.has(s.name));

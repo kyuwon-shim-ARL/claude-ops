@@ -169,6 +169,17 @@ def test_the_shared_claude_prefix_is_not_searchable():
     assert match("clau") == ["claude_claude-ops"]   # only the one truly named it
 
 
+def test_a_session_with_no_label_still_matches_without_its_prefix():
+    """The fallback must behave like a label, not like a raw tmux name."""
+    rows = [{"name": "claude_solo", "label": None, "branch": None, "state": "idle"}]
+    assert [s["name"] for s in _call("_matchSessions", rows, "solo")] == ["claude_solo"]
+
+
+def test_a_project_really_named_claude_ops_keeps_its_name():
+    """Only the shared prefix is dropped -- not a label that starts that way."""
+    assert match("claude-ops") == ["claude_claude-ops"]
+
+
 def test_matching_ignores_case():
     assert match("ALPHA") == ["claude_alpha"]
 

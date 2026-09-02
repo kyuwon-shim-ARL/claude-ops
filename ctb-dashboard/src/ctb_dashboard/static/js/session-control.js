@@ -224,6 +224,17 @@
      * sends -- which is the intent: Shift+Enter is a hardware-keyboard gesture. */
     var shiftHeld = false;
     input.addEventListener('keydown', function (e) {
+      /* Tab goes to the session, not to the next widget.
+       *
+       * Accepting a completion and pressing Enter is one gesture, and it was
+       * two trips to the ⇥ button with a click in between -- which also cost
+       * the caret. Moving focus out of this box, which is what Tab did here,
+       * leads nowhere useful: the sheet is modal and Escape is the way out. */
+      if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        sendKey('Tab');
+        return;
+      }
       var imeIsHandlingIt = e.isComposing || e.keyCode === 229;
       /* Not `|| keyCode === 229`: during Hangul composition every key reports
        * 229, so arming on it would bring the stale flag straight back. */
@@ -542,6 +553,17 @@
     return state.order || [];
   }
 
+  /* Every session, not just the ones the grid's filter left showing. The strip
+   * and the number shortcuts mirror the grid on purpose -- they are the grid's
+   * own shortcuts -- but a search that inherits a filter set behind a
+   * full-bleed sheet, where it can be neither seen nor cleared, is a search
+   * that lies about what exists. */
+  function sessionCatalog() {
+    var all = window.ctbSessionAll;
+    if (Array.isArray(all) && all.length) return all;
+    return sessionOrder();
+  }
+
   function fetchOrder() {
     if (Array.isArray(window.ctbSessionOrder) && window.ctbSessionOrder.length) return;
     fetch(api('/api/sessions'), { headers: { 'Accept': 'application/json' } })
@@ -755,6 +777,11 @@
       return;
     }
     if (!accelHeld(e) || e.shiftKey) return;
+    /* The palette owns the keyboard while it is up. Without this the digit
+     * switched the console UNDERNEATH the overlay and put the caret in a
+     * textarea nobody could see -- so the next Enter, typed at what looked
+     * like a search box, would send a prompt to a live session. */
+    if (searchOpen()) return;
     var slot = slotOf(e.key);
     if (slot === -1) return;
     var item = sessionOrder()[slot];
@@ -769,6 +796,21 @@
     if (!state.session && IS_VSCODE && window.ctbFocusSession
         && window.ctbFocusSession(item.name)) return;
     if (item.name !== state.session) show(item.name, true);
+  });
+
+  /* Ctrl/Cmd+Tab sends a Tab to the pane from anywhere in the sheet -- the
+   * same key the prompt box sends, for when the caret is not in it.
+   *
+   * A browser tab keeps this chord for its own tab switching and the page
+   * never sees it; an installed PWA window and the VSCode webview have no tab
+   * strip, so there it arrives. That is why the box's own bare Tab exists: it
+   * is the one that always gets through. */
+  document.addEventListener('keydown', function (e) {
+    if (!state.session || searchOpen() || e.key !== 'Tab') return;
+    if (e.shiftKey || e.altKey) return;
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    sendKey('Tab');
   });
 
   /* Shift+Tab bounces between the last two sessions, the way Alt+Tab does.
@@ -812,7 +854,13 @@
     if (!q) return list.slice();
     var scored = [];
     list.forEach(function (item, index) {
-      var label = String(item.label || item.name || '').toLowerCase();
+      /* The dashboard strips the shared claude_ prefix when it builds a label;
+       * falling back to the raw name has to strip it too, or the fallback
+       * behaves differently from every other row. Only the fallback -- a
+       * project genuinely called claude-ops keeps its name. */
+      var label = (item.label
+        ? String(item.label)
+        : String(item.name || '').replace(/^claude[_-]/, '')).toLowerCase();
       var branch = String(item.branch || '').toLowerCase();
       /* Every tmux session here is named claude_<something>, so matching the
        * raw name made 'c', 'cl', 'cla'... match all seventy of them. The
@@ -919,7 +967,7 @@
   }
 
   function renderResults() {
-    search.hits = matchSessions(sessionOrder(), search.input.value);
+    search.hits = matchSessions(sessionCatalog(), search.input.value);
     if (search.cursor >= search.hits.length) search.cursor = 0;
     search.list.textContent = '';
 
@@ -1005,10 +1053,14 @@
   document.addEventListener('keydown', function (e) {
     /* Only over an open console: on the grid, Ctrl+F stays the browser's find,
      * which is what searches the card labels there. */
-    if (!state.session || searchOpen()) return;
+    if (!state.session) return;
     if (e.key !== 'f' && e.key !== 'F') return;
     if (!(IS_MAC ? e.metaKey : e.ctrlKey) || e.shiftKey || e.altKey) return;
+    /* Claimed before the already-open check: letting the second press through
+     * opened the browser's own find bar on top of the palette, and typing then
+     * went to whichever box the browser felt like. */
     e.preventDefault();
+    if (searchOpen()) { search.input.focus(); search.input.select(); return; }
     hideHints();
     fetchOrder();
     openSearch();
@@ -1675,6 +1727,10 @@
       saveDrafts();
     }
     state.session = null;
+    /* The palette's lifetime is inside the console's. Left behind it covers the
+     * whole grid at z-index 80 with no way out: Escape is gated on an open
+     * console, and the ✕ is underneath it. */
+    closeSearch();
     state.selStart = null;
     state.selEnd = null;
     state.lines = null;
