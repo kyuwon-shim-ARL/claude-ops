@@ -230,7 +230,7 @@
      * at, but a pane running vim or less does its own thing with it. What
      * holds everywhere is the half worth promising -- it is an edit, not an
      * interrupt, so nothing that is running stops. */
-    clearLine.title = 'Ctrl+U 전송 — 입력 줄 지우기 (진행 중 작업은 중단되지 않음)';
+    clearLine.title = 'Ctrl+U 전송 — 입력 줄 지우기 (진행 중 작업은 중단되지 않음) · 단축키 Ctrl+U';
     clearLine.setAttribute('aria-label', '세션 입력 지우기 키 전송');
     clearLine.style.cssText = btnCss('#111827', 'auto') + 'padding:6px 11px;';
     clearLine.addEventListener('click', function () { sendKey('C-u'); });
@@ -1257,6 +1257,31 @@
     if (!el.status) return;
     el.status.textContent = text || '';
     el.status.style.color = color || '#9ca3af';
+  /* Ctrl+U — the kill-line every terminal has, and the same key the ⌧ 입력
+   * 지우기 button sends. The browser spends it on view-source, which is never
+   * what terminal fingers meant over an open console, so it is taken here.
+   *
+   * Where it lands follows where the half-typed line actually is: with the
+   * prompt box focused and holding text, that box IS the line, so it clears
+   * the draft (the browser does nothing there natively anyway); anywhere else
+   * over the console the line is in the pane, so C-u goes to tmux. Ctrl on a
+   * Mac too, not Cmd: the kill-line there is Ctrl+U as well. */
+  document.addEventListener('keydown', function (e) {
+    if (!state.session || searchOpen()) return;
+    if (e.key !== 'u' && e.key !== 'U') return;
+    if (!e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    if (e.isComposing || e.keyCode === 229) return;
+    e.preventDefault();
+    if (el.input && e.target === el.input && el.input.value) {
+      el.input.value = '';
+      delete state.drafts[state.session];
+      saveDrafts();
+      setStatus('입력 지움', '#9ca3af');
+      return;
+    }
+    sendKey('C-u');
+  });
+
   }
 
   /* --- tail ------------------------------------------------------------- */
