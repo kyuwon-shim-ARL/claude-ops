@@ -51,6 +51,28 @@ def test_the_width_is_asked_once_and_then_remembered(monkeypatch):
     assert len(calls) == 1
 
 
+def test_the_remembered_width_expires(monkeypatch):
+    """A terminal attaching, or a resize from a shell, never passes through us.
+
+    Kept forever, such a width is permanently wrong -- and a remembered width
+    SMALLER than the pane makes every row of exactly that many columns read as
+    cut at the margin, so its links are dropped or joined to the row below.
+    """
+    clock = [1000.0]
+    monkeypatch.setattr(_srv.time, "monotonic", lambda: clock[0])
+    calls = _probe(monkeypatch, stdout="80\n")
+    assert _srv._pane_cols("claude_demo") == 80
+
+    clock[0] += _srv._PANE_COLS_TTL - 0.1
+    assert _srv._pane_cols("claude_demo") == 80
+    assert len(calls) == 1, "still fresh"
+
+    clock[0] += 0.2
+    calls_after = _probe(monkeypatch, stdout="140\n")
+    assert _srv._pane_cols("claude_demo") == 140, "a stale width must heal itself"
+    assert len(calls_after) == 1
+
+
 def test_a_resize_drops_the_remembered_width(monkeypatch):
     """_fit_pane widens the pane; the next poll must not describe the old one."""
     _probe(monkeypatch, stdout="80\n")

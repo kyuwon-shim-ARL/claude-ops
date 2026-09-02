@@ -900,11 +900,21 @@ def _fit_pane(name: str, cols: int) -> None:
 
 
 # The width changes only when something resizes the pane, and the console polls
-# every 2 seconds -- so ask tmux once per session and remember the answer. The
+# every 2 seconds -- so ask tmux once and reuse the answer for a while. The
 # probe is cheap (~4ms) but it is a blocking subprocess inside an async handler,
-# and it was doubling the per-poll cost of the endpoint for a number that does
-# not move. _fit_pane invalidates the entry when it resizes.
-_PANE_COLS: dict[str, int] = {}
+# and it was doubling the per-poll cost of the endpoint for a number that
+# rarely moves.
+#
+# Rarely, not never, and not only through us: a terminal attaching or a
+# resize-window from a shell never passes through _fit_pane, so an entry kept
+# for the life of the process would be permanently wrong. The direction that
+# matters is cached < actual -- every row that happens to be exactly the
+# remembered width then reads as cut at the margin, and its links are dropped
+# or joined to the row below. A short life keeps nearly all of the saved
+# probes and lets a stale width heal on its own, the way it did before there
+# was a cache at all.
+_PANE_COLS_TTL = 10.0
+_PANE_COLS: dict[str, tuple[int, float]] = {}
 
 
 def _pane_cols(name: str) -> int:
@@ -924,8 +934,8 @@ def _pane_cols(name: str) -> int:
     0 when tmux will not say, which the console reads as "do not guess".
     """
     cached = _PANE_COLS.get(name)
-    if cached is not None:
-        return cached
+    if cached is not None and time.monotonic() - cached[1] < _PANE_COLS_TTL:
+        return cached[0]
     try:
         probe = subprocess.run(
             ["tmux", "display", "-p", "-t", name, "#{pane_width}"],
@@ -936,7 +946,7 @@ def _pane_cols(name: str) -> int:
         cols = int(probe.stdout.strip() or 0)
     except (subprocess.TimeoutExpired, ValueError):
         return 0
-    _PANE_COLS[name] = cols
+    _PANE_COLS[name] = (cols, time.monotonic())
     return cols
 
 

@@ -403,3 +403,37 @@ def test_a_url_that_merely_ends_at_the_margin_is_the_price():
     assert urls_in([head, short("unrelated")], COLS) == []
     # one column shorter and it is an ordinary link again
     assert urls_in([head[:-1], short("unrelated")], COLS) == [head[:-1]]
+
+
+def test_a_row_that_only_reaches_the_margin_with_punctuation_is_not_cut():
+    """From claude_land_wt_auction r31, the one real drop this rule caused.
+
+    The address is complete; the row touches column 80 because of the shell's
+    closing ')', which trimUrl removes anyway. Judging fullness on the raw
+    match threw the whole link away.
+    """
+    row = ('      curl -s -o /dev/null -w "%{http_code}" '
+           'http://127.0.0.1:8899/index.html)')
+    assert urls_in([row, "  and a following line"], len(row)) == [
+        "http://127.0.0.1:8899/index.html"
+    ]
+
+
+def test_a_box_border_is_not_a_continuation():
+    """│ is a table rule, not a gutter.
+
+    Of 485 rows in a 26k sample beginning with ▎ or │, 465 begin with │ and
+    every one is a border; 426 of those sit directly under an exactly-full row,
+    which is the whole setup for a false join.
+    """
+    head = "see https://example.com/report-xxxxxxxxx"
+    assert len(head) == COLS
+    rows = seg_lines([head, "│ Name    │ Value  │", "x"], COLS)
+    assert all(p["url"] is None for p in rows[1])
+
+
+def test_a_cut_marked_by_an_astral_letter_or_a_combining_mark_is_seen():
+    """Both used to emit a truncated href pointing at a real, different page."""
+    assert links("https://ex.com/path\U00020000tail") == []   # outside the BMP
+    assert links("https://ex.com/a\u0301b") == []             # decomposed 'á'
+    assert links("https://ex.com/path가") == []                # the BMP case

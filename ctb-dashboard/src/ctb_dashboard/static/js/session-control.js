@@ -1209,9 +1209,15 @@
   var URL_RE = new RegExp('https?://[' + URL_CHARS + ']*[A-Za-z0-9]['
                           + URL_CHARS + ']*', 'g');
 
-  /* A continuation is Claude Code's left gutter -- it draws ▎ or │ down the
+  /* A continuation is Claude Code's left gutter -- ▎, which it draws down the
    * side of its output -- and then more address. The glyph is the whole
    * signal, and it is required.
+   *
+   * ▎ only. │ was in here too and is not a gutter: of 485 rows in a 26k-row
+   * sample that start with one of the two, 465 start with │ and every one of
+   * them is a box border or a table rule. 426 of those sit directly under an
+   * exactly-full row, which is the entire glue setup -- and removing │ costs
+   * nothing measurable, since the one real join in that sample uses ▎.
    *
    * Measured over 26k rows of live panes. Continuing at column 0, which is
    * what a bare terminal wrap looks like, fires ZERO times: Claude Code always
@@ -1221,7 +1227,7 @@
    * line -- begins either at column 0 or with plain indentation. So the loose
    * rules cost wrong links and buy nothing measurable, while the strict one
    * fires exactly once in that sample: on a genuinely wrapped artifact link. */
-  var GUTTER_RE = /^ ?[\u258e\u2502] ?/;
+  var GUTTER_RE = /^ ?\u258e ?/;
 
   /* -> {start, text} for the part of `line` that continues an address, or null.
    * start is where the address resumes, so the gutter is not part of the href
@@ -1270,12 +1276,14 @@
   }
 
   /* A character that means the match stopped short of the real end of the
-   * address rather than at it. Built at load: an engine too old for Unicode
+   * address rather than at it. Two UTF-16 units are handed to it, not one, so
+   * a letter outside the basic plane is seen whole; a combining mark counts
+   * too, since a decomposed 'á' would otherwise truncate the href at the 'a'. Built at load: an engine too old for Unicode
    * property escapes gets a regex that matches nothing, which links the
    * truncated form -- the behaviour before this check, not a crash. */
   var CUT_RE;
   try {
-    CUT_RE = new RegExp('[\\p{L}\\p{N}]', 'u');
+    CUT_RE = new RegExp('^[\\p{L}\\p{N}\\p{M}]', 'u');
   } catch (e) {
     CUT_RE = /(?!)/;
   }
@@ -1336,15 +1344,21 @@
          * page, silently, which is worse than no link at all. A symbol next
          * door is a different matter -- ▎ • → │ are what the terminal paints
          * beside a link, not part of one -- so those still link. */
-        if (CUT_RE.test(line.charAt(m.index + m[0].length))) {
+        if (CUT_RE.test(line.slice(m.index + m[0].length,
+                                   m.index + m[0].length + 2))) {
           URL_RE.lastIndex = m.index + m[0].length;
           continue;
         }
         var pieces = [{ line: i, start: m.index, end: m.index + m[0].length }];
         var full = m[0];
         var row = i;
+        /* Judged on the address, not on what follows it: a row reaching the
+         * margin only because of a shell's closing ')' has not run off the
+         * edge -- trimUrl is about to drop that character anyway -- and
+         * treating it as cut threw away a complete, working link. */
         var endsFlush = !!width && displayWidth(line) === width
-                        && pieces[0].end === line.length;
+                        && pieces[0].end === line.length
+                        && trimUrl(m[0]).length === m[0].length;
 
         while (endsFlush && row + 1 < lines.length) {
           var cont = continuationOf(lines[row + 1]);
