@@ -179,7 +179,12 @@
     var clearLine = document.createElement('button');
     clearLine.type = 'button';
     clearLine.textContent = '⌧ 입력 지우기';
-    clearLine.title = '세션에 입력 중인 내용 지우기 (Ctrl+U · 진행 중 작업은 그대로)';
+    /* Names the key, not an outcome: Ctrl+U clears the input line in Claude
+     * Code and in a readline shell, which is every pane this pad is aimed
+     * at, but a pane running vim or less does its own thing with it. What
+     * holds everywhere is the half worth promising -- it is an edit, not an
+     * interrupt, so nothing that is running stops. */
+    clearLine.title = 'Ctrl+U 전송 — 입력 줄 지우기 (진행 중 작업은 중단되지 않음)';
     clearLine.setAttribute('aria-label', '세션 입력 지우기 키 전송');
     clearLine.style.cssText = btnCss('#111827', 'auto') + 'padding:6px 11px;';
     clearLine.addEventListener('click', function () { sendKey('C-u'); });
@@ -734,6 +739,14 @@
     return accelDown;
   }
 
+  function inCatalog(name) {
+    var list = sessionCatalog();
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].name === name) return true;
+    }
+    return false;
+  }
+
   function slotOfName(name) {
     if (!hintOrder) return -1;
     for (var i = 0; i < hintOrder.length; i++) {
@@ -833,6 +846,12 @@
     var slot = slotOf(e.key);
     if (slot === -1) return;
     var item = (hintOrder || sessionOrder())[slot];
+    /* The snapshot is a moment old, and in that moment a session can end. Open
+     * one that is gone and the console sits on a pane that will never answer,
+     * which is a worse answer than none: the badge was pointing at something
+     * that no longer exists. Checked against the full catalog, not the visible
+     * list, so a filter typed mid-hold does not read as a disappearance. */
+    if (item && hintOrder && !inCatalog(item.name)) item = null;
     hideHints();
     if (!item) return;          /* fewer sessions than the digit pressed */
     e.preventDefault();
