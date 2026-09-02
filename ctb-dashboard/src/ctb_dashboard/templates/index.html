@@ -1053,13 +1053,17 @@
     const _STATE_ORDER = { working: 0, stuck_after_agent: 1, waiting: 2,
                            context_limit: 3, error: 4, idle: 5, unknown: 6 };
 
-    function _bySessionOrder(a, b) {
-      const pinned = getPinned();
-      const tierDiff = (pinned.has(a.name) ? 0 : 1) - (pinned.has(b.name) ? 0 : 1);
-      if (tierDiff !== 0) return tierDiff;
-      const stateDiff = (_STATE_ORDER[a.state] ?? 9) - (_STATE_ORDER[b.state] ?? 9);
-      if (stateDiff !== 0) return stateDiff;
-      return (b.updated_at || 0) - (a.updated_at || 0);
+    // Takes the pinned set rather than fetching it: getPinned() builds a fresh
+    // Set out of four spread arrays, and a comparator is called O(n log n)
+    // times — ~280 of them per render at 71 sessions, on the SSE path.
+    function _bySessionOrder(pinned) {
+      return (a, b) => {
+        const tierDiff = (pinned.has(a.name) ? 0 : 1) - (pinned.has(b.name) ? 0 : 1);
+        if (tierDiff !== 0) return tierDiff;
+        const stateDiff = (_STATE_ORDER[a.state] ?? 9) - (_STATE_ORDER[b.state] ?? 9);
+        if (stateDiff !== 0) return stateDiff;
+        return (b.updated_at || 0) - (a.updated_at || 0);
+      };
     }
 
     function _toOrderItem(s) {
@@ -1673,7 +1677,7 @@
        * search that silently inherited it answered "일치하는 세션 없음" for a
        * session that plainly exists. Published before the empty-filter early
        * return below, so a filter matching nothing cannot leave a stale list. */
-      window.ctbSessionAll = [...sessions].sort(_bySessionOrder).map(_toOrderItem);
+      window.ctbSessionAll = [...sessions].sort(_bySessionOrder(pinned)).map(_toOrderItem);
 
       if (visible.length === 0) {
         Array.from(grid.children).forEach(el => { if (el !== emptyState) el.remove(); });
@@ -1685,7 +1689,7 @@
       }
       emptyState.textContent = 'No sessions detected. Start a Claude session to see it here.';
 
-      visible.sort(_bySessionOrder);
+      visible.sort(_bySessionOrder(pinned));
 
       sortedSessionNames = visible.map(s => s.name);
       /* The console's switcher strip reads this: the same order the grid shows,
