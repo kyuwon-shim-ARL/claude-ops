@@ -112,6 +112,48 @@ def test_a_transient_failure_keeps_the_subscription(store):
     assert len(push_mod.subscriptions()) == 1, "a 500 is the push service's problem, not ours"
 
 
+def test_a_subscription_that_always_fails_is_eventually_dropped(store):
+    """404/410 are the only outright "it is gone"; everything else has to earn it.
+
+    An endpoint failing every single time is dead in every way that matters,
+    and each retry delays every other subscriber inside the poll cycle.
+    """
+    push_mod.add_subscription(SUB)
+    err = push_mod.WebPushException("bad", response=MagicMock(status_code=400))
+    with patch.object(push_mod, "webpush", side_effect=err):
+        for i in range(push_mod._MAX_CONSECUTIVE_FAILURES - 1):
+            push_mod.notify("claude_demo", "done")
+            assert len(push_mod.subscriptions()) == 1, f"dropped too early, after {i + 1}"
+        push_mod.notify("claude_demo", "done")
+    assert push_mod.subscriptions() == []
+
+
+def test_one_success_forgives_the_failures_before_it(store):
+    """A service having a bad minute must not accumulate towards a drop."""
+    push_mod.add_subscription(SUB)
+    err = push_mod.WebPushException("bad", response=MagicMock(status_code=400))
+    with patch.object(push_mod, "webpush", side_effect=err):
+        for _ in range(push_mod._MAX_CONSECUTIVE_FAILURES - 1):
+            push_mod.notify("claude_demo", "done")
+    with patch.object(push_mod, "webpush"):
+        assert push_mod.notify("claude_demo", "done") == 1
+    with patch.object(push_mod, "webpush", side_effect=err):
+        for _ in range(push_mod._MAX_CONSECUTIVE_FAILURES - 1):
+            push_mod.notify("claude_demo", "done")
+    assert len(push_mod.subscriptions()) == 1, "the count did not restart"
+
+
+def test_a_failure_log_does_not_carry_the_endpoint_path(store, caplog):
+    """The path is the credential: anyone holding it can push to that device."""
+    push_mod.add_subscription(SUB)
+    err = push_mod.WebPushException("bad", response=MagicMock(status_code=400))
+    with caplog.at_level("WARNING"), patch.object(push_mod, "webpush", side_effect=err):
+        push_mod.notify("claude_demo", "done")
+    text = caplog.text
+    assert "push.example" in text, "the service should be named"
+    assert "/abc" not in text
+
+
 def test_the_payload_carries_what_the_worker_needs(store):
     push_mod.add_subscription(SUB)
     with patch.object(push_mod, "webpush") as wp:

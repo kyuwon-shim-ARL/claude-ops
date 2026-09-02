@@ -24,6 +24,7 @@ import os
 import threading
 from pathlib import Path
 from typing import Dict, List, Optional
+from urllib.parse import urlparse
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -69,6 +70,7 @@ def _reset_for_tests() -> None:
     with _lock:
         _keys = None
         _subs = None
+        _failures.clear()
 
 
 def _b64(raw: bytes) -> str:
@@ -213,18 +215,61 @@ def notify(session: str, body: str, title: str = "Claude 작업 완료") -> int:
                 timeout=5,
             )
             delivered += 1
+            _failures.pop(sub.get("endpoint") or "", None)
         except WebPushException as e:
             status = getattr(getattr(e, "response", None), "status_code", None)
             if status in (404, 410):
                 dead.append(sub.get("endpoint"))
                 logger.info("Dropping a push subscription the service says is gone")
             else:
-                logger.warning("Push failed (%s): %s", status, e)
+                _note_failure(sub, dead, status, e)
         except Exception as e:  # network, DNS, anything else transient
-            logger.warning("Push failed: %s", e)
+            _note_failure(sub, dead, None, e)
 
     if dead:
         with _lock:
             _subs = [s for s in _load_subs() if s.get("endpoint") not in dead]
             _save_subs()
     return delivered
+
+
+# 404 and 410 are the push services saying "this one is gone", and those are
+# dropped on the spot. Everything else -- a 400 from Apple for a token it no
+# longer likes, a name that stops resolving -- looks identical to a service
+# having a bad minute, so it cannot be trusted once. But it must not be
+# forgiven forever either: a subscription that fails every single time is dead
+# in every way that matters, and retrying it delays every other subscriber
+# inside the poll cycle. So: consecutive failures, counted per endpoint, and
+# dropped at five. A single success clears the count.
+#
+# In memory on purpose. A restart forgets, and a genuinely dead endpoint simply
+# earns its five again within the hour; a subscription is not worth a schema
+# change and a migration to remember a grudge across restarts.
+_MAX_CONSECUTIVE_FAILURES = 5
+_failures: dict = {}
+
+
+def _note_failure(sub: dict, dead: list, status, err) -> None:
+    endpoint = sub.get("endpoint") or ""
+    n = _failures.get(endpoint, 0) + 1
+    _failures[endpoint] = n
+    if n >= _MAX_CONSECUTIVE_FAILURES:
+        dead.append(endpoint)
+        _failures.pop(endpoint, None)
+        logger.info("Dropping a push subscription after %d consecutive failures: %s",
+                    n, _host_of(endpoint))
+    else:
+        logger.warning("Push failed (%s, %d in a row) for %s: %s",
+                       status, n, _host_of(endpoint), err)
+
+
+def _host_of(endpoint: str) -> str:
+    """The push service, for a log line that says which subscriber failed.
+
+    Never the whole endpoint: the path is the credential that lets anyone send
+    to that device.
+    """
+    try:
+        return urlparse(endpoint).hostname or "?"
+    except ValueError:
+        return "?"
