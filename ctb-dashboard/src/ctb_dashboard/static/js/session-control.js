@@ -344,6 +344,9 @@
     });
     /* Delegated: 'click' (not touchstart) so a scroll gesture never selects. */
     tail.addEventListener('click', function (e) {
+      /* A link click is a navigation, not the start of a copy range: without
+       * this the tap opened the page AND froze the tail behind it. */
+      if (e.target.closest && e.target.closest('[data-tail-link]')) return;
       var line = e.target.closest && e.target.closest('[data-line]');
       if (line) onLineTap(parseInt(line.getAttribute('data-line'), 10));
     });
@@ -380,7 +383,8 @@
 
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && state.session) {
-        if (state.selStart !== null) clearSelection();
+        if (searchOpen()) closeSearch();
+        else if (state.selStart !== null) clearSelection();
         else hide();
       }
     });
@@ -772,7 +776,7 @@
    * moving focus backwards out of the prompt box leads nowhere useful -- and
    * the ⇥ that the pane needs is sent by its own button, not by the key. */
   document.addEventListener('keydown', function (e) {
-    if (!state.session || e.key !== 'Tab' || !e.shiftKey) return;
+    if (!state.session || searchOpen() || e.key !== 'Tab' || !e.shiftKey) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     e.preventDefault();
     if (!state.prev || state.prev === state.session) return;
@@ -786,6 +790,229 @@
 
   /* Alt-tabbing away leaves the modifier "held" forever otherwise. */
   window.addEventListener('blur', hideHints);
+
+  /* --- session search (Ctrl/Cmd+F) --------------------------------------- */
+
+  /* The chips and the 1..9 digits both assume you can see the session you
+   * want. With ~70 of them you usually cannot: the rail is a long scroll and
+   * the tenth session onward has no shortcut at all. Ctrl+F is the key every
+   * hand already reaches for to find something on a screen -- here it searches
+   * the session list rather than the pane text, which is the thing you
+   * actually want to jump to. Only while the console is open, so the browser's
+   * own find still works on the dashboard grid.
+   *
+   * Matching is substring-first over the label, then the branch and full name,
+   * and only then a subsequence ('cops' -> 'claude-ops') so a rough guess still
+   * lands. Ranked, never filtered to nothing that a substring would have found.
+   */
+
+  /* Pure, so it can be tested without a DOM. */
+  function matchSessions(list, query) {
+    var q = String(query || '').trim().toLowerCase();
+    if (!q) return list.slice();
+    var scored = [];
+    list.forEach(function (item, index) {
+      var label = String(item.label || item.name || '').toLowerCase();
+      var branch = String(item.branch || '').toLowerCase();
+      /* Every tmux session here is named claude_<something>, so matching the
+       * raw name made 'c', 'cl', 'cla'... match all seventy of them. The
+       * prefix carries no information; strip it before searching. */
+      var name = String(item.name || '').toLowerCase().replace(/^claude[_-]/, '');
+      var score = -1;
+      if (label.indexOf(q) === 0) score = 0;
+      else if (label.indexOf(q) !== -1) score = 1;
+      else if (branch.indexOf(q) !== -1 || name.indexOf(q) !== -1) score = 2;
+      else if (isSubsequence(q, label + ' ' + branch)) score = 3;
+      if (score !== -1) scored.push({ item: item, score: score, index: index });
+    });
+    scored.sort(function (a, b) {
+      return a.score - b.score || a.index - b.index;
+    });
+    return scored.map(function (s) { return s.item; });
+  }
+
+  function isSubsequence(needle, hay) {
+    var i = 0;
+    for (var j = 0; j < hay.length && i < needle.length; j++) {
+      if (hay.charAt(j) === needle.charAt(i)) i++;
+    }
+    return i === needle.length;
+  }
+
+  var search = { root: null, input: null, list: null, hits: [], cursor: 0 };
+
+  function searchOpen() {
+    return !!(search.root && search.root.style.display !== 'none');
+  }
+
+  function buildSearch() {
+    if (search.root) return;
+
+    var root = document.createElement('div');
+    root.setAttribute('role', 'dialog');
+    root.setAttribute('aria-label', '\uc138\uc158 \uac80\uc0c9');
+    root.style.cssText = [
+      'position:fixed', 'left:0', 'right:0', 'top:0', 'bottom:0', 'z-index:80',
+      'display:none', 'flex-direction:column', 'align-items:center',
+      'padding:calc(48px + env(safe-area-inset-top)) 12px 12px',
+      'background:rgba(2,6,23,0.72)',
+      '-webkit-backdrop-filter:blur(3px)', 'backdrop-filter:blur(3px)',
+    ].join(';');
+    /* A click on the dimmed area closes, the way every palette does. */
+    root.addEventListener('mousedown', function (e) {
+      if (e.target === root) closeSearch();
+    });
+
+    var box = document.createElement('div');
+    box.style.cssText = [
+      'width:100%', 'max-width:520px', 'display:flex', 'flex-direction:column',
+      'min-height:0', 'border-radius:12px', 'overflow:hidden',
+      'background:#0b1220', 'border:1px solid #1f2937',
+      'box-shadow:0 18px 48px rgba(0,0,0,0.55)',
+    ].join(';');
+
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.setAttribute('aria-label', '\uc138\uc158 \uc774\ub984 \uac80\uc0c9');
+    input.placeholder = '\uc138\uc158 \uac80\uc0c9 (\u2191\u2193 \uc120\ud0dd \u00b7 Enter \uc774\ub3d9 \u00b7 Esc \ub2eb\uae30)';
+    input.style.cssText = [
+      'width:100%', 'box-sizing:border-box', 'padding:12px 14px',
+      'background:#020617', 'color:#e5e7eb', 'border:0',
+      'border-bottom:1px solid #1f2937', 'outline:none',
+      /* 16px keeps iOS from zooming the page in on focus. */
+      'font-size:16px', "font-family:'JetBrains Mono',monospace",
+    ].join(';');
+    input.addEventListener('input', function () { renderResults(); });
+    input.addEventListener('keydown', onSearchKey);
+
+    var list = document.createElement('div');
+    list.style.cssText =
+      'overflow-y:auto;max-height:min(52vh,420px);-webkit-overflow-scrolling:touch;';
+    list.addEventListener('click', function (e) {
+      var row = e.target.closest && e.target.closest('[data-search-session]');
+      if (row) pick(row.getAttribute('data-search-session'));
+    });
+
+    box.appendChild(input);
+    box.appendChild(list);
+    root.appendChild(box);
+    document.body.appendChild(root);
+    search.root = root;
+    search.input = input;
+    search.list = list;
+  }
+
+  function openSearch() {
+    buildSearch();
+    search.root.style.display = 'flex';
+    search.input.value = '';
+    search.cursor = 0;
+    renderResults();
+    search.input.focus();
+  }
+
+  function closeSearch() {
+    if (!search.root) return;
+    search.root.style.display = 'none';
+    /* Give the caret back to the box the user was typing in. */
+    if (el.input && state.session) el.input.focus();
+  }
+
+  function renderResults() {
+    search.hits = matchSessions(sessionOrder(), search.input.value);
+    if (search.cursor >= search.hits.length) search.cursor = 0;
+    search.list.textContent = '';
+
+    if (!search.hits.length) {
+      var empty = document.createElement('div');
+      empty.textContent = '\uc77c\uce58\ud558\ub294 \uc138\uc158 \uc5c6\uc74c';
+      empty.style.cssText =
+        'padding:14px;color:#6b7280;font-size:12px;text-align:center;';
+      search.list.appendChild(empty);
+      return;
+    }
+
+    search.hits.forEach(function (item, i) {
+      var active = i === search.cursor;
+      var row = document.createElement('div');
+      row.setAttribute('data-search-session', item.name);
+      row.setAttribute('role', 'option');
+      if (active) row.setAttribute('aria-selected', 'true');
+      row.style.cssText = [
+        'display:flex', 'align-items:center', 'gap:8px',
+        'padding:9px 14px', 'cursor:pointer',
+        "font-family:'JetBrains Mono',monospace", 'font-size:12px',
+        'color:' + (active ? '#e5e7eb' : '#9ca3af'),
+        'background:' + (active ? '#1e3a8a' : 'transparent'),
+      ].join(';');
+
+      var dot = document.createElement('span');
+      dot.style.cssText = 'width:7px;height:7px;border-radius:50%;flex-shrink:0;' +
+        'background:' + (STATE_DOT[item.state] || '#6b7280') + ';';
+
+      var text = document.createElement('span');
+      text.style.cssText =
+        'flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+      text.textContent = item.branch
+        ? item.label + ' \u2387' + item.branch : item.label;
+
+      row.appendChild(dot);
+      row.appendChild(text);
+      if (item.name === state.session) {
+        var here = document.createElement('span');
+        here.textContent = '\ud604\uc7ac';
+        here.style.cssText =
+          'font-size:10px;color:#60a5fa;flex-shrink:0;';
+        row.appendChild(here);
+      }
+      search.list.appendChild(row);
+      if (active && row.scrollIntoView) {
+        row.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  }
+
+  function onSearchKey(e) {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!search.hits.length) return;
+      var step = e.key === 'ArrowDown' ? 1 : -1;
+      search.cursor =
+        (search.cursor + step + search.hits.length) % search.hits.length;
+      renderResults();
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      var hit = search.hits[search.cursor];
+      if (hit) pick(hit.name);
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      /* The sheet's own Escape handler is on the document and would close the
+       * console behind the palette in the same keystroke. */
+      e.stopPropagation();
+      closeSearch();
+    }
+  }
+
+  function pick(name) {
+    closeSearch();
+    if (name && name !== state.session) show(name, true);
+  }
+
+  document.addEventListener('keydown', function (e) {
+    /* Only over an open console: on the grid, Ctrl+F stays the browser's find,
+     * which is what searches the card labels there. */
+    if (!state.session || searchOpen()) return;
+    if (e.key !== 'f' && e.key !== 'F') return;
+    if (!(IS_MAC ? e.metaKey : e.ctrlKey) || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    hideHints();
+    fetchOrder();
+    openSearch();
+  });
 
   /* --- status line ------------------------------------------------------- */
 
@@ -868,6 +1095,57 @@
     return out.join('\n');
   }
 
+  /* A URL in the pane is a dead string otherwise: the terminal it came from
+   * offers Ctrl+click, this box offered nothing, and the only way to follow an
+   * artifact link was to select it by hand and paste it into the address bar.
+   *
+   * Trailing punctuation is prose, not the address -- '...see http://x/y.' --
+   * so it is trimmed off. A closing bracket is kept only when the URL opened
+   * one itself, which is what a wiki-style path needs.
+   *
+   * Per line, deliberately: tmux hard-wraps at the pane width, so a URL long
+   * enough to wrap arrives as two unrelated lines with no marker joining them.
+   * Guessing that a line ending mid-token continues into the next one would
+   * splice ordinary text together as often as it would repair a link. The
+   * console asks the server to fit the pane to its own width, which is what
+   * keeps the wrap rare. */
+  var URL_RE = /https?:\/\/[^\s<>"'`\u2500-\u257f]+/g;
+
+  function trimUrl(url) {
+    var out = url.replace(/[.,;:!?'"\u201c\u201d\u2018\u2019]+$/, '');
+    while (/[)\]}]$/.test(out)) {
+      var close = out.charAt(out.length - 1);
+      var open = close === ')' ? '(' : (close === ']' ? '[' : '{');
+      var depth = 0;
+      for (var i = 0; i < out.length; i++) {
+        if (out.charAt(i) === open) depth++;
+        else if (out.charAt(i) === close) depth--;
+      }
+      if (depth >= 0) break;   /* the bracket belongs to the URL */
+      out = out.slice(0, -1);
+    }
+    return out;
+  }
+
+  /* -> [{text, url}] with url null for the plain stretches. Pure; tested. */
+  function splitLinks(line) {
+    var out = [];
+    var last = 0;
+    var m;
+    URL_RE.lastIndex = 0;
+    while ((m = URL_RE.exec(line)) !== null) {
+      var url = trimUrl(m[0]);
+      if (!url) continue;
+      if (m.index > last) out.push({ text: line.slice(last, m.index), url: null });
+      out.push({ text: url, url: url });
+      last = m.index + url.length;
+      URL_RE.lastIndex = last;
+    }
+    if (last < line.length) out.push({ text: line.slice(last), url: null });
+    if (!out.length) out.push({ text: line, url: null });
+    return out;
+  }
+
   function renderTail(text) {
     var lines = text.split('\n');
     state.lines = lines;
@@ -877,7 +1155,27 @@
       var div = document.createElement('div');
       div.setAttribute('data-line', String(i));
       div.style.cssText = 'padding:1px 3px;border-radius:3px;min-height:1.45em;';
-      div.textContent = line;
+      var parts = splitLinks(line);
+      if (parts.length === 1 && !parts[0].url) {
+        div.textContent = line;
+      } else {
+        parts.forEach(function (part) {
+          if (!part.url) {
+            div.appendChild(document.createTextNode(part.text));
+            return;
+          }
+          var a = document.createElement('a');
+          a.href = part.url;
+          a.textContent = part.text;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.setAttribute('data-tail-link', '');
+          a.style.cssText =
+            'color:#7dd3fc;text-decoration:underline;text-underline-offset:2px;' +
+            'cursor:pointer;word-break:break-all;';
+          div.appendChild(a);
+        });
+      }
       frag.appendChild(div);
     });
     el.tail.appendChild(frag);
@@ -1366,10 +1664,14 @@
   window.ctbConsole = {
     open: show,
     close: hide,
+    /* The dashboard's own shortcuts sit behind this sheet; they ask. */
+    isOpen: function () { return !!state.session; },
     /* exposed for tests / debugging */
     _state: state,
     _openFromQuery: openFromQuery,
     _cleanLines: cleanLines,
+    _splitLinks: splitLinks,
+    _matchSessions: matchSessions,
     SESSION_NAME_RE: SESSION_NAME_RE,
     POLL_MS: POLL_MS,
   };

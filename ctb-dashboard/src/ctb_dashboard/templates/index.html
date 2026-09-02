@@ -1205,6 +1205,12 @@
       return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
     }
     document.addEventListener('keydown', (e) => {
+      /* The console is a full-bleed sheet drawn over this box. Focusing it from
+       * under there took the keystroke and typed into something invisible --
+       * the query filtered a grid nobody could see, and the console's own
+       * search (which the same chord opens) never got the characters. Over an
+       * open console the shortcut belongs to the console. */
+      if (window.ctbConsole && window.ctbConsole.isOpen && window.ctbConsole.isOpen()) return;
       const focusSearch = () => {
         e.preventDefault();
         _searchInput.focus();
