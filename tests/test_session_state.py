@@ -941,6 +941,154 @@ class TestWideWindowAndOMCSignals:
         )
         assert self.analyzer._detect_working_state(screen) is True
 
+    # --- "· done <time>" completion marker (Claude Code ≥ 2026-04 format) ---
+    #
+    # The completion summary line now carries an explicit finish timestamp:
+    #   "✻ Sautéed for 40s · done 3:58 PM · 4 shells still running"
+    # `done` is the authoritative end-of-turn marker. Whatever trails it
+    # ("N shells / background tasks / local agents still running") describes
+    # things left alive in the background, not the turn -- a background shell
+    # can run for days, and treating it as WORKING would swallow the completion
+    # notification for that long. A false IDLE costs one early notification;
+    # a false WORKING silences all of them.
+
+    DONE_BG = "\u273b Churned for 47s \xb7 done 3:58 PM \xb7 2 background tasks still running (\u2193 to manage)\n"
+
+    def test_done_marker_with_background_tasks_still_running_is_idle(self):
+        assert self.analyzer._detect_working_state(self.DONE_BG + "\n\u276f\n") is False
+
+    def test_done_marker_with_local_agents_still_running_is_idle(self):
+        screen = (
+            "\u273b Baked for 1m 17s \xb7 done Friday, Jun 26, 9:44 AM \xb7 2 local agents still running\n"
+            "\n"
+            "\u276f\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is False
+
+    def test_done_marker_weekday_format_is_idle(self):
+        screen = (
+            "\u273b Cooked for 9s \xb7 done Tuesday 5:38 PM \xb7 3 background tasks still running\n"
+            "\n"
+            "\u276f\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is False
+
+    def test_done_marker_24h_clock_is_idle(self):
+        screen = (
+            "\u273b Cooked for 9s \xb7 done 17:38 \xb7 3 background tasks still running\n"
+            "\n"
+            "\u276f\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is False
+
+    def test_done_marker_wrapped_tail_is_idle(self):
+        """Narrow pane: tmux wraps the tail onto the next line."""
+        screen = (
+            "\u273b Worked for 3m 49s \xb7 done Tuesday, May 12, 4:28 PM \xb7 2 background\n"
+            "tasks still running (\u2193 to manage)\n"
+            "\n"
+            "\u276f\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is False
+
+    def test_done_marker_wrapped_over_four_rows_is_idle(self):
+        """40-column pane: the completion line spans four rows."""
+        screen = (
+            "\u273b Saut\u00e9ed for 40s \xb7 done 3:58\n"
+            " PM \xb7 2 background\n"
+            " tasks still\n"
+            " running (\u2193 to manage)\n"
+            "\n"
+            "\u276f\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is False
+
+    def test_unrelated_still_running_text_does_not_disarm_gate(self):
+        """Tool output saying "still running" above the done line is not a tail."""
+        screen = (
+            "\u25cf Bash(docker ps)\n"
+            "  \u23bf dev server still running on :8080\n"
+            "\n"
+            + self.DONE_BG
+            + "\n"
+            "\u276f\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is False
+
+    def test_live_tail_below_done_line_is_still_working(self):
+        """A `done` line two rows up does not lend its stamp to a separate live tail."""
+        screen = (
+            self.DONE_BG
+            + "  some text\n"
+            "\u273b Churned for 47s \xb7 3 background tasks still running\n"
+            "\n"
+            "\u276f\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is True
+
+    def test_done_in_prose_is_not_a_marker(self):
+        screen = (
+            "  \xb7 done reviewing the diff\n"
+            "\u273b Churned for 47s \xb7 2 background tasks still running\n"
+            "\n"
+            "\u276f\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is True
+
+    def test_done_marker_with_stale_omc_agents_bar_is_idle(self):
+        """GUARD C: ❯ visible + done line with a bg tail → agents:N bar is stale."""
+        screen = (
+            self.DONE_BG
+            + "\n"
+            "\u276f\n"
+            "[OMC#4.12.0] | thinking | agents:1 | session:11m\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is False
+
+    def test_no_done_with_omc_agents_bar_keeps_working(self):
+        """Same screen without the stamp: legacy reading, agents:1 is live."""
+        screen = (
+            "\u273b Churned for 47s \xb7 2 background tasks still running (\u2193 to manage)\n"
+            "\n"
+            "\u276f\n"
+            "[OMC#4.12.0] | thinking | agents:1 | session:11m\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is True
+
+    def test_done_marker_does_not_mask_active_spinner(self):
+        """Old done line above a live spinner: still WORKING."""
+        screen = (
+            self.DONE_BG
+            + "\n"
+            "  next task please\n"
+            "\n"
+            "\u273b Considering\u2026 (2m 4s \xb7 \u2193 5.4k tokens \xb7 thought for 3s)\n"
+            "\n"
+            "\u276f\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is True
+
+    def test_done_marker_pasted_in_user_prompt_does_not_mask_interrupt(self):
+        """The line quoted inside a user prompt while Claude works on it."""
+        screen = (
+            "  " + self.DONE_BG
+            + "  look at this line\n"
+            "\n"
+            "\u273b Brewing\u2026 (12s \xb7 \u2191 1.2k tokens \xb7 esc to interrupt)\n"
+            "\n"
+            "\u276f\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is True
+
+    def test_no_done_marker_keeps_legacy_background_working(self):
+        """Old Claude Code without `done`: unchanged, still WORKING."""
+        screen = (
+            "\u273b Churned for 47s \xb7 2 background tasks still running (\u2193 to manage)\n"
+            "\n"
+            "\u276f\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is True
+
     # --- T7: collapse path performance test ---
 
     def test_performance_collapse_500_blocks(self):

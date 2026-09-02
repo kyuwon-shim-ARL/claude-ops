@@ -121,3 +121,53 @@ def test_extract_work_context_no_lock_file(tmp_path):
     result = analyzer.extract_work_context(str(tmp_path))
     # No lock, no notepad, no MANIFEST, no CLAUDE.md → falls through to branch name or None
     assert result is None or isinstance(result, str)
+
+
+# --- "· done <time>" completion marker -------------------------------------
+# Mirrors tests/test_session_state.py in the parent package: `done` is the
+# authoritative end-of-turn stamp; a "still running" tail after it is not work.
+
+DONE_BG = "✻ Churned for 47s \xb7 done 3:58 PM \xb7 2 background tasks still running (↓ to manage)\n"
+
+
+def test_done_marker_with_background_tasks_still_running_is_idle():
+    assert SessionStateAnalyzer()._detect_working_state(DONE_BG + "\n❯\n") is False
+
+
+def test_done_marker_wrapped_tail_is_idle():
+    screen = ("✻ Worked for 3m 49s \xb7 done Tuesday, May 12, 4:28 PM \xb7 2 background\n"
+              "tasks still running (↓ to manage)\n\n❯\n")
+    assert SessionStateAnalyzer()._detect_working_state(screen) is False
+
+
+def test_unrelated_still_running_text_does_not_disarm_gate():
+    screen = ("  ⎿ dev server still running on :8080\n\n" + DONE_BG + "\n❯\n")
+    assert SessionStateAnalyzer()._detect_working_state(screen) is False
+
+
+def test_live_tail_below_done_line_is_still_working():
+    screen = (DONE_BG + "  some text\n"
+              "✻ Churned for 47s \xb7 3 background tasks still running\n\n❯\n")
+    assert SessionStateAnalyzer()._detect_working_state(screen) is True
+
+
+def test_done_marker_does_not_mask_active_spinner():
+    screen = (DONE_BG + "\n  next task please\n\n"
+              "✻ Considering… (2m 4s \xb7 ↓ 5.4k tokens \xb7 thought for 3s)\n\n❯\n")
+    assert SessionStateAnalyzer()._detect_working_state(screen) is True
+
+
+def test_no_done_marker_keeps_legacy_background_working():
+    screen = "✻ Churned for 47s \xb7 2 background tasks still running (↓ to manage)\n\n❯\n"
+    assert SessionStateAnalyzer()._detect_working_state(screen) is True
+
+
+def test_done_gate_matches_canonical_detector():
+    """The dashboard carries a copy of the gate; the parts must not drift."""
+    try:
+        from claude_ctb.utils.session_state import SessionStateAnalyzer as Canonical
+    except ImportError:
+        import pytest
+        pytest.skip("claude_ctb not importable in this environment")
+    assert SessionStateAnalyzer._DONE_MARKER_RE.pattern == Canonical._DONE_MARKER_RE.pattern
+    assert SessionStateAnalyzer._BG_TAIL_RE.pattern == Canonical._BG_TAIL_RE.pattern

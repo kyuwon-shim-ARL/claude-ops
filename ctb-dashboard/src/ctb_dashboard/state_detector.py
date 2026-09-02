@@ -99,6 +99,51 @@ class SessionStateAnalyzer:
     # Claude Code spinner/bullet glyphs used for tool execution and thinking.
     _TOOL_GLYPHS = '\u00b7\u2722\u2733\u2736\u273b\u273d\u25cf\u23fa'
 
+    # "✻ Sautéed for 40s · done 3:58 PM · 4 shells still running"
+    # Claude Code (2026-04+) stamps the completion line with `· done <time>`.
+    # The date part varies with age ("3:58 PM", "Tuesday 5:38 PM",
+    # "Friday, Jun 26, 9:44 AM"), so the match is anchored on the H:MM clock
+    # that every variant ends in -- "· done reviewing the diff" in prose does
+    # not qualify. AM/PM optional for a 24h locale.
+    _DONE_MARKER_RE = re.compile(r'\u00b7\s*done\s+[^\u00b7\n]*?\d{1,2}:\d{2}(?:\s*[AP]M)?')
+
+    # Fragments Claude Code appends after `done` for things left alive in the
+    # background. Scoped to those nouns: tool output saying "server still
+    # running" is not a background tail and must not touch the gate.
+    _BG_TAIL_RE = re.compile(
+        r'(?:background tasks?|local agents?|shells?)\s+still\s+running|to manage\)'
+    )
+
+    @classmethod
+    def _bg_tail_is_done(cls, lines) -> bool:
+        """True when every background-tail fragment hangs off a `done` line.
+
+        `done` is the authoritative end-of-turn marker; "N shells / background
+        tasks / local agents still running" after it lists what is left alive
+        in the background, not work on the turn. A background shell can live
+        for days, and reading it as WORKING would silence the completion
+        notification for that long. Without `done` (older Claude Code) the
+        legacy reading -- background tail = still working -- is kept.
+
+        A narrow pane wraps the completion line over several rows, so the
+        marker is looked for on the fragment's logical line: the row itself
+        plus the rows above it up to and including the nearest one that opens
+        with a spinner glyph (a wrap continuation never does). A row that
+        opens with a glyph is a line of its own and borrows nothing from above.
+        """
+        found = False
+        glyph_start = re.compile(rf'^\s*[{cls._TOOL_GLYPHS}] ')
+        for i, line in enumerate(lines):
+            if not cls._BG_TAIL_RE.search(line):
+                continue
+            found = True
+            j = i
+            while j > 0 and i - j < 4 and not glyph_start.search(lines[j]):
+                j -= 1
+            if not any(cls._DONE_MARKER_RE.search(l) for l in lines[j:i + 1]):
+                return False
+        return found
+
     # Working-state guard patterns: if any of these appear in recent screen content,
     # Claude is working and NOT waiting for user input.
     _WORKING_GUARD_PATTERNS = [
@@ -325,9 +370,13 @@ class SessionStateAnalyzer:
 
         # PRIORITY 1c: Claude Code background tasks / local agents still running
         # Matches both old "background tasks still running" and new "local agents still running"
+        # A `· done <time>` line owns whatever trails it (see _bg_tail_is_done).
         if ('background task' in recent_content or 'local agents' in recent_content) and 'still running' in recent_content:
-            logger.debug("WORKING: Claude background task(s)/local agents still running detected")
-            return True
+            if self._bg_tail_is_done(recent_lines):
+                logger.debug("1c: background tail hangs off a `done` line -> not working")
+            else:
+                logger.debug("WORKING: Claude background task(s)/local agents still running detected")
+                return True
 
         # PRIORITY 1d: Active spinner glyph with ellipsis
         _spinner_active_re = re.compile(
@@ -381,8 +430,17 @@ class SessionStateAnalyzer:
             logger.debug("WORKING: '| thinking |' detected in filtered content")
             return True
 
+        _bg_tail_patterns = {
+            "background task still running", "local agents still running", "to manage)",
+        }
+        # Last few non-blank lines, not just check_lines: a wrapped tail puts
+        # `done` one line above the fragment check_lines holds.
+        _tail_done = self._bg_tail_is_done(non_blank[-6:])
         for pattern in working_patterns:
             if pattern in check_content:
+                if pattern in _bg_tail_patterns and _tail_done:
+                    logger.debug(f"2a: '{pattern}' hangs off a `done` line -> not working")
+                    continue
                 logger.debug(f"WORKING: '{pattern}' detected in filtered content")
                 return True
 
@@ -391,7 +449,8 @@ class SessionStateAnalyzer:
             rf'^\s*[{SessionStateAnalyzer._TOOL_GLYPHS}] \w+ for \d+',
             check_content, re.MULTILINE,
         ):
-            if 'background task' not in check_content and 'local agents' not in check_content:
+            if ('background task' not in check_content and 'local agents' not in check_content) \
+                    or _tail_done:
                 logger.debug("NOT WORKING: past-tense completion line detected")
                 return False
             else:
