@@ -31,7 +31,8 @@ def client():
     return TestClient(app)
 
 
-@pytest.mark.parametrize("key", ["Enter", "Escape", "y", "n", "1", "2", "Up", "Down", "C-c"])
+@pytest.mark.parametrize("key", ["Enter", "Escape", "y", "n", "1", "2", "Up", "Down",
+                                 "C-c", "C-u", "BSpace"])
 def test_allowlisted_keys_are_sent(client, keys, key):
     r = client.post("/api/sessions/claude_demo/key", json={"key": key}, headers=AUTH)
     assert r.status_code == 200
@@ -40,8 +41,9 @@ def test_allowlisted_keys_are_sent(client, keys, key):
 
 @pytest.mark.parametrize("key", [
     "rm -rf /",        # a command, not a key
-    "C-u",             # not allowlisted
     "M-x",
+    "C-d",             # would close the pane
+    "C-z",             # would stop the process
     "sudo",
     "",
     "Enter Enter",
@@ -87,7 +89,7 @@ def test_send_key_rejects_outside_allowlist_before_tmux(monkeypatch):
     monkeypatch.setattr(session_input.subprocess, "run",
                         lambda argv, **kw: calls.append(argv))
     with pytest.raises(ValueError):
-        session_input.send_key("claude_demo", "C-u")
+        session_input.send_key("claude_demo", "C-d")
     assert calls == []
 
 

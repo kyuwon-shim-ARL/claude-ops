@@ -156,7 +156,7 @@
       ['1', '1', '1번'], ['2', '2', '2번'], ['3', '3', '3번'],
       ['4', '4', '4번'], ['5', '5', '5번'],
       ['↵', 'Enter', 'Enter'], ['esc', 'Escape', 'Escape'],
-      ['⇥', 'Tab', 'Tab'],
+      ['⇥', 'Tab', 'Tab'], ['⌫', 'BSpace', '한 글자 지우기'],
       ['↑', 'Up', '위'], ['↓', 'Down', '아래'],
       ['←', 'Left', '왼쪽'], ['→', 'Right', '오른쪽'],
     ].forEach(function (spec) {
@@ -169,6 +169,21 @@
       b.addEventListener('click', function () { sendKey(spec[1]); });
       keys.appendChild(b);
     });
+
+    /* Clearing what is half-typed in the PANE -- not in the box above, whose
+     * own draft is cleared by sending it. Ctrl+U is a kill-line, so it takes
+     * the whole input and leaves anything already running alone; Escape-Escape
+     * rewinds the conversation and ⛔ interrupts the work, and neither of those
+     * is what "I mistyped, start the line again" should cost. Ctrl+Y in the
+     * session pastes it back if the finger was wrong. */
+    var clearLine = document.createElement('button');
+    clearLine.type = 'button';
+    clearLine.textContent = '⌧ 입력 지우기';
+    clearLine.title = '세션에 입력 중인 내용 지우기 (Ctrl+U · 진행 중 작업은 그대로)';
+    clearLine.setAttribute('aria-label', '세션 입력 지우기');
+    clearLine.style.cssText = btnCss('#111827', 'auto') + 'padding:6px 11px;';
+    clearLine.addEventListener('click', function () { sendKey('C-u'); });
+    keys.appendChild(clearLine);
 
     var stop = document.createElement('button');
     stop.type = 'button';

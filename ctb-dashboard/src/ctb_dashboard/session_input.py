@@ -232,6 +232,13 @@ ALLOWED_KEYS = frozenset({
     "y", "n", "Y", "N",
     "1", "2", "3", "4", "5", "6", "7", "8", "9",
     "C-c",
+    # Clearing the input line. Ctrl+U is the edit, not the interrupt: verified
+    # against a live Claude Code pane with a Bash tool call in flight -- the
+    # queued text vanished, the pane offered "Ctrl+Y to paste deleted text",
+    # and the command ran to completion. Escape-Escape rewinds the
+    # conversation and Ctrl+C interrupts the work; neither is what "clear what
+    # I was typing" should cost.
+    "C-u",
 })
 
 
