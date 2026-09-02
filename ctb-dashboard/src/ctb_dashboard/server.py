@@ -890,12 +890,21 @@ def _fit_pane(name: str, cols: int) -> None:
             ["tmux", "resize-window", "-t", name, "-x", str(cols), "-y", height],
             capture_output=True, text=True, timeout=5,
         )
+        _PANE_COLS.pop(name, None)
         subprocess.run(
             ["tmux", "set", "-w", "-t", name, "-u", "window-size"],
             capture_output=True, text=True, timeout=5,
         )
     except (subprocess.TimeoutExpired, ValueError):
         return
+
+
+# The width changes only when something resizes the pane, and the console polls
+# every 2 seconds -- so ask tmux once per session and remember the answer. The
+# probe is cheap (~4ms) but it is a blocking subprocess inside an async handler,
+# and it was doubling the per-poll cost of the endpoint for a number that does
+# not move. _fit_pane invalidates the entry when it resizes.
+_PANE_COLS: dict[str, int] = {}
 
 
 def _pane_cols(name: str) -> int:
@@ -907,18 +916,28 @@ def _pane_cols(name: str) -> int:
     wrapped one. The width is the difference: only a row filled to the last
     column can have been cut there.
 
+    pane_width, not window_width: capture-pane captures a pane, and a window
+    split vertically holds panes half its width. Asking for the window's width
+    there reports roughly double the columns the text was wrapped at, so no
+    line ever matches and the console silently stops rejoining anything.
+
     0 when tmux will not say, which the console reads as "do not guess".
     """
+    cached = _PANE_COLS.get(name)
+    if cached is not None:
+        return cached
     try:
         probe = subprocess.run(
-            ["tmux", "display", "-p", "-t", name, "#{window_width}"],
+            ["tmux", "display", "-p", "-t", name, "#{pane_width}"],
             capture_output=True, text=True, timeout=5,
         )
         if probe.returncode != 0:
             return 0
-        return int(probe.stdout.strip() or 0)
+        cols = int(probe.stdout.strip() or 0)
     except (subprocess.TimeoutExpired, ValueError):
         return 0
+    _PANE_COLS[name] = cols
+    return cols
 
 
 @app.get("/api/sessions/{name}/log")

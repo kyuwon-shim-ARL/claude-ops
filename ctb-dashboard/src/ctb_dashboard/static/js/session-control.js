@@ -1169,11 +1169,34 @@
    * Trailing punctuation is prose, not the address -- '...see http://x/y.' --
    * so it is trimmed off. A closing bracket is kept only when the URL opened
    * one itself, which is what a wiki-style path needs. */
-  var URL_RE = /https?:\/\/[^\s<>"'`─-╿]+/g;
+  /* What may appear in an address, per RFC 3986 -- a whitelist, because the
+   * blacklist this replaces only excluded box drawing (U+2500-257F) and so let
+   * every other glyph the terminal paints beside a link run into the href:
+   * Claude Code's own gutter ▎ (U+258E) is outside that range, as are • and →.
+   * A host is required, so a bare 'https://' at the end of a sentence is text.
+   *
+   * Unicode domains are not linked. That is the safe half of a real tradeoff:
+   * they cannot be told apart from an ordinary CJK word running into a URL, and
+   * a homograph that looks like a familiar host is exactly what should not be
+   * one click away from a pane whose contents nobody audited. */
+  var URL_CHARS = "A-Za-z0-9\\-._~:/?#\\[\\]@!$&'()*+,;=%";
+  var URL_RE = new RegExp('https?://[' + URL_CHARS + ']*[A-Za-z0-9]['
+                          + URL_CHARS + ']*', 'g');
 
   /* What a hard-wrapped continuation may be made of: the same characters, from
    * column 0. Anchored, because that is the whole signal. */
-  var CONT_RE = /^[^\s<>"'`─-╿]+/;
+  var CONT_RE = new RegExp('^[' + URL_CHARS + ']+');
+
+  /* A character that means the match stopped short of the real end of the
+   * address rather than at it. Built at load: an engine too old for Unicode
+   * property escapes gets a regex that matches nothing, which links the
+   * truncated form -- the behaviour before this check, not a crash. */
+  var CUT_RE;
+  try {
+    CUT_RE = new RegExp('[\\p{L}\\p{N}]', 'u');
+  } catch (e) {
+    CUT_RE = /(?!)/;
+  }
 
   function trimUrl(url) {
     var out = url.replace(/[.,;:!?'"“”‘’]+$/, '');
@@ -1225,6 +1248,16 @@
       URL_RE.lastIndex = 0;
       var m;
       while ((m = URL_RE.exec(line)) !== null) {
+        /* A letter or digit right after the match means the address did not
+         * end there -- the whitelist simply cannot spell the next character.
+         * A Korean path (…/가나) would otherwise link as …/ : a different
+         * page, silently, which is worse than no link at all. A symbol next
+         * door is a different matter -- ▎ • → │ are what the terminal paints
+         * beside a link, not part of one -- so those still link. */
+        if (CUT_RE.test(line.charAt(m.index + m[0].length))) {
+          URL_RE.lastIndex = m.index + m[0].length;
+          continue;
+        }
         var pieces = [{ line: i, start: m.index, end: m.index + m[0].length }];
         var full = m[0];
         var row = i;

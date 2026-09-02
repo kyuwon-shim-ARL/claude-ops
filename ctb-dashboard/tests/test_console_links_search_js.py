@@ -119,6 +119,35 @@ def test_the_rendered_text_reproduces_the_line_exactly():
         assert text_of(line) == line
 
 
+def test_the_glyphs_claude_code_paints_beside_a_link_stay_out_of_it():
+    """The blacklist this replaced only excluded box drawing (U+2500-257F).
+
+    Claude Code's own left gutter is ▎ (U+258E), outside that range, so it was
+    being glued onto the href of every link it sat next to. • and → likewise.
+    """
+    assert links("x https://ex.com/a▎ more") == ["https://ex.com/a"]
+    assert links("• https://ex.com/b• x") == ["https://ex.com/b"]
+    assert links("→ https://ex.com/c→") == ["https://ex.com/c"]
+
+
+def test_a_scheme_with_no_host_is_not_a_link():
+    """'see https://.' used to produce an href of 'https://'."""
+    assert links("see https://.") == []
+    assert links("bare https:// end") == []
+
+
+def test_a_url_cut_short_by_a_character_we_cannot_spell_is_not_linked():
+    """A Korean path would otherwise link as the site root -- a different page.
+
+    The address does not end where the whitelist stops; dropping the link is
+    the honest outcome, and better than one that silently goes elsewhere.
+    """
+    assert links("한글 https://example.com/가나 뒤") == []
+    assert links("https://ex.com/pathでは") == []
+    # the one before it, which really did end, still links
+    assert links("두 개 https://a.io/x 와 https://b.io/여기") == ["https://a.io/x"]
+
+
 def test_a_box_drawing_border_does_not_run_into_the_url():
     """tmux panes are full of ─ and │; a link touching one must stop at it.
 
@@ -186,13 +215,15 @@ def test_matching_ignores_case():
 
 # --- URLs the pane hard-wrapped ----------------------------------------------
 
-# A pane 40 columns wide. capture-pane -J trims the padding, so a row that is
-# exactly 40 characters is the only kind that can have been cut at the margin;
-# pad() here is a no-op kept for readability of the short rows.
+# A pane 40 columns wide. capture-pane -J trims trailing padding, so what
+# reaches the console is the bare text: a row of exactly 40 columns is the only
+# kind that can have been cut at the margin, and a shorter row ended where its
+# author ended it. short() marks the rows that are deliberately not full.
 COLS = 40
 
 
-def pad(line):
+def short(line):
+    assert len(line) < COLS, "this row is meant to be shorter than the pane"
     return line
 
 
@@ -201,23 +232,23 @@ def test_a_url_wrapped_across_two_rows_becomes_one_link():
     url = "https://claude.ai/code/artifact/67b095b6-2541-42dc-a5f0-98c25c251f3a"
     head, tail = url[:COLS], url[COLS:]
     assert len(head) == COLS
-    assert urls_in([head, pad(tail)], COLS) == [url]
+    assert urls_in([head, short(tail)], COLS) == [url]
 
 
 def test_the_joined_link_is_drawn_on_both_rows():
     """Rows stay rows -- selection and copy still count in lines."""
     url = "https://claude.ai/code/artifact/67b095b6-2541-42dc-a5f0-98c25c251f3a"
-    rows = seg_lines([url[:COLS], pad(url[COLS:])], COLS)
+    rows = seg_lines([url[:COLS], short(url[COLS:])], COLS)
     assert [p["url"] for p in rows[0]] == [url]
     assert rows[1][0]["url"] == url
     # and the text still reproduces each row exactly
     assert "".join(p["text"] for p in rows[0]) == url[:COLS]
-    assert "".join(p["text"] for p in rows[1]) == pad(url[COLS:])
+    assert "".join(p["text"] for p in rows[1]) == short(url[COLS:])
 
 
 def test_a_url_wrapped_across_three_rows_is_joined_whole():
     url = "https://example.com/" + "a" * 70
-    rows = [url[:COLS], url[COLS:2 * COLS], pad(url[2 * COLS:])]
+    rows = [url[:COLS], url[COLS:2 * COLS], short(url[2 * COLS:])]
     assert len(rows[0]) == len(rows[1]) == COLS
     assert urls_in(rows, COLS) == [url]
 
@@ -226,12 +257,12 @@ def test_an_indented_next_line_is_not_glued_on():
     """Claude Code indents its output; only the terminal writes at column 0."""
     head = "x" * (COLS - 20) + "https://example.com/"
     assert len(head) == COLS
-    assert urls_in([head, pad("  and then some prose")], COLS) == ["https://example.com/"]
+    assert urls_in([head, short("  and then some prose")], COLS) == ["https://example.com/"]
 
 
 def test_a_url_that_stops_short_of_the_margin_takes_no_continuation():
-    """Padding proves the row was not full, so there is nothing to rejoin."""
-    assert urls_in([pad("see https://example.com/x"), pad("next line here")], COLS) == [
+    """A row that stops short of the margin was not cut there."""
+    assert urls_in([short("see https://example.com/x"), short("next line here")], COLS) == [
         "https://example.com/x"
     ]
 
@@ -239,20 +270,20 @@ def test_a_url_that_stops_short_of_the_margin_takes_no_continuation():
 def test_punctuation_on_the_continuation_row_is_still_dropped():
     url = "https://example.com/" + "b" * 30
     head, tail = url[:COLS], url[COLS:]
-    assert urls_in([head, pad(tail + ".")], COLS) == [url]
+    assert urls_in([head, short(tail + ".")], COLS) == [url]
 
 
 def test_a_continuation_row_of_pure_punctuation_is_not_part_of_the_link():
     """Trimming may empty the whole second row; it is then plain text."""
     url = "https://example.com/" + "c" * 20
     assert len(url) == COLS
-    rows = seg_lines([url, pad(".")], COLS)
+    rows = seg_lines([url, short(".")], COLS)
     assert [p["url"] for p in rows[0]] == [url]
     assert all(p["url"] is None for p in rows[1])
 
 
 def test_a_full_row_of_ordinary_text_starts_no_link():
-    assert urls_in([pad("nothing here at all"), "x" * COLS], COLS) == []
+    assert urls_in([short("nothing here at all"), "x" * COLS], COLS) == []
 
 
 def test_a_log_line_ending_in_a_url_is_not_glued_to_the_next_line():
