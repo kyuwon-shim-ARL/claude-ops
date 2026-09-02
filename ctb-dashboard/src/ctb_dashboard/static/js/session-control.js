@@ -651,10 +651,14 @@
       chip.title = item.name;
 
       chip.appendChild(dot);
-      if (index < HINT_MAX) {
+      /* While the numbers are frozen the chip carries the number that will
+       * actually fire, not its position in a rail that may have re-sorted
+       * since. Unfrozen, the two are the same thing. */
+      var numbered = accelDown ? slotOfName(item.name) : index;
+      if (numbered > -1 && numbered < HINT_MAX) {
         var num = document.createElement('b');
         num.setAttribute('data-numhint', '');
-        num.textContent = String(index + 1);
+        num.textContent = String(numbered + 1);
         num.style.cssText = "font-family:'JetBrains Mono',monospace;" +
           'font-size:9px;font-weight:700;color:#fbbf24;flex-shrink:0;' +
           'padding:0 3px;border-radius:4px;background:rgba(245,158,11,0.16);' +
@@ -714,8 +718,28 @@
    * does not drop them. */
   var accelDown = false;
 
+  /* The list the numbers refer to, frozen while the accelerator is held.
+   *
+   * The grid re-sorts on every poll -- pinned first, then state, then how
+   * recently the session moved -- so a session finishing its work is enough to
+   * renumber everything below it. Read live, the map moved between seeing "3"
+   * and pressing it, and the digit opened whatever had since taken the slot:
+   * the numbers were unreliable exactly when the board was busy, which is when
+   * they are wanted. Frozen at the moment the accelerator goes down, what is
+   * on screen and what the digit does cannot disagree, and the badges stop
+   * shuffling under a held finger. Released with the key. */
+  var hintOrder = null;
+
   function hintsVisible() {
     return accelDown;
+  }
+
+  function slotOfName(name) {
+    if (!hintOrder) return -1;
+    for (var i = 0; i < hintOrder.length; i++) {
+      if (hintOrder[i].name === name) return i;
+    }
+    return -1;
   }
 
   function paintHints() {
@@ -745,7 +769,7 @@
     /* With the console open the strip carries the numbers, and the grid behind
      * it is not on screen anyway. */
     if (!accelDown || state.session) return;
-    var list = sessionOrder();
+    var list = hintOrder || sessionOrder();
     for (var i = 0; i < list.length && i < HINT_MAX; i++) {
       var card = cardFor(list[i].name);
       if (!card) continue;
@@ -778,6 +802,7 @@
   function showHints() {
     if (accelDown) return;
     accelDown = true;
+    hintOrder = sessionOrder().slice();
     paintHints();
     if (!hintTimer) hintTimer = setInterval(paintHints, 400);
   }
@@ -785,6 +810,7 @@
   function hideHints() {
     if (!accelDown) return;
     accelDown = false;
+    hintOrder = null;
     if (hintTimer) { clearInterval(hintTimer); hintTimer = null; }
     paintHints();
   }
@@ -806,7 +832,7 @@
     if (searchOpen()) return;
     var slot = slotOf(e.key);
     if (slot === -1) return;
-    var item = sessionOrder()[slot];
+    var item = (hintOrder || sessionOrder())[slot];
     hideHints();
     if (!item) return;          /* fewer sessions than the digit pressed */
     e.preventDefault();
