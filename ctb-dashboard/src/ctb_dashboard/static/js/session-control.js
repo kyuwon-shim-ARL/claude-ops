@@ -57,6 +57,14 @@
         ' calc(14px + env(safe-area-inset-bottom))',
       'background:#0b1220', 'color:#e5e7eb',
       'font-family:ui-sans-serif,system-ui,sans-serif',
+      /* The sheet is dark whatever the board's theme is, so it carries its own
+       * scrollbar colours: the page's variables would put a light-theme bar
+       * down the side of a near-black pane. Custom properties cascade, so this
+       * covers the tail and anything else here that scrolls. */
+      '--scroll-track:rgba(255,255,255,0.05)',
+      '--scroll-thumb:rgba(148,163,184,0.32)',
+      '--scroll-thumb-hover:rgba(148,163,184,0.5)',
+      'color-scheme:dark',
     ].join(';');
 
     /* Switcher strip: the sheet used to open with dead space above it, and

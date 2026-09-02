@@ -27,6 +27,36 @@
       font-family: 'Nunito', sans-serif;
       transition: background-color 0.4s ease, color 0.4s ease;
     }
+
+    /* Scrollbars, in the board's own colours rather than the system's grey.
+     * Two mechanisms, because they are not equivalent: Firefox and current
+     * Chrome take `scrollbar-color`, while WebKit and older Chrome only obey
+     * the ::-webkit-scrollbar pseudo-elements. Where both are understood the
+     * standard property wins, and the pseudo-element rules are simply unused.
+     * The variables are set by applyTheme(); the fallbacks here are the dark
+     * palette, so the very first paint is right too. */
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: var(--scroll-thumb, rgba(160,150,200,0.28))
+                       var(--scroll-track, rgba(255,255,255,0.04));
+    }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track {
+      background: var(--scroll-track, rgba(255,255,255,0.04));
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--scroll-thumb, rgba(160,150,200,0.28));
+      border-radius: 99px;
+      /* Inset from the trough, so the bar reads as a pill rather than a slab.
+       * A transparent border shows the track through it under background-clip. */
+      border: 2px solid transparent;
+      background-clip: padding-box;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--scroll-thumb-hover, rgba(180,170,220,0.45));
+      background-clip: padding-box;
+    }
+    ::-webkit-scrollbar-corner { background: transparent; }
     .font-mono { font-family: 'JetBrains Mono', monospace; }
 
     @keyframes breathe {
@@ -308,6 +338,12 @@
           emptyText: 'rgba(255,255,255,0.15)',
           quadLabelColor: 'rgba(255,255,255,0.45)',
           metaThemeColor: '#0f0d14',
+          /* The parts the browser paints, not us: the scrollbar troughs and,
+           * in an installed desktop app, the title bar. Left alone they come
+           * out system grey against a near-black page. */
+          scrollTrack: 'rgba(255,255,255,0.04)',
+          scrollThumb: 'rgba(160,150,200,0.28)',
+          scrollThumbHover: 'rgba(180,170,220,0.45)',
           freshBarGrad: 'linear-gradient(90deg,#f0a500,#fbbf24)',
           freshBadgeBg: 'linear-gradient(135deg,#f0a500,#fbbf24)',
           freshBadgeText: '#0f0d14',
@@ -345,6 +381,9 @@
         emptyText: 'rgba(100,80,60,0.3)',
         quadLabelColor: 'rgba(45,35,24,0.5)',
         metaThemeColor: '#fdf8f2',
+        scrollTrack: 'rgba(0,0,0,0.035)',
+        scrollThumb: 'rgba(90,75,60,0.28)',
+        scrollThumbHover: 'rgba(90,75,60,0.45)',
         freshBarGrad: 'linear-gradient(90deg,#e08c00,#f0a500)',
         freshBadgeBg: 'linear-gradient(135deg,#e08c00,#f0a500)',
         freshBadgeText: '#fffcf7',
@@ -427,6 +466,18 @@
       btnTheme.style.borderColor = t.badgeBorder;
 
       document.querySelector('meta[name="theme-color"]').content = t.metaThemeColor;
+
+      /* color-scheme is what makes the browser's OWN chrome follow the page --
+       * the scrollbar trough and its buttons, the form controls, the flash of
+       * background before paint. Without it a near-black board sits inside a
+       * light-grey scrollbar. The custom properties below then restyle the bar
+       * itself; color-scheme still matters, because it is what the parts CSS
+       * cannot reach go by. */
+      const rootEl = document.documentElement;
+      rootEl.style.colorScheme = dark ? 'dark' : 'light';
+      rootEl.style.setProperty('--scroll-track', t.scrollTrack);
+      rootEl.style.setProperty('--scroll-thumb', t.scrollThumb);
+      rootEl.style.setProperty('--scroll-thumb-hover', t.scrollThumbHover);
 
       // Update CSS custom properties for animations
       const root = document.documentElement;
