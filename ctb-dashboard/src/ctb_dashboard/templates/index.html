@@ -1729,6 +1729,11 @@
        * session that plainly exists. Published before the empty-filter early
        * return below, so a filter matching nothing cannot leave a stale list. */
       window.ctbSessionAll = [...sessions].sort(_bySessionOrder(pinned)).map(_toOrderItem);
+      // The console says whether the session it is showing can notify at all,
+      // and pinning is the gate: _push_completions sends for pinned sessions
+      // only, so an unpinned one finishing is silent by design and used to be
+      // indistinguishable from a notification that failed.
+      window.ctbPinned = [...pinned];
 
       if (visible.length === 0) {
         Array.from(grid.children).forEach(el => { if (el !== emptyState) el.remove(); });

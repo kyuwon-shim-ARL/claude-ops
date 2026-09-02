@@ -414,7 +414,42 @@ def _completion_body(entry: Dict[str, Any]) -> str:
 
 # Which completion we have already pushed for, per session. Keyed by the
 # completion timestamp so the next completion of the same session pushes again.
-_pushed_completions: Dict[str, float] = {}
+#
+# On disk, because this used to live only in memory and the process restarts --
+# for a deploy, for a crash, for a config change. Empty after a restart, the
+# next poll saw completions it had already pushed for and pushed again, so a
+# quiet afternoon of restarts arrived on the phone as a burst of duplicates for
+# work that finished hours ago. Persisted, a restart is invisible here.
+_PUSHED_PATH = os.path.join(_STATE_DIR, "pushed-completions.json")
+
+
+def _load_pushed_completions() -> Dict[str, float]:
+    try:
+        with open(_PUSHED_PATH) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    # Written by us, but read defensively: a truncated write must not take the
+    # whole poll loop down on the next start.
+    return {k: v for k, v in data.items()
+            if isinstance(k, str) and isinstance(v, (int, float))}
+
+
+def _save_pushed_completions() -> None:
+    """Best effort: a completion pushed twice is a nuisance, a crash is not."""
+    try:
+        os.makedirs(_STATE_DIR, exist_ok=True)
+        tmp = _PUSHED_PATH + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(_pushed_completions, fh)
+        os.replace(tmp, _PUSHED_PATH)
+    except OSError as e:
+        logger.warning("Could not persist pushed completions: %s", e)
+
+
+_pushed_completions: Dict[str, float] = _load_pushed_completions()
 
 
 def _push_completions(session_list: list) -> None:
@@ -437,6 +472,7 @@ def _push_completions(session_list: list) -> None:
             if _pushed_completions.get(name) == completed_at:
                 continue
             _pushed_completions[name] = completed_at
+            _save_pushed_completions()
             short = name.replace("claude_", "", 1)
             # Logged either way: this path has failed silently in several
             # different ways, and "did a push go out" should not need a phone

@@ -90,8 +90,39 @@
       "flex:1;min-width:0;font-family:'JetBrains Mono',monospace;font-size:13px;" +
       'font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
 
+    /* Why no notification came, where the question is asked. "핀 고정 아님" is
+     * the one reason the page cannot show: the alerts switch reports the
+     * browser's side, but completion pushes go out for pinned sessions only,
+     * so an unpinned session finishing in silence looks exactly like a push
+     * that failed. */
+    var silent = document.createElement('span');
+    silent.textContent = '\ud83d\udd15';
+    silent.title = '\uc774 \uc138\uc158\uc740 \ud540 \uace0\uc815\uc774 \uc544\ub2c8\ub77c '
+      + '\uc644\ub8cc \uc54c\ub9bc\uc774 \uac00\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.\n'
+      + '\ubcf4\ub4dc\uc5d0\uc11c \uce74\ub4dc\ub97c \uc0c1\ub2e8 \uc0ac\ubd84\uba74\uc73c\ub85c '
+      + '\ub04c\uc5b4\ub2e4 \ub193\uc73c\uba74 \uc54c\ub9bc\uc774 \uc635\ub2c8\ub2e4.';
+    silent.setAttribute('aria-label', '\ud540 \uace0\uc815\uc774 \uc544\ub2c8\ub77c \uc54c\ub9bc \uc5c6\uc74c');
+    silent.style.cssText =
+      'display:none;font-size:12px;flex-shrink:0;cursor:help;opacity:0.75;';
+
     var status = document.createElement('span');
     status.style.cssText = 'font-size:11px;color:#9ca3af;flex-shrink:0;';
+
+    /* The palette had one entrance and it was a chord. On a phone there is no
+     * Ctrl and no Cmd unless a keyboard is attached, so with seventy sessions
+     * the only way to reach one was to scroll the rail until it appeared. */
+    var find = document.createElement('button');
+    find.type = 'button';
+    find.textContent = '\ud83d\udd0e';
+    find.title = '\uc138\uc158 \uac80\uc0c9 (Ctrl/Cmd+F)';
+    find.setAttribute('aria-label', '\uc138\uc158 \uac80\uc0c9 \uc5f4\uae30');
+    find.style.cssText = btnCss('#1f2937', '36px');
+    find.addEventListener('click', function () {
+      if (searchOpen()) return;
+      hideHints();
+      fetchOrder();
+      openSearch();
+    });
 
     var copy = document.createElement('button');
     copy.type = 'button';
@@ -109,7 +140,9 @@
     close.addEventListener('click', hide);
 
     header.appendChild(title);
+    header.appendChild(silent);
     header.appendChild(status);
+    header.appendChild(find);
     header.appendChild(copy);
     header.appendChild(close);
 
@@ -348,7 +381,7 @@
 
     el = { root: root, strip: strip, title: title, status: status, tail: tail,
            frozen: frozen, bar: bar, barLabel: barLabel, input: input,
-           send: send };
+           send: send, silent: silent };
 
     /* The keyboard shrinks the visual viewport, and iOS does not always fire a
      * resize that brings it back when the keyboard closes without an edit --
@@ -620,7 +653,20 @@
       .catch(function () { /* the strip just stays empty */ });
   }
 
+  /* Pinned is server state the board re-reads on a timer, so this is checked on
+   * every render rather than once when the console opens. */
+  function paintSilentBadge() {
+    if (!el.silent) return;
+    var pinned = window.ctbPinned;
+    if (!state.session || !Array.isArray(pinned)) {
+      el.silent.style.display = 'none';
+      return;
+    }
+    el.silent.style.display = pinned.indexOf(state.session) === -1 ? 'inline' : 'none';
+  }
+
   function renderStrip() {
+    paintSilentBadge();
     if (!el.strip) return;
     var list = sessionOrder();
     el.strip.textContent = '';
@@ -1653,7 +1699,14 @@
     if (ctl) opts.signal = ctl.signal;
     function done(v) { if (timer) clearTimeout(timer); return v; }
     return fetch(api(path), opts).then(
-      function (r) { done(); return r.ok ? r.json() : null; },
+      function (r) {
+        done();
+        /* The status matters, not just the failure: 404 from these routes is
+         * the server saying this session does not exist, which is a fact and
+         * not a blip. Everything else stays a blip. */
+        if (!r.ok) return { __status: r.status };
+        return r.json();
+      },
       function (e) { done(); throw e; }
     );
   }
@@ -1672,6 +1725,18 @@
     }
   }
 
+  /* Retrying a session that has ended is not patience, it is a lie: the tail
+   * said "다시 시도하는 중…" forever over a pane that will never answer, and the
+   * poll kept a capture-pane request going out every two seconds for it. Say
+   * what happened and stop; the strip is still there to switch away with. */
+  function sessionGone() {
+    stopPolling();
+    state.exhausted = true;
+    el.tail.textContent = '이 세션은 더 이상 없습니다 — 종료되었거나 이름이 바뀌었습니다.';
+    setStatus('세션 없음', '#f87171');
+    renderStrip();
+  }
+
   function pollOk() {
     state.fails = 0;
     if (!state.warned) return;
@@ -1686,7 +1751,8 @@
             + fitParam())
       .then(function (data) {
         if (state.session !== name) return;
-        if (!data) { pollFailed(); return; }
+        if (data && data.__status === 404) { sessionGone(); return; }
+        if (!data || data.__status) { pollFailed(); return; }
         pollOk();
         /* A live selection wins over a refresh: repainting would move the
          * chosen lines out from under the user. */
@@ -1719,6 +1785,7 @@
     getJSON('/api/sessions/' + encodeURIComponent(name) + '/log?lines=' + state.depth)
       .then(function (data) {
         if (!data || state.session !== name) return;
+        if (data.__status) { setStatus('불러오기 실패', '#ef4444'); return; }
         state.cols = data.cols || 0;
         var before = state.lines ? state.lines.length : 0;
         var fromBottom = el.tail.scrollHeight - el.tail.scrollTop;
