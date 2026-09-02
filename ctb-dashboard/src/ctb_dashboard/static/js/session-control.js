@@ -1178,14 +1178,75 @@
    * Unicode domains are not linked. That is the safe half of a real tradeoff:
    * they cannot be told apart from an ordinary CJK word running into a URL, and
    * a homograph that looks like a familiar host is exactly what should not be
-   * one click away from a pane whose contents nobody audited. */
+   * one click away from a pane whose contents nobody audited.
+   *
+   * The apostrophe stays in, as RFC 3986 has it. In 151 URLs captured from
+   * live panes every apostrophe beside a link was the closing quote of a shell
+   * argument -- and trimUrl already takes a trailing quote off, which is where
+   * all of them were. Excluding it here as well would change nothing. */
   var URL_CHARS = "A-Za-z0-9\\-._~:/?#\\[\\]@!$&'()*+,;=%";
   var URL_RE = new RegExp('https?://[' + URL_CHARS + ']*[A-Za-z0-9]['
                           + URL_CHARS + ']*', 'g');
 
-  /* What a hard-wrapped continuation may be made of: the same characters, from
-   * column 0. Anchored, because that is the whole signal. */
-  var CONT_RE = new RegExp('^[' + URL_CHARS + ']+');
+  /* A continuation is Claude Code's left gutter -- it draws ▎ or │ down the
+   * side of its output -- and then more address. The glyph is the whole
+   * signal, and it is required.
+   *
+   * Measured over 26k rows of live panes. Continuing at column 0, which is
+   * what a bare terminal wrap looks like, fires ZERO times: Claude Code always
+   * writes its gutter first, and a shell's own wrapping is rejoined by
+   * capture-pane -J long before it reaches here. Every glue candidate, on the
+   * other hand -- a full row ending in a URL, followed by an ordinary next
+   * line -- begins either at column 0 or with plain indentation. So the loose
+   * rules cost wrong links and buy nothing measurable, while the strict one
+   * fires exactly once in that sample: on a genuinely wrapped artifact link. */
+  var GUTTER_RE = /^ ?[\u258e\u2502] ?/;
+
+  /* -> {start, text} for the part of `line` that continues an address, or null.
+   * start is where the address resumes, so the gutter is not part of the href
+   * and not painted as a link. */
+  function continuationOf(line) {
+    var gutter = GUTTER_RE.exec(line);
+    if (!gutter) return null;
+    var rest = new RegExp('^[' + URL_CHARS + ']+').exec(line.slice(gutter[0].length));
+    if (!rest) return null;
+    return { start: gutter[0].length, text: rest[0] };
+  }
+
+  /* How many columns a row occupies -- which is what "filled to the last
+   * column" has to mean. JS string length counts UTF-16 units: a Korean row is
+   * half its own width by that measure and an emoji is double-counted, so 998
+   * genuinely full rows in a 26k-row sample were invisible to a length test.
+   * Wide (W/F) is two columns, a combining mark or zero-width joiner is none,
+   * and everything else is one -- the same rule tmux itself lays out with. */
+  var WIDE = [
+    [0x1100, 0x115f], [0x2e80, 0x303e], [0x3041, 0x33ff], [0x3400, 0x4dbf],
+    [0x4e00, 0x9fff], [0xa000, 0xa4cf], [0xa960, 0xa97f], [0xac00, 0xd7a3],
+    [0xf900, 0xfaff], [0xfe10, 0xfe19], [0xfe30, 0xfe6f], [0xff00, 0xff60],
+    [0xffe0, 0xffe6], [0x1f300, 0x1f64f], [0x1f900, 0x1f9ff],
+    [0x20000, 0x2fffd], [0x30000, 0x3fffd],
+  ];
+  var ZERO = [
+    [0x0300, 0x036f], [0x200b, 0x200f], [0x2060, 0x2064], [0xfe00, 0xfe0f],
+  ];
+
+  function inRanges(cp, ranges) {
+    for (var i = 0; i < ranges.length; i++) {
+      if (cp >= ranges[i][0] && cp <= ranges[i][1]) return true;
+    }
+    return false;
+  }
+
+  function displayWidth(text) {
+    var w = 0;
+    for (var i = 0; i < text.length; i++) {
+      var cp = text.codePointAt(i);
+      if (cp > 0xffff) i++;            /* surrogate pair: one code point */
+      if (inRanges(cp, ZERO)) continue;
+      w += inRanges(cp, WIDE) ? 2 : 1;
+    }
+    return w;
+  }
 
   /* A character that means the match stopped short of the real end of the
    * address rather than at it. Built at load: an engine too old for Unicode
@@ -1261,17 +1322,29 @@
         var pieces = [{ line: i, start: m.index, end: m.index + m[0].length }];
         var full = m[0];
         var row = i;
-        var endsFlush = !!width && line.length === width
+        var endsFlush = !!width && displayWidth(line) === width
                         && pieces[0].end === line.length;
 
         while (endsFlush && row + 1 < lines.length) {
-          var cont = CONT_RE.exec(lines[row + 1]);
+          var cont = continuationOf(lines[row + 1]);
           if (!cont) break;
           row += 1;
-          pieces.push({ line: row, start: 0, end: cont[0].length });
-          full += cont[0];
-          endsFlush = lines[row].length === width
-                      && cont[0].length === lines[row].length;
+          pieces.push({ line: row, start: cont.start,
+                        end: cont.start + cont.text.length });
+          full += cont.text;
+          endsFlush = displayWidth(lines[row]) === width
+                      && cont.start + cont.text.length === lines[row].length;
+        }
+
+        /* Still flush after the search means the address ran off the last row
+         * we were given and the rest of it is not here: the continuation
+         * scrolled out of the window, or was written at a different pane
+         * width, or the pane has been widened since. Linking the half we have
+         * would point at a real but different page -- the same silent
+         * substitution a Korean path produced, and the same answer. */
+        if (endsFlush) {
+          URL_RE.lastIndex = m.index + m[0].length;
+          continue;
         }
 
         /* Trim the prose punctuation off the tail, giving back whatever rows
@@ -1860,6 +1933,7 @@
     _cleanLines: cleanLines,
     _splitLinks: splitLinks,
     _linkifyLines: linkifyLines,
+    _displayWidth: displayWidth,
     _matchSessions: matchSessions,
     SESSION_NAME_RE: SESSION_NAME_RE,
     POLL_MS: POLL_MS,
