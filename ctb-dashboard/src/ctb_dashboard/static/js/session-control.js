@@ -1070,7 +1070,7 @@
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.isComposing || e.keyCode === 229) return;   /* the IME's key, not ours */
     e.preventDefault();
-    sendKey('Tab');
+    sendKey('Tab', 'Shift+Tab');
   });
 
   document.addEventListener('keyup', function (e) {
@@ -1349,7 +1349,7 @@
       setStatus('입력 지움', 'var(--con-muted)');
       return;
     }
-    sendKey('C-u');
+    sendKey('C-u', 'Ctrl+U');
   });
 
   }
@@ -2164,12 +2164,16 @@
       });
   }
 
-  function sendKey(key) {
+  /* `label` is what the status line calls the send. A shortcut names the
+   * chord that was pressed -- "Shift+Tab 전송됨" -- because a key that does
+   * nothing visible in the pane leaves no other sign that it was taken. */
+  function sendKey(key, label) {
     if (!state.session) return;
-    setStatus('키 ' + key + ' 전송…', 'var(--con-muted)');
+    var what = label || ('키 ' + key);
+    setStatus(what + ' 전송…', 'var(--con-muted)');
     post('/key', { key: key })
       .then(function (res) {
-        setStatus(res.ok ? '키 ' + key + ' 전송됨' : '키 전송 실패 (' + res.status + ')',
+        setStatus(res.ok ? what + ' 전송됨' : what + ' 전송 실패 (' + res.status + ')',
                   res.ok ? 'var(--con-ok)' : 'var(--con-err)');
         pollTail();
       })
