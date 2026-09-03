@@ -53,7 +53,7 @@
       scheme: 'dark',
       sheet: '#0b1220', well: '#020617', text: '#e5e7eb', muted: '#9ca3af',
       dim: '#6b7280', line: '#1f2937', 'tail-weight': '400',
-      btn: '#1a2333', 'btn-hover': '#243044', active: '#1e3a8a',
+      btn: '#1a2333', 'btn-hover': '#243044', active: '#1e3a8a', tray: '#070c18',
       stop: '#3f1d1d', 'stop-text': '#fca5a5', copybar: '#173a2a',
       accent: '#3b82f6', 'accent-hover': '#4f8ff7', 'accent-soft': 'rgba(59,130,246,0.18)', 'well-edge': 'inset 0 0 0 1px rgba(255,255,255,0.05)',
       ok: '#34d399', warn: '#fbbf24', err: '#ef4444', link: '#7dd3fc', info: '#60a5fa',
@@ -74,7 +74,7 @@
       dim: '#6b7280', line: '#d3d7de', 'tail-weight': '600',
       /* Controls are white shapes on the grey sheet, the way a grouped iOS
        * list sits: the sheet is the ground, everything on it is lighter. */
-      btn: '#ffffff', 'btn-hover': '#f5f6f8', active: '#dbe6ff',
+      btn: '#ffffff', 'btn-hover': '#f5f6f8', active: '#dbe6ff', tray: '#e2e5eb',
       stop: '#fbe1e1', 'stop-text': '#991b1b', copybar: '#d7f1e3',
       accent: '#2563eb', 'accent-hover': '#1d4ed8', 'accent-soft': 'rgba(37,99,235,0.14)', 'well-edge': 'inset 0 1px 2px rgba(16,24,40,0.06)',
       ok: '#047857', warn: '#b45309', err: '#dc2626', link: '#0b63a8', info: '#1d4ed8',
@@ -184,7 +184,17 @@
       'background:transparent;color:var(--con-muted);font:500 12px/1 ui-sans-serif,system-ui,sans-serif;',
       'user-select:none;-webkit-user-select:none;min-height:34px;',
       'transition:background-color .15s ease,color .15s ease}',
-      '#ctb-console .con-chip[aria-current="true"]{background:var(--con-accent-soft);color:var(--con-text);font-weight:700}',
+      /* The active chip is the raised one on the rail -- a white key on the
+       * tray -- rather than a tinted one; tint is kept for the accent. */
+      '#ctb-console .con-chip[aria-current="true"]{background:var(--con-btn);color:var(--con-text);font-weight:700;',
+      'box-shadow:0 1px 2px rgba(16,24,40,0.10)}',
+      '#ctb-console .con-rail{background:var(--con-tray);border-radius:14px;padding:4px}',
+      '#ctb-console .con-tray{background:var(--con-tray);border-radius:16px;padding:8px}',
+      /* A key that changed the input box: the box line pulses once so the
+       * eye lands on what the key did, not only on the status text. */
+      '@keyframes con-flash{0%{background:var(--con-accent-soft)}100%{background:transparent}}',
+      '#ctb-console .con-flash{animation:con-flash 1.2s ease-out}',
+      '@media(prefers-reduced-motion:reduce){#ctb-console .con-flash{animation:none;background:var(--con-accent-soft)}}',
       '#ctb-console .con-chip:active{transform:scale(.97)}',
       '#ctb-console .con-chip:focus-visible{outline:2px solid var(--con-accent);outline-offset:1px}',
       '#ctb-console .con-well{border:0;border-radius:16px;box-shadow:var(--con-well-edge)}',
@@ -237,8 +247,9 @@
      * own order (recency/state), flat — worktrees are not grouped here.
      * makePannable() adds the wheel and drag affordances a mouse needs. */
     var strip = document.createElement('div');
+    strip.className = 'con-rail';
     strip.style.cssText = [
-      'display:flex', 'gap:6px', 'flex-shrink:0', 'margin-bottom:8px',
+      'display:flex', 'gap:4px', 'flex-shrink:0', 'margin-bottom:10px',
       'overflow-x:auto', 'overflow-y:hidden',
       'scroll-snap-type:x proximity', '-webkit-overflow-scrolling:touch',
       'scrollbar-width:none',
@@ -362,6 +373,7 @@
     /* Keys first: answering a permission prompt is the thing you most often
      * need in a hurry, and send_prompt refuses while one is pending. */
     var keys = document.createElement('div');
+    keys.className = 'con-tray';
     keys.style.cssText =
       'display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;flex-shrink:0;';
     [
@@ -2268,15 +2280,69 @@
    * nothing visible in the pane leaves no other sign that it was taken. */
   function sendKey(key, label) {
     if (!state.session) return;
+    var name = state.session;
     var what = label || ('키 ' + key);
+    var before = state.pending ? state.pending.text : '';
     setStatus(what + ' 전송…', 'var(--con-muted)');
     post('/key', { key: key })
       .then(function (res) {
-        setStatus(res.ok ? what + ' 전송됨' : what + ' 전송 실패 (' + res.status + ')',
-                  res.ok ? 'var(--con-ok)' : 'var(--con-err)');
+        if (!res.ok) {
+          setStatus(what + ' 전송 실패 (' + res.status + ')', 'var(--con-err)');
+          return;
+        }
+        setStatus(what + ' 전송됨', 'var(--con-ok)');
         pollTail();
+        keyEffect(name, what, before);
       })
       .catch(function () { setStatus('네트워크 오류', 'var(--con-err)'); });
+  }
+
+  /* What the key DID, not only that it went. "전송됨" says tmux took it; it
+   * says nothing about the pane, and for Tab -- which accepts a prefill or
+   * completes a path -- the pane is the whole point. The input box is read
+   * before and after, and the line reports the difference: what the box
+   * held, what it holds now. Read straight from the pane, not from the
+   * rendered tail, so a reader scrolled up in history gets the same answer.
+   * A few looks, spaced out: the pane redraws a beat after the key lands. */
+  function keyEffect(name, what, before) {
+    var looks = 0;
+    function look() {
+      if (state.session !== name) return;
+      getJSON('/api/sessions/' + encodeURIComponent(name) + '/log?lines=' + TAIL_LINES)
+        .then(function (data) {
+          if (state.session !== name || !data || data.__status) return;
+          var pending = findPendingInput((data.log || '').split('\n'));
+          var after = pending ? pending.text : '';
+          if (after !== before) {
+            setStatus(what + ' 반영됨 · 입력창 ' + describeBox(before, after), 'var(--con-ok)');
+            /* Repaint first so the flashed line is the new one. */
+            pollTail();
+            setTimeout(flashPending, 400);
+            return;
+          }
+          if (++looks < 3) { setTimeout(look, 500); return; }
+          setStatus(what + ' 전송됨 · 입력창 변화 없음', 'var(--con-warn)');
+        })
+        .catch(function () { /* the status already says it was sent */ });
+    }
+    setTimeout(look, 350);
+  }
+
+  /* One short clause for the change: filled, cleared, or rewritten. The
+   * text itself is on the screen a few lines up, so only its shape is named. */
+  function describeBox(before, after) {
+    if (!before && after) return '채워짐';
+    if (before && !after) return '비워짐';
+    return '바뀜';
+  }
+
+  function flashPending() {
+    if (!el.tail || !state.pending) return;
+    var node = el.tail.children[state.pending.index];
+    if (!node) return;
+    node.classList.remove('con-flash');
+    void node.offsetWidth;   /* restart the animation if it is still running */
+    node.classList.add('con-flash');
   }
 
   function interrupt() {
@@ -2471,6 +2537,7 @@
     _stepDownSession: stepDownSession,
     _linkifyLines: linkifyLines,
     _whenSettled: whenSettled,
+    _describeBox: describeBox,
     _noteScrolling: noteScrolling,
     _scrollInFlight: scrollInFlight,
     _setTouching: function (v) { touching = !!v; },

@@ -94,3 +94,22 @@ def test_in_flight_is_reported_while_moving_and_cleared_at_rest():
       setTimeout(() => mark(c._scrollInFlight() ? 'moving' : 'rest'), 300);
     """)
     assert [t for t, _ in log] == ["rest", "moving", "rest"]
+
+
+# --- what a key did to the input box --------------------------------------
+
+def _describe(before, after):
+    body = f"mark(c._describeBox({json.dumps(before)}, {json.dumps(after)}));"
+    return _run(body, wait_ms=50)[0][0]
+
+
+def test_a_key_that_fills_an_empty_box_says_so():
+    assert _describe("", "git status") == "채워짐"
+
+
+def test_a_key_that_empties_the_box_says_so():
+    assert _describe("git status", "") == "비워짐"
+
+
+def test_a_key_that_rewrites_the_box_says_so():
+    assert _describe("git st", "git status") == "바뀜"
