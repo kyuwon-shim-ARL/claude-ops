@@ -508,6 +508,8 @@
 
       // Re-render if we have data
       if (lastSSEData) render(lastSSEData);
+      /* The console sheet paints from its own palette; tell it to re-read. */
+      document.dispatchEvent(new CustomEvent('ctb-theme'));
     }
 
     // T5: Toggle handler

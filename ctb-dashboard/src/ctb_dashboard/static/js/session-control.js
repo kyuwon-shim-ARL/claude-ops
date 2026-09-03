@@ -38,6 +38,69 @@
 
   /* --- markup ------------------------------------------------------------ */
 
+  /* --- theme ------------------------------------------------------------- */
+
+  /* The sheet used to be dark whatever the board was: a terminal is dark, and
+   * a light pane next to a dark board looked like a hole. It now follows the
+   * board's toggle instead -- the board's key in localStorage, else the
+   * system -- so a light board gets a light console, paper-warm to match it.
+   * Everything here paints through these variables; nothing carries a colour
+   * of its own. They sit on <html> so the sheet, the search palette and the
+   * floating chips all inherit one set, and switching is one write. */
+  var THEME_KEY = 'ctb_theme';
+  var THEMES = {
+    dark: {
+      scheme: 'dark',
+      sheet: '#0b1220', well: '#020617', text: '#e5e7eb', muted: '#9ca3af',
+      dim: '#6b7280', line: '#1f2937', line2: '#374151',
+      btn: '#111827', btn2: '#1f2937', active: '#1e3a8a', 'active-line': '#3b82f6',
+      send: '#1d4ed8', stop: '#3f1d1d', copybar: '#173a2a',
+      ok: '#34d399', warn: '#fbbf24', err: '#ef4444', link: '#7dd3fc', info: '#60a5fa',
+      overlay: 'rgba(2,6,23,0.72)', 'hint-bg': 'rgba(15,13,20,0.92)',
+      shadow: '0 18px 48px rgba(0,0,0,0.55)',
+      'scroll-track': 'rgba(255,255,255,0.05)',
+      'scroll-thumb': 'rgba(148,163,184,0.32)',
+      'scroll-thumb-hover': 'rgba(148,163,184,0.5)',
+    },
+    light: {
+      scheme: 'light',
+      sheet: '#f4f1ea', well: '#fdfcf9', text: '#1f2328', muted: '#5b6472',
+      dim: '#8a8f98', line: '#ddd8cc', line2: '#c8c2b4',
+      btn: '#ece8df', btn2: '#e4dfd3', active: '#dbe6ff', 'active-line': 'var(--con-active-line)',
+      send: '#2563eb', stop: '#fbe1e1', copybar: '#d7f1e3',
+      ok: '#047857', warn: '#b45309', err: '#dc2626', link: '#0b63a8', info: '#1d4ed8',
+      overlay: 'rgba(70,60,45,0.45)', 'hint-bg': 'rgba(255,252,247,0.95)',
+      shadow: '0 18px 48px rgba(40,30,10,0.22)',
+      'scroll-track': 'rgba(0,0,0,0.04)',
+      'scroll-thumb': 'rgba(100,90,80,0.3)',
+      'scroll-thumb-hover': 'rgba(100,90,80,0.5)',
+    },
+  };
+
+  function themeName() {
+    try {
+      var stored = localStorage.getItem(THEME_KEY);
+      if (stored) return stored === 'dark' ? 'dark' : 'light';
+    } catch (e) { /* private mode: fall through to the system */ }
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark' : 'light';
+  }
+
+  function applyTheme() {
+    var t = THEMES[themeName()];
+    if (!document.documentElement) return;   /* the test harness has no <html> */
+    var st = document.documentElement.style;
+    Object.keys(t).forEach(function (k) { st.setProperty('--con-' + k, t[k]); });
+  }
+
+  applyTheme();
+  /* The board's toggle announces itself; the system can flip on its own. */
+  document.addEventListener('ctb-theme', applyTheme);
+  if (window.matchMedia) {
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    if (mq.addEventListener) mq.addEventListener('change', applyTheme);
+  }
+
   function build() {
     if (el.root) return;
 
@@ -56,16 +119,15 @@
       /* Standalone PWA: top:0 is under the status bar / notch, so inset. */
       'padding:calc(10px + env(safe-area-inset-top)) 12px' +
         ' calc(14px + env(safe-area-inset-bottom))',
-      'background:#0b1220', 'color:#e5e7eb',
+      'background:var(--con-sheet)', 'color:var(--con-text)',
       'font-family:ui-sans-serif,system-ui,sans-serif',
-      /* The sheet is dark whatever the board's theme is, so it carries its own
-       * scrollbar colours: the page's variables would put a light-theme bar
-       * down the side of a near-black pane. Custom properties cascade, so this
-       * covers the tail and anything else here that scrolls. */
-      '--scroll-track:rgba(255,255,255,0.05)',
-      '--scroll-thumb:rgba(148,163,184,0.32)',
-      '--scroll-thumb-hover:rgba(148,163,184,0.5)',
-      'color-scheme:dark',
+      /* The sheet carries its own scrollbar colours, from its own palette:
+       * the page's variables are tuned to the board. Custom properties
+       * cascade, so this covers the tail and anything else here that scrolls. */
+      '--scroll-track:var(--con-scroll-track)',
+      '--scroll-thumb:var(--con-scroll-thumb)',
+      '--scroll-thumb-hover:var(--con-scroll-thumb-hover)',
+      'color-scheme:var(--con-scheme)',
     ].join(';');
 
     /* Switcher strip: the sheet used to open with dead space above it, and
@@ -107,7 +169,7 @@
       'display:none;font-size:12px;flex-shrink:0;cursor:help;opacity:0.75;';
 
     var status = document.createElement('span');
-    status.style.cssText = 'font-size:11px;color:#9ca3af;flex-shrink:0;';
+    status.style.cssText = 'font-size:11px;color:var(--con-muted);flex-shrink:0;';
 
     /* The palette had one entrance and it was a chord. On a phone there is no
      * Ctrl and no Cmd unless a keyboard is attached, so with seventy sessions
@@ -117,7 +179,7 @@
     find.textContent = '\ud83d\udd0e';
     find.title = '\uc138\uc158 \uac80\uc0c9 (Ctrl/Cmd+F)';
     find.setAttribute('aria-label', '\uc138\uc158 \uac80\uc0c9 \uc5f4\uae30');
-    find.style.cssText = btnCss('#1f2937', '36px');
+    find.style.cssText = btnCss('var(--con-btn2)', '36px');
     find.addEventListener('click', function () {
       if (searchOpen()) return;
       hideHints();
@@ -130,14 +192,14 @@
     copy.textContent = '\ud83d\udccb';
     copy.title = '\ud654\uba74 \ub0b4\uc6a9 \ubcf5\uc0ac';
     copy.setAttribute('aria-label', '\ud654\uba74 \ub0b4\uc6a9 \ubcf5\uc0ac');
-    copy.style.cssText = btnCss('#1f2937', '36px');
+    copy.style.cssText = btnCss('var(--con-btn2)', '36px');
     copy.addEventListener('click', copyTail);
 
     var close = document.createElement('button');
     close.type = 'button';
     close.textContent = '✕';
     close.setAttribute('aria-label', '콘솔 닫기');
-    close.style.cssText = btnCss('#1f2937', '36px');
+    close.style.cssText = btnCss('var(--con-btn2)', '36px');
     close.addEventListener('click', hide);
 
     header.appendChild(title);
@@ -151,8 +213,8 @@
     tail.setAttribute('aria-live', 'polite');
     tail.style.cssText = [
       'flex:1', 'min-height:120px', 'overflow:auto', 'margin:0 0 8px',
-      'padding:8px', 'border-radius:10px', 'background:#020617',
-      'border:1px solid #1f2937',
+      'padding:8px', 'border-radius:10px', 'background:var(--con-well)',
+      'border:1px solid var(--con-line)',
       "font-family:'JetBrains Mono',monospace", 'font-size:11px',
       'line-height:1.45', 'white-space:pre-wrap', 'word-break:break-word',
       '-webkit-overflow-scrolling:touch',
@@ -166,7 +228,7 @@
     var bar = document.createElement('div');
     bar.style.cssText =
       'display:none;align-items:center;gap:8px;margin-bottom:8px;flex-shrink:0;' +
-      'font-size:11px;color:#9ca3af;';
+      'font-size:11px;color:var(--con-muted);';
 
     var barLabel = document.createElement('span');
     barLabel.style.cssText = 'flex:1;min-width:0;';
@@ -174,14 +236,14 @@
     var barCopy = document.createElement('button');
     barCopy.type = 'button';
     barCopy.textContent = '\ubcf5\uc0ac';
-    barCopy.style.cssText = btnCss('#173a2a', 'auto') +
-      'padding:6px 14px;font-weight:600;color:#34d399;border-color:rgba(52,211,153,0.45);';
+    barCopy.style.cssText = btnCss('var(--con-copybar)', 'auto') +
+      'padding:6px 14px;font-weight:600;color:var(--con-ok);border-color:rgba(52,211,153,0.45);';
     barCopy.addEventListener('click', copySelection);
 
     var barClear = document.createElement('button');
     barClear.type = 'button';
     barClear.textContent = '\ud574\uc81c';
-    barClear.style.cssText = btnCss('#1f2937', 'auto') + 'padding:6px 12px;';
+    barClear.style.cssText = btnCss('var(--con-btn2)', 'auto') + 'padding:6px 12px;';
     barClear.addEventListener('click', clearSelection);
 
     bar.appendChild(barLabel);
@@ -211,7 +273,7 @@
       b.textContent = spec[0];
       b.title = spec[2];
       b.setAttribute('aria-label', spec[2] + ' 키 전송');
-      b.style.cssText = btnCss('#111827', 'auto') + 'padding:6px 11px;';
+      b.style.cssText = btnCss('var(--con-btn)', 'auto') + 'padding:6px 11px;';
       b.addEventListener('click', function () { sendKey(spec[1]); });
       keys.appendChild(b);
     });
@@ -232,7 +294,7 @@
      * interrupt, so nothing that is running stops. */
     clearLine.title = 'Ctrl+U 전송 — 입력 줄 지우기 (진행 중 작업은 중단되지 않음) · 단축키 Ctrl+U';
     clearLine.setAttribute('aria-label', '세션 입력 지우기 키 전송');
-    clearLine.style.cssText = btnCss('#111827', 'auto') + 'padding:6px 11px;';
+    clearLine.style.cssText = btnCss('var(--con-btn)', 'auto') + 'padding:6px 11px;';
     clearLine.addEventListener('click', function () { sendKey('C-u'); });
     keys.appendChild(clearLine);
 
@@ -241,7 +303,7 @@
     stop.textContent = '⛔ 중단';
     stop.setAttribute('aria-label', '작업 중단');
     stop.style.cssText =
-      btnCss('#3f1d1d', 'auto') + 'padding:6px 11px;margin-left:auto;';
+      btnCss('var(--con-stop)', 'auto') + 'padding:6px 11px;margin-left:auto;';
     stop.addEventListener('click', interrupt);
     keys.appendChild(stop);
 
@@ -254,7 +316,7 @@
     input.setAttribute('aria-label', '프롬프트 입력');
     input.style.cssText = [
       'flex:1', 'resize:none', 'padding:9px 10px', 'border-radius:10px',
-      'background:#020617', 'color:#e5e7eb', 'border:1px solid #374151',
+      'background:var(--con-well)', 'color:var(--con-text)', 'border:1px solid var(--con-line2)',
       /* 16px, and not a pixel less. Below that, iOS zooms the page in when the
        * field takes focus -- and it does not zoom back out when focus leaves,
        * so every tap on the box left the user pinching to get the screen back.
@@ -347,7 +409,7 @@
     send.type = 'button';
     send.textContent = '전송';
     send.setAttribute('aria-label', '프롬프트 전송');
-    send.style.cssText = btnCss('#1d4ed8', 'auto') + 'padding:10px 16px;font-weight:600;';
+    send.style.cssText = btnCss('var(--con-send)', 'auto') + 'padding:10px 16px;font-weight:600;';
     send.addEventListener('click', submit);
 
     row.appendChild(input);
@@ -367,7 +429,7 @@
       'display:none', 'position:absolute', 'top:6px', 'right:10px',
       'padding:3px 9px', 'border-radius:99px', 'pointer-events:none',
       'font-size:10px', 'font-weight:700', 'letter-spacing:0.02em',
-      'background:rgba(245,158,11,0.16)', 'color:#fbbf24',
+      'background:rgba(245,158,11,0.16)', 'color:var(--con-warn)',
       'border:1px solid rgba(245,158,11,0.5)',
       'backdrop-filter:blur(4px)', '-webkit-backdrop-filter:blur(4px)',
     ].join(';');
@@ -496,7 +558,7 @@
 
   function btnCss(bg, size) {
     return [
-      'background:' + bg, 'color:#e5e7eb', 'border:1px solid #374151',
+      'background:' + bg, 'color:var(--con-text)', 'border:1px solid var(--con-line2)',
       'border-radius:9px', 'cursor:pointer', 'font-size:12px',
       'touch-action:manipulation', 'flex-shrink:0',
       size !== 'auto' ? 'width:' + size + ';height:' + size : '',
@@ -704,9 +766,9 @@
         'padding:5px 8px', 'border-radius:9px', 'cursor:pointer',
         'text-align:left', 'overflow:hidden',
         'touch-action:manipulation',
-        'background:' + (active ? '#1e3a8a' : '#111827'),
-        'border:1px solid ' + (active ? '#3b82f6' : '#1f2937'),
-        'color:' + (active ? '#e5e7eb' : '#9ca3af'),
+        'background:' + (active ? 'var(--con-active)' : 'var(--con-btn)'),
+        'border:1px solid ' + (active ? 'var(--con-active-line)' : 'var(--con-line)'),
+        'color:' + (active ? 'var(--con-text)' : 'var(--con-muted)'),
       ].join(';');
 
       var dot = document.createElement('span');
@@ -730,7 +792,7 @@
         num.setAttribute('data-numhint', '');
         num.textContent = String(numbered + 1);
         num.style.cssText = "font-family:'JetBrains Mono',monospace;" +
-          'font-size:9px;font-weight:700;color:#fbbf24;flex-shrink:0;' +
+          'font-size:9px;font-weight:700;color:var(--con-warn);flex-shrink:0;' +
           'padding:0 3px;border-radius:4px;background:rgba(245,158,11,0.16);' +
           'border:1px solid rgba(245,158,11,0.4);' +
           'display:' + (accelDown ? 'inline-block' : 'none') + ';';
@@ -859,8 +921,8 @@
        * pick a number. Down here it covers a corner of the idle timer. */
       b.style.cssText = "position:absolute;bottom:6px;left:6px;z-index:7;" +
         "font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;" +
-        'color:#fbbf24;padding:2px 7px;border-radius:7px;pointer-events:none;' +
-        'background:rgba(15,13,20,0.92);border:1px solid rgba(245,158,11,0.55);';
+        'color:var(--con-warn);padding:2px 7px;border-radius:7px;pointer-events:none;' +
+        'background:var(--con-hint-bg);border:1px solid rgba(245,158,11,0.55);';
       card.appendChild(b);
     }
   }
@@ -1087,7 +1149,7 @@
       'position:fixed', 'left:0', 'right:0', 'top:0', 'bottom:0', 'z-index:80',
       'display:none', 'flex-direction:column', 'align-items:center',
       'padding:calc(48px + env(safe-area-inset-top)) 12px 12px',
-      'background:rgba(2,6,23,0.72)',
+      'background:var(--con-overlay)',
       '-webkit-backdrop-filter:blur(3px)', 'backdrop-filter:blur(3px)',
     ].join(';');
     /* A click on the dimmed area closes, the way every palette does. */
@@ -1099,8 +1161,8 @@
     box.style.cssText = [
       'width:100%', 'max-width:520px', 'display:flex', 'flex-direction:column',
       'min-height:0', 'border-radius:12px', 'overflow:hidden',
-      'background:#0b1220', 'border:1px solid #1f2937',
-      'box-shadow:0 18px 48px rgba(0,0,0,0.55)',
+      'background:var(--con-sheet)', 'border:1px solid var(--con-line)',
+      'box-shadow:var(--con-shadow)',
     ].join(';');
 
     var input = document.createElement('input');
@@ -1109,8 +1171,8 @@
     input.placeholder = '\uc138\uc158 \uac80\uc0c9 (\u2191\u2193 \uc120\ud0dd \u00b7 Enter \uc774\ub3d9 \u00b7 Esc \ub2eb\uae30)';
     input.style.cssText = [
       'width:100%', 'box-sizing:border-box', 'padding:12px 14px',
-      'background:#020617', 'color:#e5e7eb', 'border:0',
-      'border-bottom:1px solid #1f2937', 'outline:none',
+      'background:var(--con-well)', 'color:var(--con-text)', 'border:0',
+      'border-bottom:1px solid var(--con-line)', 'outline:none',
       /* 16px keeps iOS from zooming the page in on focus. */
       'font-size:16px', "font-family:'JetBrains Mono',monospace",
     ].join(';');
@@ -1159,7 +1221,7 @@
       var empty = document.createElement('div');
       empty.textContent = '\uc77c\uce58\ud558\ub294 \uc138\uc158 \uc5c6\uc74c';
       empty.style.cssText =
-        'padding:14px;color:#6b7280;font-size:12px;text-align:center;';
+        'padding:14px;color:var(--con-dim);font-size:12px;text-align:center;';
       search.list.appendChild(empty);
       return;
     }
@@ -1174,8 +1236,8 @@
         'display:flex', 'align-items:center', 'gap:8px',
         'padding:9px 14px', 'cursor:pointer',
         "font-family:'JetBrains Mono',monospace", 'font-size:12px',
-        'color:' + (active ? '#e5e7eb' : '#9ca3af'),
-        'background:' + (active ? '#1e3a8a' : 'transparent'),
+        'color:' + (active ? 'var(--con-text)' : 'var(--con-muted)'),
+        'background:' + (active ? 'var(--con-active)' : 'transparent'),
       ].join(';');
 
       var dot = document.createElement('span');
@@ -1194,7 +1256,7 @@
         var here = document.createElement('span');
         here.textContent = '\ud604\uc7ac';
         here.style.cssText =
-          'font-size:10px;color:#60a5fa;flex-shrink:0;';
+          'font-size:10px;color:var(--con-info);flex-shrink:0;';
         row.appendChild(here);
       }
       search.list.appendChild(row);
@@ -1262,7 +1324,7 @@
   function setStatus(text, color) {
     if (!el.status) return;
     el.status.textContent = text || '';
-    el.status.style.color = color || '#9ca3af';
+    el.status.style.color = color || 'var(--con-muted)';
   /* Ctrl+U — the kill-line every terminal has, and the same key the ⌧ 입력
    * 지우기 button sends. The browser spends it on view-source, which is never
    * what terminal fingers meant over an open console, so it is taken here.
@@ -1282,7 +1344,7 @@
       el.input.value = '';
       delete state.drafts[state.session];
       saveDrafts();
-      setStatus('입력 지움', '#9ca3af');
+      setStatus('입력 지움', 'var(--con-muted)');
       return;
     }
     sendKey('C-u');
@@ -1301,7 +1363,7 @@
      * async API is tried first for any future https deployment. */
     function report(ok) {
       setStatus(ok ? okLabel : '\ubcf5\uc0ac \uc2e4\ud328 \u2014 \uae38\uac8c \ub20c\ub7ec \uc9c1\uc811 \uc120\ud0dd\ud558\uc138\uc694',
-                ok ? '#34d399' : '#fbbf24');
+                ok ? 'var(--con-ok)' : 'var(--con-warn)');
     }
 
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -1683,7 +1745,7 @@
           a.rel = 'noopener noreferrer';
           a.setAttribute('data-tail-link', '');
           a.style.cssText =
-            'color:#7dd3fc;text-decoration:underline;text-underline-offset:2px;' +
+            'color:var(--con-link);text-decoration:underline;text-underline-offset:2px;' +
             'cursor:pointer;word-break:break-all;';
           div.appendChild(a);
         });
@@ -1764,7 +1826,7 @@
    * console looking frozen while it is in fact live. */
   function setFrozen(on) {
     if (el.frozen) el.frozen.style.display = on ? 'block' : 'none';
-    if (el.tail) el.tail.style.borderColor = on ? 'rgba(245,158,11,0.55)' : '#1f2937';
+    if (el.tail) el.tail.style.borderColor = on ? 'rgba(245,158,11,0.55)' : 'var(--con-line)';
   }
 
   function updateBar() {
@@ -1868,7 +1930,7 @@
     if (!state.lines) {
       el.tail.textContent = '불러오지 못했습니다 — 다시 시도하는 중…';
     } else {
-      setStatus('연결 끊김 — 다시 시도하는 중…', '#fbbf24');
+      setStatus('연결 끊김 — 다시 시도하는 중…', 'var(--con-warn)');
     }
   }
 
@@ -1880,7 +1942,7 @@
     stopPolling();
     state.exhausted = true;
     el.tail.textContent = '이 세션은 더 이상 없습니다 — 종료되었거나 이름이 바뀌었습니다.';
-    setStatus('세션 없음', '#f87171');
+    setStatus('세션 없음', 'var(--con-err)');
     renderStrip();
   }
 
@@ -1970,12 +2032,12 @@
     var was = state.depth;
     state.depth = Math.min(MAX_TAIL_LINES, state.depth + TAIL_STEP);
     state.growing = true;
-    setStatus('이전 내용 불러오는 중…', '#9ca3af');
+    setStatus('이전 내용 불러오는 중…', 'var(--con-muted)');
 
     getJSON('/api/sessions/' + encodeURIComponent(name) + '/log?lines=' + state.depth)
       .then(function (data) {
         if (!data || state.session !== name) { state.growing = false; return; }
-        if (data.__status) { state.growing = false; setStatus('불러오기 실패', '#ef4444'); return; }
+        if (data.__status) { state.growing = false; setStatus('불러오기 실패', 'var(--con-err)'); return; }
         /* Fetched at once so the lines are ready early, applied only once the
          * fling has stopped (see whenSettled). `growing` stays up until then:
          * a second request behind a fling still in flight would only queue a
@@ -1993,13 +2055,13 @@
             /* The pane has no more history: stop asking on every scroll. */
             state.exhausted = true;
             state.depth = was;
-            setStatus('더 이상 이전 내용이 없습니다', '#9ca3af');
+            setStatus('더 이상 이전 내용이 없습니다', 'var(--con-muted)');
           } else {
-            setStatus('이전 ' + gained + '줄 불러옴', '#34d399');
+            setStatus('이전 ' + gained + '줄 불러옴', 'var(--con-ok)');
           }
         });
       })
-      .catch(function () { state.growing = false; setStatus('불러오기 실패', '#ef4444'); });
+      .catch(function () { state.growing = false; setStatus('불러오기 실패', 'var(--con-err)'); });
   }
 
   function startPolling() {
@@ -2056,7 +2118,7 @@
 
     state.busy = true;
     el.send.disabled = true;
-    say('전송 중…', '#9ca3af');
+    say('전송 중…', 'var(--con-muted)');
     /* Remembered so the pending-input marking can say "this one is yours".
      * Only the last: what is sitting in the box now can only be the last thing
      * that went in, and a longer history would let an old send claim a line
@@ -2077,23 +2139,23 @@
           // confirmed:false means tmux accepted it but the pane did not change.
           // Say so instead of implying it landed.
           if (r.body.confirmed === false) {
-            say('전송됨 · 화면 변화 없음', '#fbbf24');
+            say('전송됨 · 화면 변화 없음', 'var(--con-warn)');
           } else {
-            say('전송됨', '#34d399');
+            say('전송됨', 'var(--con-ok)');
           }
           pollTail();
         } else if (r.status === 409) {
-          say('거부: ' + (r.body.reason || ''), '#fbbf24');
+          say('거부: ' + (r.body.reason || ''), 'var(--con-warn)');
           if (r.body.message) window.alert(r.body.message);
         } else if (r.status === 400) {
-          say('차단됨', '#ef4444');
+          say('차단됨', 'var(--con-err)');
           window.alert('위험 명령 패턴으로 차단되었습니다.');
         } else {
-          say('실패 (' + r.status + ')', '#ef4444');
+          say('실패 (' + r.status + ')', 'var(--con-err)');
           if (r.body.detail) window.alert(String(r.body.detail));
         }
       })
-      .catch(function () { say('네트워크 오류', '#ef4444'); })
+      .catch(function () { say('네트워크 오류', 'var(--con-err)'); })
       .then(function () {
         state.busy = false;
         el.send.disabled = false;
@@ -2102,26 +2164,26 @@
 
   function sendKey(key) {
     if (!state.session) return;
-    setStatus('키 ' + key + ' 전송…', '#9ca3af');
+    setStatus('키 ' + key + ' 전송…', 'var(--con-muted)');
     post('/key', { key: key })
       .then(function (res) {
         setStatus(res.ok ? '키 ' + key + ' 전송됨' : '키 전송 실패 (' + res.status + ')',
-                  res.ok ? '#34d399' : '#ef4444');
+                  res.ok ? 'var(--con-ok)' : 'var(--con-err)');
         pollTail();
       })
-      .catch(function () { setStatus('네트워크 오류', '#ef4444'); });
+      .catch(function () { setStatus('네트워크 오류', 'var(--con-err)'); });
   }
 
   function interrupt() {
     if (!state.session) return;
-    setStatus('중단 신호 전송…', '#9ca3af');
+    setStatus('중단 신호 전송…', 'var(--con-muted)');
     post('/interrupt')
       .then(function (res) {
         setStatus(res.ok ? '중단 신호 전송됨' : '중단 실패 (' + res.status + ')',
-                  res.ok ? '#34d399' : '#ef4444');
+                  res.ok ? 'var(--con-ok)' : 'var(--con-err)');
         pollTail();
       })
-      .catch(function () { setStatus('네트워크 오류', '#ef4444'); });
+      .catch(function () { setStatus('네트워크 오류', 'var(--con-err)'); });
   }
 
   /* --- drafts ------------------------------------------------------------ */
