@@ -110,6 +110,46 @@
     if (mq.addEventListener) mq.addEventListener('change', applyTheme);
   }
 
+  /* One small icon set, drawn here at one stroke weight so every control
+   * reads as the same family. Emoji and text arrows came from three fonts
+   * at three weights and were most of what made the sheet look assembled.
+   * 24-unit grid, 1.75 stroke, round joins; sized by the CSS around it. */
+  var ICONS = {
+    search: 'M10.5 4a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13zM20 20l-4.4-4.4',
+    copy: 'M9 9h10v11H9zM5 15V4h10',
+    close: 'M6 6l12 12M18 6L6 18',
+    up: 'M12 19V5M5 12l7-7 7 7',
+    down: 'M12 5v14M5 12l7 7 7-7',
+    left: 'M19 12H5M12 5l-7 7 7 7',
+    right: 'M5 12h14M12 5l7 7-7 7',
+    backspace: 'M8 5h12v14H8L3 12zM11 9l5 6M16 9l-5 6',
+    tab: 'M4 12h13M12 7l5 5-5 5M20 6v12',
+    enter: 'M20 5v7a2 2 0 0 1-2 2H5M9 10l-4 4 4 4',
+    clear: 'M3 12h4M17 12h4M12 3v4M12 17v4M8 8l8 8M16 8l-8 8',
+    stop: 'M12 3l6.4 3.7v7.4L12 21l-6.4-3.7V6.7zM9 9h6v6H9z',
+    bellOff: 'M6 17h12l-1.5-2V11a4.5 4.5 0 0 0-7-3.7M6.8 8.7A4.5 4.5 0 0 0 6.5 11v4L5 17M10 20h4M4 4l16 16',
+    pause: 'M8 5v14M16 5v14',
+  };
+  function icon(name, size) {
+    var svgNS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', String(size || 18));
+    svg.setAttribute('height', String(size || 18));
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    svg.style.cssText = 'display:block;flex-shrink:0;';
+    var path = document.createElementNS(svgNS, 'path');
+    path.setAttribute('d', ICONS[name]);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.75');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(path);
+    return svg;
+  }
+
   /* The sheet's own stylesheet. Inline cssText cannot express :active,
    * :hover, :focus-visible or reduced-motion, and those are where a control
    * stops looking like a painted rectangle and starts feeling like a button.
@@ -219,7 +259,7 @@
      * so an unpinned session finishing in silence looks exactly like a push
      * that failed. */
     var silent = document.createElement('span');
-    silent.textContent = '\ud83d\udd15';
+    silent.appendChild(icon('bellOff', 16));
     silent.title = '\uc774 \uc138\uc158\uc740 \ud540 \uace0\uc815\uc774 \uc544\ub2c8\ub77c '
       + '\uc644\ub8cc \uc54c\ub9bc\uc774 \uac00\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.\n'
       + '\ubcf4\ub4dc\uc5d0\uc11c \uce74\ub4dc\ub97c \uc0c1\ub2e8 \uc0ac\ubd84\uba74\uc73c\ub85c '
@@ -236,7 +276,7 @@
      * the only way to reach one was to scroll the rail until it appeared. */
     var find = document.createElement('button');
     find.type = 'button';
-    find.textContent = '\ud83d\udd0e';
+    find.appendChild(icon('search'));
     find.title = '\uc138\uc158 \uac80\uc0c9 (Ctrl/Cmd+F)';
     find.setAttribute('aria-label', '\uc138\uc158 \uac80\uc0c9 \uc5f4\uae30');
     styleBtn(find, 'icon');
@@ -249,7 +289,7 @@
 
     var copy = document.createElement('button');
     copy.type = 'button';
-    copy.textContent = '\ud83d\udccb';
+    copy.appendChild(icon('copy'));
     copy.title = '\ud654\uba74 \ub0b4\uc6a9 \ubcf5\uc0ac';
     copy.setAttribute('aria-label', '\ud654\uba74 \ub0b4\uc6a9 \ubcf5\uc0ac');
     styleBtn(copy, 'icon');
@@ -257,7 +297,7 @@
 
     var close = document.createElement('button');
     close.type = 'button';
-    close.textContent = '✕';
+    close.appendChild(icon('close'));
     close.setAttribute('aria-label', '콘솔 닫기');
     styleBtn(close, 'icon');
     close.addEventListener('click', hide);
@@ -331,14 +371,15 @@
       ['y', 'y', '예'], ['n', 'n', '아니오'],
       ['1', '1', '1번'], ['2', '2', '2번'], ['3', '3', '3번'],
       ['4', '4', '4번'], ['5', '5', '5번'],
-      ['↑', 'Up', '위'], ['↓', 'Down', '아래'],
-      ['←', 'Left', '왼쪽'], ['→', 'Right', '오른쪽'],
-      ['⌫', 'BSpace', '한 글자 지우기'], ['⇥', 'Tab', 'Tab'],
-      ['↵', 'Enter', 'Enter'], ['esc', 'Escape', 'Escape'],
+      [icon('up'), 'Up', '위'], [icon('down'), 'Down', '아래'],
+      [icon('left'), 'Left', '왼쪽'], [icon('right'), 'Right', '오른쪽'],
+      [icon('backspace'), 'BSpace', '한 글자 지우기'], [icon('tab'), 'Tab', 'Tab'],
+      [icon('enter'), 'Enter', 'Enter'], ['esc', 'Escape', 'Escape'],
     ].forEach(function (spec) {
       var b = document.createElement('button');
       b.type = 'button';
-      b.textContent = spec[0];
+      if (typeof spec[0] === 'string') b.textContent = spec[0];
+      else b.appendChild(spec[0]);
       b.title = spec[2];
       b.setAttribute('aria-label', spec[2] + ' 키 전송');
       styleBtn(b, 'key');
@@ -354,7 +395,8 @@
      * session pastes it back if the finger was wrong. */
     var clearLine = document.createElement('button');
     clearLine.type = 'button';
-    clearLine.textContent = '⌧ 입력 지우기';
+    clearLine.appendChild(icon('clear', 16));
+    clearLine.appendChild(document.createTextNode('입력 지우기'));
     /* Names the key, not an outcome: Ctrl+U clears the input line in Claude
      * Code and in a readline shell, which is every pane this pad is aimed
      * at, but a pane running vim or less does its own thing with it. What
@@ -368,7 +410,8 @@
 
     var stop = document.createElement('button');
     stop.type = 'button';
-    stop.textContent = '⛔ 중단';
+    stop.appendChild(icon('stop', 16));
+    stop.appendChild(document.createTextNode('중단'));
     stop.setAttribute('aria-label', '작업 중단');
     styleBtn(stop, 'danger', 'margin-left:auto;');
     stop.addEventListener('click', interrupt);
@@ -490,9 +533,11 @@
       'position:relative;display:flex;flex-direction:column;flex:1;min-height:0;';
 
     var frozen = document.createElement('div');
-    frozen.textContent = '\u23f8 \uac31\uc2e0 \uc815\uc9c0\ub428';
+    frozen.appendChild(icon('pause', 12));
+    frozen.appendChild(document.createTextNode('\uac31\uc2e0 \uc815\uc9c0\ub428'));
     frozen.style.cssText = [
       'display:none', 'position:absolute', 'top:6px', 'right:10px',
+      'align-items:center', 'gap:4px',
       'padding:3px 9px', 'border-radius:99px', 'pointer-events:none',
       'font-size:10px', 'font-weight:700', 'letter-spacing:0.02em',
       'background:rgba(245,158,11,0.16)', 'color:var(--con-warn)',
@@ -1877,7 +1922,7 @@
    * switching session, closing the sheet -- so none of them can leave the
    * console looking frozen while it is in fact live. */
   function setFrozen(on) {
-    if (el.frozen) el.frozen.style.display = on ? 'block' : 'none';
+    if (el.frozen) el.frozen.style.display = on ? 'inline-flex' : 'none';
     /* The well has no border; the freeze shows as an amber ring in the
      * shadow channel, on top of the well's own edge. */
     if (el.tail) el.tail.style.boxShadow = on
