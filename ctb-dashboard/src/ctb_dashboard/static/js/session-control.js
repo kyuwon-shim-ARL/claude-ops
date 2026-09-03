@@ -218,9 +218,14 @@
       'flex:1', 'min-height:120px', 'overflow:auto', 'margin:0 0 8px',
       'padding:8px', 'border-radius:10px', 'background:var(--con-well)',
       'border:1px solid var(--con-line)',
-      "font-family:'JetBrains Mono',monospace", 'font-size:11px',
-      'font-weight:var(--con-tail-weight)',
-      'line-height:1.45', 'white-space:pre-wrap', 'word-break:break-word',
+      /* The system's own monospace first: SF Mono on an iPhone is cut for
+       * that screen and reads at 12px where a web font at 11px went thin
+       * and pale, and if the web font never arrives the fallback was Courier,
+       * the thinnest face on the device. JetBrains Mono stays for platforms
+       * whose ui-monospace is poor. */
+      "font-family:ui-monospace,'SF Mono',Menlo,'JetBrains Mono',Consolas,monospace",
+      'font-size:12px', 'font-weight:var(--con-tail-weight)',
+      'line-height:1.5', 'white-space:pre-wrap', 'word-break:break-word',
       '-webkit-overflow-scrolling:touch',
       '-webkit-user-select:text', 'user-select:text',
     ].join(';');
