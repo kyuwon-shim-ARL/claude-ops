@@ -43,7 +43,7 @@
   /* The sheet used to be dark whatever the board was: a terminal is dark, and
    * a light pane next to a dark board looked like a hole. It now follows the
    * board's toggle instead -- the board's key in localStorage, else the
-   * system -- so a light board gets a light console, paper-warm to match it.
+   * system -- so a light board gets a light console, cool and near-monochrome like it.
    * Everything here paints through these variables; nothing carries a colour
    * of its own. They sit on <html> so the sheet, the search palette and the
    * floating chips all inherit one set, and switching is one write. */
@@ -67,22 +67,22 @@
       scheme: 'light',
       /* Monospace that reads fine on black goes pale on paper: light-on-dark
        * bleeds and looks heavier than it is. So the light tail is ink on
-       * warm off-white -- not pure white, which glares on an OLED at full
+       * off-white -- not pure white, which glares on an OLED at full
        * brightness outdoors -- at semibold, and the sheet around the well is
        * a shade darker so the pane has an edge to sit in. */
-      sheet: '#ece8df', well: '#fbfaf6', text: '#0b0f14', muted: '#4b5563',
-      dim: '#6b7280', line: '#cfc9bb', 'tail-weight': '600',
+      sheet: '#eceef2', well: '#fbfbfc', text: '#0b0f14', muted: '#4b5563',
+      dim: '#6b7280', line: '#d3d7de', 'tail-weight': '600',
       /* Controls are white shapes on the grey sheet, the way a grouped iOS
        * list sits: the sheet is the ground, everything on it is lighter. */
-      btn: '#fbfaf6', 'btn-hover': '#ffffff', active: '#dbe6ff',
+      btn: '#ffffff', 'btn-hover': '#f5f6f8', active: '#dbe6ff',
       stop: '#fbe1e1', 'stop-text': '#991b1b', copybar: '#d7f1e3',
-      accent: '#2563eb', 'accent-hover': '#1d4ed8', 'accent-soft': 'rgba(37,99,235,0.14)', 'well-edge': 'inset 0 1px 2px rgba(60,50,30,0.08)',
+      accent: '#2563eb', 'accent-hover': '#1d4ed8', 'accent-soft': 'rgba(37,99,235,0.14)', 'well-edge': 'inset 0 1px 2px rgba(16,24,40,0.06)',
       ok: '#047857', warn: '#b45309', err: '#dc2626', link: '#0b63a8', info: '#1d4ed8',
-      overlay: 'rgba(70,60,45,0.45)', 'hint-bg': 'rgba(255,252,247,0.95)',
-      shadow: '0 18px 48px rgba(40,30,10,0.22)',
+      overlay: 'rgba(17,24,39,0.40)', 'hint-bg': 'rgba(255,255,255,0.95)',
+      shadow: '0 18px 48px rgba(16,24,40,0.18)',
       'scroll-track': 'rgba(0,0,0,0.04)',
-      'scroll-thumb': 'rgba(100,90,80,0.3)',
-      'scroll-thumb-hover': 'rgba(100,90,80,0.5)',
+      'scroll-thumb': 'rgba(17,24,39,0.22)',
+      'scroll-thumb-hover': 'rgba(17,24,39,0.38)',
     },
   };
 

@@ -361,44 +361,48 @@
           groupLabel: 'rgba(186,230,253,0.95)',
         };
       }
+      /* Light: a cool, near-monochrome ground with one blue accent. The
+       * warm-paper-and-brass palette it replaces read as dated the moment it
+       * sat next to anything native; slate neutrals and white cards read as
+       * the same product as the dark board. */
       return {
-        bodyBg: 'radial-gradient(ellipse 80% 50% at 50% 0%, #fef3e8 0%, #fdf8f2 60%), #fdf8f2',
-        textPrimary: '#2d2318',
-        textSecondary: '#7a6450',
-        textMuted: '#b09880',
-        cardBg: 'linear-gradient(145deg,rgba(255,255,255,0.6) 0%,transparent 60%),#fffcf7',
-        cardBorder: 'rgba(180,150,110,0.2)',
-        cardShadowBase: '0 2px 12px rgba(160,120,80,0.10),0 1px 3px rgba(160,120,80,0.06)',
-        headerBg: 'linear-gradient(180deg, rgba(253,248,242,0.95) 0%, rgba(253,248,242,0.85) 100%)',
-        headerBorder: 'rgba(200,170,130,0.18)',
-        badgeBg: 'rgba(0,0,0,0.04)',
-        badgeBorder: 'rgba(180,150,110,0.2)',
-        pinBtnBg: 'rgba(0,0,0,0.04)',
-        pinBtnBorder: 'rgba(180,150,110,0.2)',
-        sectionLabelPinned: '#c08a20',
-        sectionLabelOthers: '#b09880',
-        emptyBorder: 'rgba(180,150,110,0.2)',
-        emptyText: 'rgba(100,80,60,0.3)',
-        quadLabelColor: 'rgba(45,35,24,0.5)',
-        metaThemeColor: '#fdf8f2',
-        scrollTrack: 'rgba(0,0,0,0.035)',
-        scrollThumb: 'rgba(90,75,60,0.28)',
-        scrollThumbHover: 'rgba(90,75,60,0.45)',
-        freshBarGrad: 'linear-gradient(90deg,#e08c00,#f0a500)',
-        freshBadgeBg: 'linear-gradient(135deg,#e08c00,#f0a500)',
-        freshBadgeText: '#fffcf7',
-        freshTextColor: '#c08a20',
+        bodyBg: 'radial-gradient(ellipse 80% 40% at 50% 0%, #ffffff 0%, #f3f4f6 70%), #f3f4f6',
+        textPrimary: '#111827',
+        textSecondary: '#4b5563',
+        textMuted: '#9ca3af',
+        cardBg: '#ffffff',
+        cardBorder: 'rgba(17,24,39,0.07)',
+        cardShadowBase: '0 1px 2px rgba(16,24,40,0.05),0 8px 24px rgba(16,24,40,0.06)',
+        headerBg: 'linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(243,244,246,0.86) 100%)',
+        headerBorder: 'rgba(17,24,39,0.07)',
+        badgeBg: 'rgba(17,24,39,0.05)',
+        badgeBorder: 'rgba(17,24,39,0.08)',
+        pinBtnBg: 'rgba(17,24,39,0.05)',
+        pinBtnBorder: 'rgba(17,24,39,0.08)',
+        sectionLabelPinned: '#1d4ed8',
+        sectionLabelOthers: '#9ca3af',
+        emptyBorder: 'rgba(17,24,39,0.12)',
+        emptyText: 'rgba(17,24,39,0.3)',
+        quadLabelColor: 'rgba(17,24,39,0.5)',
+        metaThemeColor: '#f3f4f6',
+        scrollTrack: 'rgba(17,24,39,0.04)',
+        scrollThumb: 'rgba(17,24,39,0.22)',
+        scrollThumbHover: 'rgba(17,24,39,0.38)',
+        freshBarGrad: 'linear-gradient(90deg,#2563eb,#3b82f6)',
+        freshBadgeBg: 'linear-gradient(135deg,#2563eb,#3b82f6)',
+        freshBadgeText: '#ffffff',
+        freshTextColor: '#1d4ed8',
         dotGlowColor: '0 0 4px currentColor',
-        ringActive: 'rgba(100,80,60,0.35)',
+        ringActive: 'rgba(37,99,235,0.45)',
         connDotOk: 'bg-emerald-500',
         connDotFail: 'bg-red-500',
-        wtStripe: 'rgba(14,165,233,0.55)',
-        wtBranch: 'rgba(2,132,199,0.85)',
-        wtBg: 'rgba(14,165,233,0.03)',
-        groupBorder: 'rgba(2,132,199,0.55)',
-        groupBgTint: 'rgba(14,165,233,0.07)',
-        groupGlow: '0 0 0 1px rgba(2,132,199,0.20), 0 0 14px rgba(14,165,233,0.20)',
-        groupLabel: 'rgba(7,89,133,0.95)',
+        wtStripe: 'rgba(37,99,235,0.5)',
+        wtBranch: 'rgba(29,78,216,0.85)',
+        wtBg: 'rgba(37,99,235,0.03)',
+        groupBorder: 'rgba(37,99,235,0.45)',
+        groupBgTint: 'rgba(37,99,235,0.05)',
+        groupGlow: '0 0 0 1px rgba(37,99,235,0.18), 0 0 14px rgba(37,99,235,0.14)',
+        groupLabel: 'rgba(30,64,175,0.95)',
       };
     }
 
@@ -437,9 +441,9 @@
       }
       return {
         Q1: { tint: 'rgba(220,100,90,0.07)',  border: 'rgba(220,100,90,0.18)' },
-        Q2: { tint: 'rgba(220,160,0,0.07)',    border: 'rgba(220,160,0,0.18)' },
-        Q3: { tint: 'rgba(80,150,220,0.06)',   border: 'rgba(80,150,220,0.14)' },
-        Q4: { tint: 'rgba(170,150,130,0.07)',  border: 'rgba(170,150,130,0.16)' },
+        Q2: { tint: 'rgba(217,119,6,0.06)',    border: 'rgba(217,119,6,0.16)' },
+        Q3: { tint: 'rgba(37,99,235,0.05)',    border: 'rgba(37,99,235,0.14)' },
+        Q4: { tint: 'rgba(107,114,128,0.06)',  border: 'rgba(107,114,128,0.16)' },
       };
     }
 
@@ -494,12 +498,12 @@
         root.style.setProperty('--glow-work-ring-hi', 'rgba(52,211,153,0.50)');
       } else {
         // e014-T2: stronger light mode glow values for visibility
-        root.style.setProperty('--glow-fresh-lo', 'rgba(192,138,32,0.30)');
-        root.style.setProperty('--glow-fresh-hi', 'rgba(192,138,32,0.50)');
-        root.style.setProperty('--glow-fresh-ring-lo', 'rgba(192,138,32,0.35)');
-        root.style.setProperty('--glow-fresh-ring-hi', 'rgba(192,138,32,0.55)');
-        root.style.setProperty('--glow-fresh-inset-lo', 'rgba(192,138,32,0.06)');
-        root.style.setProperty('--glow-fresh-inset-hi', 'rgba(192,138,32,0.12)');
+        root.style.setProperty('--glow-fresh-lo', 'rgba(37,99,235,0.30)');
+        root.style.setProperty('--glow-fresh-hi', 'rgba(37,99,235,0.50)');
+        root.style.setProperty('--glow-fresh-ring-lo', 'rgba(37,99,235,0.35)');
+        root.style.setProperty('--glow-fresh-ring-hi', 'rgba(37,99,235,0.55)');
+        root.style.setProperty('--glow-fresh-inset-lo', 'rgba(37,99,235,0.06)');
+        root.style.setProperty('--glow-fresh-inset-hi', 'rgba(37,99,235,0.12)');
         root.style.setProperty('--glow-work-lo', 'rgba(34,185,138,0.25)');
         root.style.setProperty('--glow-work-hi', 'rgba(34,185,138,0.45)');
         root.style.setProperty('--glow-work-ring-lo', 'rgba(34,185,138,0.30)');
@@ -1220,7 +1224,7 @@
       const t = getThemeColors();
       const pop = document.createElement('div');
       pop.id = 'age-settings-pop';
-      pop.style.cssText = `position:absolute;z-index:900;margin-top:6px;padding:10px 12px;border-radius:12px;background:${isDark() ? '#1c1628' : '#fffcf7'};border:1px solid ${t.cardBorder};box-shadow:0 10px 30px rgba(0,0,0,0.35);min-width:150px;`;
+      pop.style.cssText = `position:absolute;z-index:900;margin-top:6px;padding:10px 12px;border-radius:12px;background:${isDark() ? '#1c1628' : '#ffffff'};border:1px solid ${t.cardBorder};box-shadow:0 10px 30px rgba(0,0,0,0.35);min-width:150px;`;
       const title = document.createElement('div');
       title.textContent = '표시할 기간 버튼';
       title.style.cssText = `font-size:11px;font-weight:700;opacity:0.7;margin-bottom:8px;`;
@@ -1434,7 +1438,7 @@
       if (!session.last_prompt) return `<div style="font-size:12px;color:${t.textMuted};margin-top:3px;font-style:italic;opacity:0.5;"><span style="opacity:0.6;">&#10095;</span> 프롬프트 대기 중</div>`;
 
       const text = escapeHtml(session.last_prompt);
-      const tooltipBg = isDark() ? '#2a2440' : '#fffcf7';
+      const tooltipBg = isDark() ? '#2a2440' : '#ffffff';
       const tooltipBorder = isDark() ? 'rgba(255,255,255,0.1)' : 'rgba(180,150,110,0.2)';
 
       return `
@@ -2407,7 +2411,7 @@
 
     function _themeModal() {
       const t = getThemeColors();
-      deleteModalBox.style.background = isDark() ? '#1c1628' : '#fffcf7';
+      deleteModalBox.style.background = isDark() ? '#1c1628' : '#ffffff';
       deleteModalBox.style.borderColor = t.cardBorder;
       deleteModalBox.style.color = t.textPrimary;
       deleteModalBody.style.color = t.textSecondary;
