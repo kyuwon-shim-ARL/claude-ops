@@ -1030,7 +1030,7 @@ def _pane_cols(name: str) -> int:
 
 
 @app.get("/api/sessions/{name}/log")
-async def get_session_log(name: str, lines: int = 50, fit: int = 0):
+async def get_session_log(name: str, lines: int = 50, fit: int = 0, since: str = ""):
     """Return recent tmux pane output for a session.
 
     fit: columns the console can show. Sent when a session is opened, not on
@@ -1051,10 +1051,20 @@ async def get_session_log(name: str, lines: int = 50, fit: int = 0):
         )
         if result.returncode != 0:
             raise HTTPException(status_code=404, detail="Session not found")
+        ghost = _box_ghost(name)
+        # A fingerprint of what the client would paint. The console polls
+        # every two seconds and most polls find the pane unchanged; with
+        # `since` set to the last fingerprint it gets a short answer and
+        # skips the repaint instead of rebuilding forty lines for nothing.
+        digest = hashlib.sha1(
+            f"{ghost}\n{result.stdout}".encode("utf-8", "surrogateescape")
+        ).hexdigest()[:16]
+        if since and since == digest:
+            return {"session": name, "unchanged": True, "hash": digest}
         return {
             "session": name, "log": result.stdout, "cols": _pane_cols(name),
             # Ghost or typed: the client cannot tell from the plain capture.
-            "ghost": _box_ghost(name),
+            "ghost": ghost, "hash": digest,
         }
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="tmux timeout")

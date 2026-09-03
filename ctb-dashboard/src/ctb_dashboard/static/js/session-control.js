@@ -33,7 +33,7 @@
                 fitted: false, fails: 0, warned: false, cols: 0,
                 pending: null, sent: null,
                 depth: TAIL_LINES, growing: false, exhausted: false,
-                drafts: {}, boxTouched: null, ghost: false };
+                drafts: {}, boxTouched: null, ghost: false, hash: '', cache: {} };
   var el = {};
 
   /* --- markup ------------------------------------------------------------ */
@@ -1133,7 +1133,7 @@
     if (item.name !== state.session) show(item.name, true);
   });
 
-  /* Ctrl/Cmd+` walks DOWN the numbers: 9 → 8 → … → 1 → 9.
+  /* Ctrl/Cmd+` walks UP the rail one session at a time, from wherever the open one sits, wrapping at the top.
    *
    * The digits are for jumping to a session you can see; this is for working
    * through them. The board sorts what needs attention to the top, so starting
@@ -1148,15 +1148,17 @@
    * board that re-sorts under every step. */
   function stepDownSession() {
     var list = hintOrder || sessionOrder();
-    var slots = Math.min(list.length, HINT_MAX);
-    if (!slots) return null;
+    var n = list.length;
+    if (!n) return null;
     var here = -1;
-    for (var i = 0; i < slots; i++) {
+    for (var i = 0; i < n; i++) {
       if (list[i].name === state.session) { here = i; break; }
     }
-    /* Not in the numbered range -- nothing open, or a session past the ninth
-     * -- so begin at the bottom of it. */
-    var next = here === -1 ? slots - 1 : (here - 1 + slots) % slots;
+    /* From wherever the open session sits in the rail -- the whole rail,
+     * not only the nine that carry numbers. It used to jump to slot 9 from
+     * anything past it, which with a dozen sessions meant the tenth and
+     * eleventh were skipped over every time. Nothing open: start at the end. */
+    var next = here === -1 ? n - 1 : (here - 1 + n) % n;
     return list[next];
   }
 
@@ -2129,12 +2131,15 @@
     if (!state.session) return;
     var name = state.session;
     getJSON('/api/sessions/' + encodeURIComponent(name) + '/log?lines=' + state.depth
-            + fitParam())
+            + fitParam() + (state.hash && !force ? '&since=' + state.hash : ''))
       .then(function (data) {
         if (state.session !== name) return;
         if (data && data.__status === 404) { sessionGone(); return; }
         if (!data || data.__status) { pollFailed(); return; }
         pollOk();
+        /* Same pane as last time: nothing to paint. */
+        if (data.unchanged) return;
+        state.hash = data.hash || '';
         /* A live selection wins over a refresh: repainting would move the
          * chosen lines out from under the user. */
         if (state.selStart !== null) return;
@@ -2148,10 +2153,15 @@
          * mid-fling on iOS throws the view (see whenSettled). The reader gets
          * the live tail back the moment they return to the bottom -- the
          * next poll sees atBottom and paints. */
-        if (!force && (!atBottom || scrollInFlight())) return;
+        if (!force && (!atBottom || scrollInFlight())) {
+          /* Not painted now, so the next poll must bring it again. */
+          state.hash = '';
+          return;
+        }
         var fromBottom = el.tail.scrollHeight - el.tail.scrollTop;
         renderTail(data.log || '');
         el.tail.scrollTop = atBottom ? el.tail.scrollHeight : el.tail.scrollHeight - fromBottom;
+        rememberTail(name, data);
       })
       .catch(function () {
         if (state.session === name) pollFailed();
@@ -2220,9 +2230,11 @@
           state.growing = false;
           if (state.session !== name || state.selStart !== null) return;
           state.cols = data.cols || 0;
+          state.hash = data.hash || '';
           var before = state.lines ? state.lines.length : 0;
           var fromBottom = el.tail.scrollHeight - el.tail.scrollTop;
           renderTail(data.log || '');
+          rememberTail(name, data);
           el.tail.scrollTop = el.tail.scrollHeight - fromBottom;
           var gained = (state.lines ? state.lines.length : 0) - before;
           if (gained <= 0) {
@@ -2444,6 +2456,37 @@
     } catch (e) { /* quota or private mode: the in-memory copy still works */ }
   }
 
+  /* --- last-seen panes -------------------------------------------------- */
+
+  /* What the console last painted, per session: in memory for the switch
+   * back and forth, and in localStorage so a reopened PWA turns to the page
+   * it was on. Text only, forty lines a session, capped at thirty sessions
+   * (the oldest goes) -- a few hundred kilobytes at the most. */
+  var TAIL_KEY = 'ctb_console_tails';
+  var TAIL_KEEP = 30;
+
+  function rememberTail(name, data) {
+    var entry = { log: data.log || '', cols: data.cols || 0, ghost: data.ghost === true,
+                  depth: state.depth, at: Date.now() };
+    state.cache[name] = entry;
+    try {
+      var all = JSON.parse(localStorage.getItem(TAIL_KEY)) || {};
+      all[name] = entry;
+      var names = Object.keys(all).sort(function (a, b) { return all[b].at - all[a].at; });
+      names.slice(TAIL_KEEP).forEach(function (n) { delete all[n]; });
+      localStorage.setItem(TAIL_KEY, JSON.stringify(all));
+    } catch (e) { /* quota or private mode: memory still works */ }
+  }
+
+  function recallTail(name) {
+    if (state.cache[name]) return state.cache[name];
+    try {
+      var all = JSON.parse(localStorage.getItem(TAIL_KEY)) || {};
+      if (all[name] && typeof all[name].log === 'string') return all[name];
+    } catch (e) { /* unreadable */ }
+    return null;
+  }
+
   /* --- open / close ----------------------------------------------------- */
 
   /* focusInput: a session switch the user drove -- a chip click, a number
@@ -2483,16 +2526,32 @@
     state.warned = false;
     state.growing = false;
     state.exhausted = false;
+    state.hash = '';
     if (el.bar) el.bar.style.display = 'none';
     setFrozen(false);
     el.title.textContent = name.replace(/^claude[_-]/, '');
-    el.tail.textContent = '불러오는 중…';
+    /* The last pane this console painted for the session, if there is one,
+     * goes up at once -- a switch between two sessions should feel like
+     * turning a page, not like a first load. The poll that starts below
+     * replaces it within a couple of seconds; until then it is marked. */
+    var kept = recallTail(name);
+    if (kept) {
+      state.cols = kept.cols || 0;
+      state.ghost = kept.ghost === true;
+      state.depth = kept.depth || TAIL_LINES;
+      renderTail(kept.log || '');
+      el.tail.scrollTop = el.tail.scrollHeight;
+      setStatus('마지막으로 본 화면 · 갱신 중…', 'var(--con-muted)');
+    } else {
+      el.tail.textContent = '불러오는 중…';
+    }
     setStatus('');
     el.root.style.display = 'flex';
     renderStrip();
     fetchOrder();
     fitViewport();
     startPolling();
+    if (kept) pollTail(true);
     // Do not autofocus on open: on iOS that pops the keyboard before the pane
     // is read. A deliberate switch is different -- see focusInput.
     if (focusInput && el.input) {

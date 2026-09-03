@@ -130,3 +130,29 @@ def test_every_theme_defines_the_same_tokens():
     themes = json.loads(_run(body, wait_ms=50)[0][0])
     assert set(themes) == {"dark", "light", "parchment"}
     assert themes["light"] == themes["dark"] == themes["parchment"]
+
+
+# --- Ctrl+` walks the whole rail ---------------------------------------------
+
+def _step(order, current):
+    body = (
+        f"window.ctbSessionOrder = {json.dumps([{'name': n, 'label': n, 'state': 'idle'} for n in order])};"
+        f"c._state.session = {json.dumps(current)};"
+        "const it = c._stepDownSession(); mark(it ? it.name : null);"
+    )
+    return _run(body, wait_ms=50)[0][0]
+
+
+def test_step_moves_one_up_from_the_eleventh_session():
+    order = [f"s{i}" for i in range(1, 13)]
+    assert _step(order, "s11") == "s10"
+
+
+def test_step_from_the_top_wraps_to_the_last_session_not_the_ninth():
+    order = [f"s{i}" for i in range(1, 13)]
+    assert _step(order, "s1") == "s12"
+
+
+def test_step_with_nothing_open_starts_at_the_end_of_the_rail():
+    order = [f"s{i}" for i in range(1, 13)]
+    assert _step(order, None) == "s12"
