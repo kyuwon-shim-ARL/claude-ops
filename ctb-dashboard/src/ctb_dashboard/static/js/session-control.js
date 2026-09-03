@@ -33,7 +33,7 @@
                 fitted: false, fails: 0, warned: false, cols: 0,
                 pending: null, sent: null,
                 depth: TAIL_LINES, growing: false, exhausted: false,
-                drafts: {} };
+                drafts: {}, boxTouched: null };
   var el = {};
 
   /* --- markup ------------------------------------------------------------ */
@@ -129,6 +129,9 @@
     stop: 'M12 3l6.4 3.7v7.4L12 21l-6.4-3.7V6.7zM9 9h6v6H9z',
     bellOff: 'M6 17h12l-1.5-2V11a4.5 4.5 0 0 0-7-3.7M6.8 8.7A4.5 4.5 0 0 0 6.5 11v4L5 17M10 20h4M4 4l16 16',
     pause: 'M8 5v14M16 5v14',
+    check: 'M5 12.5l4.5 4.5L19 7',
+    alert: 'M12 4l9 16H3zM12 10v4M12 17.5v.5',
+    dot: 'M12 12m-2.5 0a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0',
   };
   function icon(name, size) {
     var svgNS = 'http://www.w3.org/2000/svg';
@@ -192,9 +195,9 @@
       '#ctb-console .con-tray{background:var(--con-tray);border-radius:16px;padding:8px}',
       /* A key that changed the input box: the box line pulses once so the
        * eye lands on what the key did, not only on the status text. */
-      '@keyframes con-flash{0%{background:var(--con-accent-soft)}100%{background:transparent}}',
+      '@keyframes con-flash{0%{background:rgba(16,185,129,0.35)}100%{background:transparent}}',
       '#ctb-console .con-flash{animation:con-flash 1.2s ease-out}',
-      '@media(prefers-reduced-motion:reduce){#ctb-console .con-flash{animation:none;background:var(--con-accent-soft)}}',
+      '@media(prefers-reduced-motion:reduce){#ctb-console .con-flash{animation:none}}',
       '#ctb-console .con-chip:active{transform:scale(.97)}',
       '#ctb-console .con-chip:focus-visible{outline:2px solid var(--con-accent);outline-offset:1px}',
       '#ctb-console .con-well{border:0;border-radius:16px;box-shadow:var(--con-well-edge)}',
@@ -280,8 +283,16 @@
     silent.style.cssText =
       'display:none;font-size:12px;flex-shrink:0;cursor:help;opacity:0.75;';
 
-    var status = document.createElement('span');
-    status.style.cssText = 'font-size:12px;font-weight:500;color:var(--con-muted);flex-shrink:0;';
+    /* The status line lives between the pane and the key pad, not in the
+     * header: the eyes are on the box and the keys when a key is pressed,
+     * and a line at the top of the sheet was out of view on a phone and out
+     * of focus on a desk. It leads with a glyph so the outcome reads before
+     * the words do. */
+    var status = document.createElement('div');
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    status.style.cssText = 'display:none;align-items:center;gap:6px;min-height:22px;' +
+      'margin:-4px 2px 8px;font-size:12px;font-weight:600;color:var(--con-muted);flex-shrink:0;';
 
     /* The palette had one entrance and it was a chord. On a phone there is no
      * Ctrl and no Cmd unless a keyboard is attached, so with seventy sessions
@@ -316,7 +327,6 @@
 
     header.appendChild(title);
     header.appendChild(silent);
-    header.appendChild(status);
     header.appendChild(find);
     header.appendChild(copy);
     header.appendChild(close);
@@ -565,6 +575,7 @@
     root.appendChild(header);
     root.appendChild(tailWrap);
     root.appendChild(bar);
+    root.appendChild(status);
     root.appendChild(keys);
     root.appendChild(row);
     keepCaret(root, input);
@@ -1054,6 +1065,12 @@
     if (accelDown) return;
     accelDown = true;
     hintOrder = sessionOrder().slice();
+    /* The rail is drawn when the console opens and not again on every poll,
+     * so its badges carried the numbers of THAT moment's order while the
+     * digits fired on the order frozen here. After a re-sort the "1" on the
+     * chip and the session Ctrl+1 opened were different sessions. Redraw the
+     * rail from the frozen order so the two cannot disagree. */
+    renderStrip();
     paintHints();
     if (!hintTimer) hintTimer = setInterval(paintHints, 400);
   }
@@ -1063,6 +1080,8 @@
     accelDown = false;
     hintOrder = null;
     if (hintTimer) { clearInterval(hintTimer); hintTimer = null; }
+    /* Back to the live order, with the badges hidden. */
+    renderStrip();
     paintHints();
   }
 
@@ -1431,9 +1450,19 @@
 
   /* --- status line ------------------------------------------------------- */
 
+  /* The colour names the outcome and picks the glyph: ok → check, warn →
+   * triangle, err → cross, anything else → a quiet dot for "in progress". */
+  var STATUS_ICON = {
+    'var(--con-ok)': 'check', 'var(--con-warn)': 'alert', 'var(--con-err)': 'close',
+  };
   function setStatus(text, color) {
     if (!el.status) return;
-    el.status.textContent = text || '';
+    el.status.textContent = '';
+    if (!text) { el.status.style.display = 'none'; return; }
+    var name = STATUS_ICON[color] || 'dot';
+    el.status.appendChild(icon(name, 15));
+    el.status.appendChild(document.createTextNode(text));
+    el.status.style.display = 'flex';
     el.status.style.color = color || 'var(--con-muted)';
   /* Ctrl+U — the kill-line every terminal has, and the same key the ⌧ 입력
    * 지우기 button sends. The browser spends it on view-source, which is never
@@ -1902,9 +1931,15 @@
         nodes[i].title = '';
         continue;
       }
+      /* Blue: text is sitting in the box, unsent. Green: the last key
+       * changed what sits there (a Tab took the prefill, a key cleared it),
+       * held until the box changes again -- so before and after a key look
+       * different, not just "something is there" both times. Amber is the
+       * board's waiting colour and had nothing to do with either. */
       if (pending && i === pending.index) {
-        nodes[i].style.background = 'rgba(245,158,11,0.14)';
-        nodes[i].style.boxShadow = 'inset 3px 0 0 #f59e0b';
+        var touched = state.boxTouched !== null && state.boxTouched === pending.text;
+        nodes[i].style.background = touched ? 'rgba(16,185,129,0.14)' : 'rgba(37,99,235,0.10)';
+        nodes[i].style.boxShadow = 'inset 3px 0 0 ' + (touched ? '#10b981' : '#3b82f6');
         nodes[i].title = pendingHint(pending.text);
         continue;
       }
@@ -2314,6 +2349,7 @@
           var pending = findPendingInput((data.log || '').split('\n'));
           var after = pending ? pending.text : '';
           if (after !== before) {
+            state.boxTouched = after || null;
             setStatus(what + ' 반영됨 · 입력창 ' + describeBox(before, after), 'var(--con-ok)');
             /* Repaint first so the flashed line is the new one. */
             pollTail();
@@ -2409,6 +2445,7 @@
     /* Remember where we came from so Ctrl+Tab can bounce back -- the pair you
      * are actually working in is almost always two sessions, not nine. */
     if (state.session && state.session !== name) state.prev = state.session;
+    state.boxTouched = null;   /* the mark belongs to the box it was made in */
     state.session = name;
     state.selStart = null;
     state.selEnd = null;
