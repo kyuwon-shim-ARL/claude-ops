@@ -362,9 +362,8 @@
        * Not while an IME is composing: a Hangul or Japanese keyboard uses Tab
        * to commit or cycle a candidate, so taking it there would leave the
        * half-typed word uncommitted in the box AND drop a stray Tab into a
-       * live pane. Shift+Tab is left alone as the way out of this box -- it is
-       * the only one, since the sheet's own buttons are otherwise unreachable
-       * from here by keyboard. */
+       * live pane. Shift+Tab is not taken here: the document-level handler
+       * sends it as a Tab too, from the box or anywhere else in the sheet. */
       if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey
           && !imeIsHandlingIt) {
         e.preventDefault();
@@ -1056,17 +1055,16 @@
     show(state.prev, true);
   });
 
-  /* Shift+Tab sends a Tab to the pane from anywhere in the sheet -- the same
-   * key the prompt box's bare Tab sends, for when the caret is not in it. */
+  /* Shift+Tab sends a Tab to the pane from anywhere in the sheet, the prompt
+   * box included -- one key that means the same thing wherever the caret is.
+   * It used to be left alone in the box as the way to reach the sheet's own
+   * buttons by keyboard; that path is given up on purpose. The keys those
+   * buttons send are all on the pad or on a chord already, and the number
+   * shortcuts and the search land in the box, which is where typing goes. */
   document.addEventListener('keydown', function (e) {
     if (!state.session || searchOpen() || e.key !== 'Tab' || !e.shiftKey) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.isComposing || e.keyCode === 229) return;   /* the IME's key, not ours */
-    /* Not from the prompt box. Bare Tab there goes to the pane already, so
-     * Shift+Tab is the only key left that can move focus onto the sheet's own
-     * controls -- ⛔ 중단, the key pad, ✕ -- and taking it here would make
-     * every one of them mouse-only. */
-    if (el.input && e.target === el.input) return;
     e.preventDefault();
     sendKey('Tab');
   });
