@@ -113,3 +113,20 @@ def test_a_key_that_empties_the_box_says_so():
 
 def test_a_key_that_rewrites_the_box_says_so():
     assert _describe("git st", "git status") == "바뀜"
+
+
+def test_a_tab_that_makes_a_ghost_real_is_reported_as_accepted():
+    body = "mark(c._describeBox({text:'git status', ghost:true}, {text:'git status', ghost:false}));"
+    assert _run(body, wait_ms=50)[0][0] == "제안 확정됨"
+
+
+# --- theme palettes --------------------------------------------------------
+
+def test_every_theme_defines_the_same_tokens():
+    """applyTheme only sets the active theme's keys and never clears the rest,
+    so a theme missing a key would inherit a stale --con-* value from whatever
+    was cycled through last. Key parity is the guard."""
+    body = "mark(JSON.stringify(Object.fromEntries(Object.entries(c._THEMES).map(([k,v]) => [k, Object.keys(v).sort()]))));"
+    themes = json.loads(_run(body, wait_ms=50)[0][0])
+    assert set(themes) == {"dark", "light", "parchment"}
+    assert themes["light"] == themes["dark"] == themes["parchment"]

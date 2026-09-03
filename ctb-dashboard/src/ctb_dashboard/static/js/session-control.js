@@ -84,11 +84,31 @@
       'scroll-thumb': 'rgba(17,24,39,0.22)',
       'scroll-thumb-hover': 'rgba(17,24,39,0.38)',
     },
+    /* 양피지: the board's vellum tile is the sheet itself; the well is a
+     * lighter sheet laid on it, ink for text, keys are small vellum cards
+     * with a sepia edge, and the seal red is the one accent. Status colours
+     * are the muted pigments of an old map so they still mean the same. */
+    parchment: {
+      scheme: 'light',
+      sheet: '#efe6d3', well: '#fbf6ea', text: '#2a1f14', muted: '#6b5a45',
+      dim: '#7d6a52', line: '#cdbfa5', 'tail-weight': '600',
+      btn: '#fbf6ea', 'btn-hover': '#fffbf1', active: '#e6d3c0', tray: '#e3d7c0',
+      stop: '#efd5cf', 'stop-text': '#7b2d26', copybar: '#d9e6dc',
+      accent: '#7b2d26', 'accent-hover': '#6a251f', 'accent-soft': 'rgba(123,45,38,0.14)',
+      'well-edge': 'inset 0 0 0 1px rgba(90,60,30,0.18)',
+      ok: '#2f6f50', warn: '#9a5a12', err: '#a2332b', link: '#2f5648', info: '#5b4636',
+      overlay: 'rgba(60,40,20,0.42)', 'hint-bg': 'rgba(251,246,234,0.95)',
+      shadow: '0 18px 48px rgba(70,45,20,0.22)',
+      'scroll-track': 'rgba(90,60,30,0.06)',
+      'scroll-thumb': 'rgba(90,60,30,0.28)',
+      'scroll-thumb-hover': 'rgba(90,60,30,0.45)',
+    },
   };
 
   function themeName() {
     try {
       var stored = localStorage.getItem(THEME_KEY);
+      if (stored === 'parchment') return 'parchment';
       if (stored) return stored === 'dark' ? 'dark' : 'light';
     } catch (e) { /* private mode: fall through to the system */ }
     return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
@@ -96,10 +116,11 @@
   }
 
   function applyTheme() {
-    var t = THEMES[themeName()];
+    var t = THEMES[themeName()] || THEMES.light;
     if (!document.documentElement) return;   /* the test harness has no <html> */
     var st = document.documentElement.style;
     Object.keys(t).forEach(function (k) { st.setProperty('--con-' + k, t[k]); });
+    st.setProperty('--con-sheet-img', themeName() === 'parchment' ? 'url(/static/img/parchment.jpg)' : 'none');
   }
 
   applyTheme();
@@ -232,7 +253,7 @@
       /* Standalone PWA: top:0 is under the status bar / notch, so inset. */
       'padding:calc(10px + env(safe-area-inset-top)) 12px' +
         ' calc(14px + env(safe-area-inset-bottom))',
-      'background:var(--con-sheet)', 'color:var(--con-text)',
+      'background:var(--con-sheet-img,none) center/768px repeat, var(--con-sheet)', 'color:var(--con-text)',
       'font-family:ui-sans-serif,system-ui,sans-serif',
       /* The sheet carries its own scrollbar colours, from its own palette:
        * the page's variables are tuned to the board. Custom properties
@@ -1935,8 +1956,8 @@
         var ghost = !touched && state.ghost;
         nodes[i].style.background = touched ? 'rgba(16,185,129,0.14)'
           : ghost ? 'rgba(107,114,128,0.10)' : 'rgba(37,99,235,0.10)';
-        nodes[i].style.boxShadow = touched ? 'inset 3px 0 0 #10b981'
-          : ghost ? 'inset 3px 0 0 var(--con-dim)' : 'inset 3px 0 0 #3b82f6';
+        nodes[i].style.boxShadow = touched ? 'inset 3px 0 0 var(--con-ok)'
+          : ghost ? 'inset 3px 0 0 var(--con-dim)' : 'inset 3px 0 0 var(--con-accent)';
         nodes[i].style.opacity = ghost ? '0.7' : '';
         nodes[i].title = ghost ? '제안된 입력 — Tab(⇥)으로 확정' : pendingHint(pending.text);
         continue;
@@ -2100,7 +2121,11 @@
     setStatus('');
   }
 
-  function pollTail() {
+  /* `force`: repaint even when the reader is up in history or mid-fling --
+   * used once, after a key changed the box, so the colour change is seen
+   * wherever the view sits. The view is held by its distance from the
+   * bottom, the way growTail holds it. */
+  function pollTail(force) {
     if (!state.session) return;
     var name = state.session;
     getJSON('/api/sessions/' + encodeURIComponent(name) + '/log?lines=' + state.depth
@@ -2123,9 +2148,10 @@
          * mid-fling on iOS throws the view (see whenSettled). The reader gets
          * the live tail back the moment they return to the bottom -- the
          * next poll sees atBottom and paints. */
-        if (!atBottom || scrollInFlight()) return;
+        if (!force && (!atBottom || scrollInFlight())) return;
+        var fromBottom = el.tail.scrollHeight - el.tail.scrollTop;
         renderTail(data.log || '');
-        el.tail.scrollTop = el.tail.scrollHeight;
+        el.tail.scrollTop = atBottom ? el.tail.scrollHeight : el.tail.scrollHeight - fromBottom;
       })
       .catch(function () {
         if (state.session === name) pollFailed();
@@ -2317,7 +2343,7 @@
     if (!state.session) return;
     var name = state.session;
     var what = label || ('키 ' + key);
-    var before = state.pending ? state.pending.text : '';
+    var before = { text: state.pending ? state.pending.text : '', ghost: state.ghost };
     setStatus(what + ' 전송…', 'var(--con-muted)');
     post('/key', { key: key })
       .then(function (res) {
@@ -2347,12 +2373,18 @@
         .then(function (data) {
           if (state.session !== name || !data || data.__status) return;
           var pending = findPendingInput((data.log || '').split('\n'));
-          var after = pending ? pending.text : '';
-          if (after !== before) {
-            state.boxTouched = after || null;
+          var after = { text: pending ? pending.text : '', ghost: data.ghost === true };
+          /* A Tab that takes a ghost leaves the same characters in the box;
+           * what changed is that they are now real. That counts. */
+          var changed = after.text !== before.text
+            || (before.ghost && !after.ghost && after.text);
+          if (changed) {
+            state.boxTouched = after.text || null;
+            state.ghost = after.ghost;
             setStatus(what + ' 반영됨 · 입력창 ' + describeBox(before, after), 'var(--con-ok)');
-            /* Repaint first so the flashed line is the new one. */
-            pollTail();
+            /* Repaint first -- forced, so it happens wherever the view sits
+             * -- so the flashed line is the new one. */
+            pollTail(true);
             setTimeout(flashPending, 400);
             return;
           }
@@ -2367,8 +2399,11 @@
   /* One short clause for the change: filled, cleared, or rewritten. The
    * text itself is on the screen a few lines up, so only its shape is named. */
   function describeBox(before, after) {
-    if (!before && after) return '채워짐';
-    if (before && !after) return '비워짐';
+    if (typeof before === 'string') before = { text: before, ghost: false };
+    if (typeof after === 'string') after = { text: after, ghost: false };
+    if (!before.text && after.text) return '채워짐';
+    if (before.text && !after.text) return '비워짐';
+    if (before.text === after.text && before.ghost && !after.ghost) return '제안 확정됨';
     return '바뀜';
   }
 
@@ -2564,6 +2599,7 @@
     _linkifyLines: linkifyLines,
     _whenSettled: whenSettled,
     _describeBox: describeBox,
+    _THEMES: THEMES,
     _noteScrolling: noteScrolling,
     _scrollInFlight: scrollInFlight,
     _setTouching: function (v) { touching = !!v; },

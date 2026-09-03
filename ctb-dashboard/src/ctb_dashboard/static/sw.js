@@ -6,7 +6,7 @@
 // state of live sessions -- serving a stale session list from cache would be
 // worse than showing nothing, because it looks authoritative.
 
-const CACHE = 'ctb-shell-v2';
+const CACHE = 'ctb-shell-v3';
 
 // Deliberately small: the shell, not the data.
 const SHELL = [
@@ -16,6 +16,7 @@ const SHELL = [
   '/static/manifest.json',
   '/static/icon-192.png',
   '/static/icon-512.png',
+  '/static/img/parchment.jpg',
 ];
 
 self.addEventListener('install', (e) => {

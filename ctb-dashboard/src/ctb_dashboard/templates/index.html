@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
-  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=JetBrains+Mono:wght@400;500&family=Nanum+Myeongjo:wght@400;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <script nonce="{{ csp_nonce }}">
     tailwind.config = {
@@ -310,11 +310,16 @@
     // =============================================
     const THEME_KEY = 'ctb_theme';
 
-    function isDark() {
+    /* Three looks: light, dark, and 양피지 -- an opt-in parchment skin that
+     * is a light theme underneath (every isDark() branch treats it as one)
+     * with its own ground, ink and seal-red accent on top. */
+    function themeMode() {
       const stored = localStorage.getItem(THEME_KEY);
-      if (stored) return stored === 'dark';
-      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (stored === 'parchment' || stored === 'dark' || stored === 'light') return stored;
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     }
+    function isDark() { return themeMode() === 'dark'; }
+    function isParchment() { return themeMode() === 'parchment'; }
 
     function getThemeColors() {
       if (isDark()) {
@@ -324,6 +329,7 @@
           textSecondary: '#8b85a0',
           textMuted: '#5a5470',
           cardBg: 'linear-gradient(145deg,rgba(255,255,255,0.035) 0%,transparent 60%),#1c1628',
+          panelBg: '#1c1628',
           cardBorder: 'rgba(255,255,255,0.06)',
           cardShadowBase: '0 4px 24px rgba(0,0,0,0.35),0 1px 0 rgba(255,255,255,0.04) inset',
           headerBg: 'linear-gradient(180deg, rgba(22,18,31,0.95) 0%, rgba(15,13,20,0.8) 100%)',
@@ -361,6 +367,53 @@
           groupLabel: 'rgba(186,230,253,0.95)',
         };
       }
+      if (isParchment()) {
+        /* 양피지: a real vellum tile under everything (static/img/parchment.jpg,
+         * generated, made seamless, luminance spread ~3% so small type still
+         * reads), sheets of lighter vellum for cards with a sepia hairline,
+         * ink for text, and a wax-seal red as the single accent. Worktrees
+         * take verdigris, the other pigment on an old map. */
+        return {
+          bodyBg: 'url(/static/img/parchment.jpg) left top/768px repeat, #f1e8d6',
+          textPrimary: '#2a1f14',
+          textSecondary: '#6b5a45',
+          textMuted: '#7d6a52',
+          cardBg: 'rgba(255,251,243,0.82)',
+          panelBg: '#fbf6ea',
+          cardBorder: 'rgba(90,60,30,0.22)',
+          cardShadowBase: '0 1px 2px rgba(70,45,20,0.10),0 10px 26px rgba(70,45,20,0.10)',
+          headerBg: 'linear-gradient(180deg, rgba(246,239,225,0.94) 0%, rgba(241,232,214,0.86) 100%)',
+          headerBorder: 'rgba(90,60,30,0.22)',
+          badgeBg: 'rgba(90,60,30,0.07)',
+          badgeBorder: 'rgba(90,60,30,0.22)',
+          pinBtnBg: 'rgba(90,60,30,0.07)',
+          pinBtnBorder: 'rgba(90,60,30,0.22)',
+          sectionLabelPinned: '#7b2d26',
+          sectionLabelOthers: '#7d6a52',
+          emptyBorder: 'rgba(90,60,30,0.28)',
+          emptyText: 'rgba(42,31,20,0.5)',
+          quadLabelColor: 'rgba(42,31,20,0.72)',
+          metaThemeColor: '#f1e8d6',
+          scrollTrack: 'rgba(90,60,30,0.06)',
+          scrollThumb: 'rgba(90,60,30,0.28)',
+          scrollThumbHover: 'rgba(90,60,30,0.45)',
+          freshBarGrad: 'linear-gradient(90deg,#7b2d26,#a2433a)',
+          freshBadgeBg: 'linear-gradient(135deg,#7b2d26,#a2433a)',
+          freshBadgeText: '#fff8ea',
+          freshTextColor: '#7b2d26',
+          dotGlowColor: '0 0 4px currentColor',
+          ringActive: 'rgba(123,45,38,0.45)',
+          connDotOk: 'bg-emerald-700',
+          connDotFail: 'bg-red-700',
+          wtStripe: 'rgba(63,111,94,0.6)',
+          wtBranch: 'rgba(47,86,72,0.9)',
+          wtBg: 'rgba(63,111,94,0.05)',
+          groupBorder: 'rgba(63,111,94,0.5)',
+          groupBgTint: 'rgba(63,111,94,0.06)',
+          groupGlow: '0 0 0 1px rgba(63,111,94,0.22), 0 0 14px rgba(63,111,94,0.16)',
+          groupLabel: 'rgba(38,70,58,0.95)',
+        };
+      }
       /* Light: a cool, near-monochrome ground with one blue accent. The
        * warm-paper-and-brass palette it replaces read as dated the moment it
        * sat next to anything native; slate neutrals and white cards read as
@@ -371,6 +424,7 @@
         textSecondary: '#4b5563',
         textMuted: '#9ca3af',
         cardBg: '#ffffff',
+        panelBg: '#ffffff',
         cardBorder: 'rgba(17,24,39,0.07)',
         cardShadowBase: '0 1px 2px rgba(16,24,40,0.05),0 8px 24px rgba(16,24,40,0.06)',
         headerBg: 'linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(243,244,246,0.86) 100%)',
@@ -454,6 +508,14 @@
 
       document.body.style.background = t.bodyBg;
       document.body.style.color = t.textPrimary;
+      /* The one typographic move the skin makes: the masthead in a Korean
+       * serif. Body and data stay in the sans the board is read in. */
+      const title = document.getElementById('app-title');
+      if (title) {
+        title.style.fontFamily = isParchment() ? "'Nanum Myeongjo', serif" : '';
+        title.style.fontWeight = isParchment() ? '800' : '';
+        title.style.letterSpacing = isParchment() ? '0.01em' : '';
+      }
 
       const header = document.getElementById('app-header');
       header.style.background = t.headerBg;
@@ -465,7 +527,8 @@
       badge.style.color = t.textSecondary;
 
       const btnTheme = document.getElementById('btn-theme');
-      btnTheme.textContent = dark ? '🌙' : '☀️';
+      btnTheme.textContent = dark ? '🌙' : isParchment() ? '📜' : '☀️';
+      btnTheme.title = '테마: ' + (dark ? '다크' : isParchment() ? '양피지' : '라이트') + ' — 눌러서 바꾸기';
       btnTheme.style.background = t.badgeBg;
       btnTheme.style.borderColor = t.badgeBorder;
 
@@ -496,6 +559,17 @@
         root.style.setProperty('--glow-work-hi', 'rgba(52,211,153,0.30)');
         root.style.setProperty('--glow-work-ring-lo', 'rgba(52,211,153,0.25)');
         root.style.setProperty('--glow-work-ring-hi', 'rgba(52,211,153,0.50)');
+      } else if (isParchment()) {
+        root.style.setProperty('--glow-fresh-lo', 'rgba(123,45,38,0.25)');
+        root.style.setProperty('--glow-fresh-hi', 'rgba(123,45,38,0.45)');
+        root.style.setProperty('--glow-fresh-ring-lo', 'rgba(123,45,38,0.30)');
+        root.style.setProperty('--glow-fresh-ring-hi', 'rgba(123,45,38,0.50)');
+        root.style.setProperty('--glow-fresh-inset-lo', 'rgba(123,45,38,0.05)');
+        root.style.setProperty('--glow-fresh-inset-hi', 'rgba(123,45,38,0.10)');
+        root.style.setProperty('--glow-work-lo', 'rgba(47,111,80,0.18)');
+        root.style.setProperty('--glow-work-hi', 'rgba(47,111,80,0.36)');
+        root.style.setProperty('--glow-work-ring-lo', 'rgba(47,111,80,0.28)');
+        root.style.setProperty('--glow-work-ring-hi', 'rgba(47,111,80,0.50)');
       } else {
         // e014-T2: stronger light mode glow values for visibility
         root.style.setProperty('--glow-fresh-lo', 'rgba(37,99,235,0.30)');
@@ -518,7 +592,9 @@
 
     // T5: Toggle handler
     document.getElementById('btn-theme').addEventListener('click', () => {
-      const newTheme = isDark() ? 'light' : 'dark';
+      /* light → dark → 양피지 → light */
+      const mode = themeMode();
+      const newTheme = mode === 'light' ? 'dark' : mode === 'dark' ? 'parchment' : 'light';
       localStorage.setItem(THEME_KEY, newTheme);
       applyTheme();
     });
@@ -1224,7 +1300,7 @@
       const t = getThemeColors();
       const pop = document.createElement('div');
       pop.id = 'age-settings-pop';
-      pop.style.cssText = `position:absolute;z-index:900;margin-top:6px;padding:10px 12px;border-radius:12px;background:${isDark() ? '#1c1628' : '#ffffff'};border:1px solid ${t.cardBorder};box-shadow:0 10px 30px rgba(0,0,0,0.35);min-width:150px;`;
+      pop.style.cssText = `position:absolute;z-index:900;margin-top:6px;padding:10px 12px;border-radius:12px;background:${t.panelBg};border:1px solid ${t.cardBorder};box-shadow:0 10px 30px rgba(0,0,0,0.35);min-width:150px;`;
       const title = document.createElement('div');
       title.textContent = '표시할 기간 버튼';
       title.style.cssText = `font-size:11px;font-weight:700;opacity:0.7;margin-bottom:8px;`;
@@ -1421,7 +1497,7 @@
         ultrawork: '#34d399', pipeline: '#fbbf24',
         ca: '#f97316', cc: '#fb923c', ralplan: '#c084fc', 'office-hours': '#38bdf8',
       };
-      const tagColor = (tag && tagColors[tag.toLowerCase()]) || (isDark() ? '#94a3b8' : '#64748b');
+      const tagColor = (tag && tagColors[tag.toLowerCase()]) || (isDark() ? '#94a3b8' : isParchment() ? '#6b5a45' : '#64748b');
 
       const tagHtml = tag
         ? `<span style="color:${tagColor};font-weight:700;margin-right:3px;font-size:11px;letter-spacing:0.03em;text-transform:uppercase;">${escapeHtml(tag)}</span>`
@@ -1438,7 +1514,7 @@
       if (!session.last_prompt) return `<div style="font-size:12px;color:${t.textMuted};margin-top:3px;font-style:italic;opacity:0.5;"><span style="opacity:0.6;">&#10095;</span> 프롬프트 대기 중</div>`;
 
       const text = escapeHtml(session.last_prompt);
-      const tooltipBg = isDark() ? '#2a2440' : '#ffffff';
+      const tooltipBg = isDark() ? '#2a2440' : getThemeColors().panelBg;
       const tooltipBorder = isDark() ? 'rgba(255,255,255,0.1)' : 'rgba(180,150,110,0.2)';
 
       return `
@@ -2282,7 +2358,10 @@
       toast.className = 'copy-toast';
       const dark = isDark();
       const isGreen = color === 'green';
-      const fg = isGreen ? '#34d399' : '#fb923c';
+      /* Readable on every ground: the light and parchment boards get the
+       * deeper pigments, dark keeps the bright ones. */
+      const fg = dark ? (isGreen ? '#34d399' : '#fb923c')
+        : isParchment() ? (isGreen ? '#2f6f50' : '#9a5a12') : (isGreen ? '#047857' : '#b45309');
       const bg = isGreen
         ? (dark ? 'rgba(52,211,153,0.15)' : 'rgba(52,211,153,0.1)')
         : (dark ? 'rgba(251,146,60,0.15)' : 'rgba(251,146,60,0.1)');
@@ -2411,7 +2490,7 @@
 
     function _themeModal() {
       const t = getThemeColors();
-      deleteModalBox.style.background = isDark() ? '#1c1628' : '#ffffff';
+      deleteModalBox.style.background = getThemeColors().panelBg;
       deleteModalBox.style.borderColor = t.cardBorder;
       deleteModalBox.style.color = t.textPrimary;
       deleteModalBody.style.color = t.textSecondary;
