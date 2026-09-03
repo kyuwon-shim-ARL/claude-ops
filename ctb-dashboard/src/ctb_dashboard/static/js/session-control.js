@@ -154,8 +154,7 @@
    * :hover, :focus-visible or reduced-motion, and those are where a control
    * stops looking like a painted rectangle and starts feeling like a button.
    * The visual vocabulary is small on purpose -- every control is a tonal
-   * shape on the sheet, no 1px borders, one accent, one radius rule: pills
-   * for the keys, 12px for the rest, 16px for the well. */
+   * shape on the sheet, no 1px borders, one accent, one radius rule: 12px for every control, 16px for the well. */
   function injectStyle() {
     if (document.getElementById('ctb-console-style')) return;
     var css = [
@@ -167,8 +166,10 @@
       '#ctb-console .con-btn:active{transform:scale(.95)}',
       '#ctb-console .con-btn:focus-visible{outline:2px solid var(--con-accent);outline-offset:2px}',
       '@media(hover:hover){#ctb-console .con-btn:hover{background:var(--con-btn-hover)}}',
-      '#ctb-console .con-btn--icon{width:44px;padding:0;border-radius:50%;font-size:15px}',
-      "#ctb-console .con-btn--key{border-radius:999px;min-width:44px;padding:0 13px;",
+      '#ctb-console .con-btn--icon{width:44px;padding:0}',
+      /* Keys are rounded squares, not pills: a pill row reads as a calculator,
+       * a row of soft squares reads as keys. One radius for every control. */
+      "#ctb-console .con-btn--key{min-width:44px;padding:0 13px;",
       "font:600 14px/1 ui-monospace,'SF Mono',Menlo,monospace}",
       /* The tinted variants restate their ground under :hover: the neutral
        * hover rule above outranks a bare variant class, and 중단 going grey
