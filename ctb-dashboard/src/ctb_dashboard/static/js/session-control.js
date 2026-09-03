@@ -52,7 +52,7 @@
     dark: {
       scheme: 'dark',
       sheet: '#0b1220', well: '#020617', text: '#e5e7eb', muted: '#9ca3af',
-      dim: '#6b7280', line: '#1f2937', line2: '#374151',
+      dim: '#6b7280', line: '#1f2937', line2: '#374151', 'tail-weight': '400',
       btn: '#111827', btn2: '#1f2937', active: '#1e3a8a', 'active-line': '#3b82f6',
       send: '#1d4ed8', stop: '#3f1d1d', copybar: '#173a2a',
       ok: '#34d399', warn: '#fbbf24', err: '#ef4444', link: '#7dd3fc', info: '#60a5fa',
@@ -64,8 +64,11 @@
     },
     light: {
       scheme: 'light',
-      sheet: '#f4f1ea', well: '#fdfcf9', text: '#1f2328', muted: '#5b6472',
-      dim: '#8a8f98', line: '#ddd8cc', line2: '#c8c2b4',
+      /* Thin monospace at 11px reads pale on paper where the same face
+       * reads fine on black -- light-on-dark bleeds and looks heavier.
+       * So the light tail goes to near-black at weight 500. */
+      sheet: '#f4f1ea', well: '#ffffff', text: '#111318', muted: '#4b5563',
+      dim: '#6b7280', line: '#d6d1c4', line2: '#bfb9ab', 'tail-weight': '500',
       btn: '#ece8df', btn2: '#e4dfd3', active: '#dbe6ff', 'active-line': 'var(--con-active-line)',
       send: '#2563eb', stop: '#fbe1e1', copybar: '#d7f1e3',
       ok: '#047857', warn: '#b45309', err: '#dc2626', link: '#0b63a8', info: '#1d4ed8',
@@ -216,6 +219,7 @@
       'padding:8px', 'border-radius:10px', 'background:var(--con-well)',
       'border:1px solid var(--con-line)',
       "font-family:'JetBrains Mono',monospace", 'font-size:11px',
+      'font-weight:var(--con-tail-weight)',
       'line-height:1.45', 'white-space:pre-wrap', 'word-break:break-word',
       '-webkit-overflow-scrolling:touch',
       '-webkit-user-select:text', 'user-select:text',
