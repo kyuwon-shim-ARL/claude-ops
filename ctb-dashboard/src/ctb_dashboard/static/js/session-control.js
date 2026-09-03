@@ -2222,7 +2222,11 @@
    * tail to come to rest. A scroll event every frame while moving, then
    * silence; SETTLE_MS of silence with no finger down is "at rest". */
   var SETTLE_MS = 120;
-  var TOUCH_LEASE_MS = 700;
+  /* Long enough that a finger resting on the glass mid-drag -- no touchmove,
+   * no scroll events -- still counts as a scroll in progress: landing 400
+   * lines under a resting finger is what threw the view when the drag
+   * resumed. Short enough that a lost touchend clears in a second and a bit. */
+  var TOUCH_LEASE_MS = 1200;
   var touchUntil = 0;
   var settleTimer = null;
   var onSettled = null;
@@ -2234,7 +2238,9 @@
     if (settleTimer) clearTimeout(settleTimer);
     settleTimer = setTimeout(function () {
       settleTimer = null;
-      if (touching() || !onSettled) return;
+      if (!onSettled) return;
+      /* Still not at rest (finger resting, or bouncing): look again. */
+      if (scrollInFlight()) { noteScrolling(); return; }
       var fn = onSettled;
       onSettled = null;
       fn();
@@ -2242,7 +2248,10 @@
   }
 
   function scrollInFlight() {
-    return touching() || settleTimer !== null;
+    /* The rubber band at the top: scrollTop goes negative and springs back
+     * with no scroll events on the way, so silence there is not rest. */
+    var bouncing = el.tail && el.tail.scrollTop < 0;
+    return touching() || settleTimer !== null || bouncing;
   }
 
   /* Run now if the tail is at rest, otherwise once it is. Only the latest
@@ -2250,8 +2259,8 @@
   function whenSettled(fn) {
     if (!scrollInFlight()) { fn(); return; }
     onSettled = fn;
-    /* A lease that lapses with no further scroll event would otherwise
-     * leave the work queued for good: check again when it is due to end. */
+    /* A lease or a bounce that ends with no further scroll event would
+     * otherwise leave the work queued for good: look again shortly. */
     if (!settleTimer) noteScrolling();
   }
 
