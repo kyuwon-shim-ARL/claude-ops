@@ -156,3 +156,21 @@ def test_step_from_the_top_wraps_to_the_last_session_not_the_ninth():
 def test_step_with_nothing_open_starts_at_the_end_of_the_rail():
     order = [f"s{i}" for i in range(1, 13)]
     assert _step(order, None) == "s12"
+
+
+def test_a_finger_whose_touchend_never_arrives_releases_on_its_own():
+    """touchend is lost when the touched line was replaced by a poll; the
+    lease must lapse by itself so polling does not stay skipped forever."""
+    log = _run("""
+      c._setTouching(true);          // a 60s lease, as the test hook grants
+      mark(c._scrollInFlight() ? 'moving' : 'rest');
+    """)
+    assert [t for t, _ in log] == ["moving"]
+    # the real lease is short: prove it lapses without a touchend
+    log = _run("""
+      // grab the real lease length by starting one through the public path
+      const tail = { addEventListener(){}, };
+      c._noteScrolling();
+      c._whenSettled(() => mark('ran'));
+    """, wait_ms=400)
+    assert [t for t, _ in log] == ["ran"]

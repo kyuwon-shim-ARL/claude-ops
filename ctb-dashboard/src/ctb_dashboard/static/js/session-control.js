@@ -34,7 +34,7 @@
                 pending: null, sent: null,
                 depth: TAIL_LINES, growing: false, exhausted: false,
                 drafts: {}, boxTouched: null, ghost: false, hash: '', cache: {},
-                pinned: true };
+                pinned: true, skipped: 0 };
   var el = {};
 
   /* --- markup ------------------------------------------------------------ */
@@ -662,9 +662,17 @@
     });
     /* A finger on the glass counts as scrolling even between events: the
      * fling that follows a lift has not started firing yet. */
-    tail.addEventListener('touchstart', function () { touching = true; noteScrolling(); }, { passive: true });
-    tail.addEventListener('touchend', function () { touching = false; noteScrolling(); }, { passive: true });
-    tail.addEventListener('touchcancel', function () { touching = false; noteScrolling(); }, { passive: true });
+    /* touchend cannot be trusted to arrive: it is dispatched to the element
+     * the touch STARTED on, and when a poll has since replaced that line the
+     * event lands on a detached node and never reaches this listener. A
+     * flag set on touchstart and cleared on touchend therefore stuck at
+     * "finger down" forever, every poll skipped its repaint, and the console
+     * froze until a session switch forced one. So the finger is a lease,
+     * renewed by touchstart and every touchmove, expiring on its own. */
+    tail.addEventListener('touchstart', function () { touchLease(); noteScrolling(); }, { passive: true });
+    tail.addEventListener('touchmove', function () { touchLease(); noteScrolling(); }, { passive: true });
+    tail.addEventListener('touchend', function () { touchUntil = 0; noteScrolling(); }, { passive: true });
+    tail.addEventListener('touchcancel', function () { touchUntil = 0; noteScrolling(); }, { passive: true });
     /* Delegated: 'click' (not touchstart) so a scroll gesture never selects. */
     tail.addEventListener('click', function (e) {
       /* A link click is a navigation, not the start of a copy range: without
@@ -2182,11 +2190,17 @@
          * mid-fling on iOS throws the view (see whenSettled). The reader gets
          * the live tail back the moment they return to the bottom -- the
          * next poll sees atBottom and paints. */
-        if (!force && (!atBottom || scrollInFlight())) {
+        /* A safety net under all of the above: whatever the reason, three
+         * skipped repaints in a row is a frozen screen, and the fourth paints
+         * -- holding the view by its distance from the bottom if the reader
+         * is up in history. */
+        if (!force && (!atBottom || scrollInFlight()) && state.skipped < 3) {
+          state.skipped += 1;
           /* Not painted now, so the next poll must bring it again. */
           state.hash = '';
           return;
         }
+        state.skipped = 0;
         var fromBottom = el.tail.scrollHeight - el.tail.scrollTop;
         renderTail(data.log || '');
         el.tail.scrollTop = atBottom ? el.tail.scrollHeight : el.tail.scrollHeight - fromBottom;
@@ -2208,15 +2222,19 @@
    * tail to come to rest. A scroll event every frame while moving, then
    * silence; SETTLE_MS of silence with no finger down is "at rest". */
   var SETTLE_MS = 120;
-  var touching = false;
+  var TOUCH_LEASE_MS = 700;
+  var touchUntil = 0;
   var settleTimer = null;
   var onSettled = null;
+
+  function touchLease() { touchUntil = Date.now() + TOUCH_LEASE_MS; }
+  function touching() { return Date.now() < touchUntil; }
 
   function noteScrolling() {
     if (settleTimer) clearTimeout(settleTimer);
     settleTimer = setTimeout(function () {
       settleTimer = null;
-      if (touching || !onSettled) return;
+      if (touching() || !onSettled) return;
       var fn = onSettled;
       onSettled = null;
       fn();
@@ -2224,7 +2242,7 @@
   }
 
   function scrollInFlight() {
-    return touching || settleTimer !== null;
+    return touching() || settleTimer !== null;
   }
 
   /* Run now if the tail is at rest, otherwise once it is. Only the latest
@@ -2232,6 +2250,9 @@
   function whenSettled(fn) {
     if (!scrollInFlight()) { fn(); return; }
     onSettled = fn;
+    /* A lease that lapses with no further scroll event would otherwise
+     * leave the work queued for good: check again when it is due to end. */
+    if (!settleTimer) noteScrolling();
   }
 
   /* Deepen the window and redraw, keeping the line the user is looking at
@@ -2692,7 +2713,7 @@
     _THEMES: THEMES,
     _noteScrolling: noteScrolling,
     _scrollInFlight: scrollInFlight,
-    _setTouching: function (v) { touching = !!v; },
+    _setTouching: function (v) { touchUntil = v ? Date.now() + 60000 : 0; },
     _displayWidth: displayWidth,
     _matchSessions: matchSessions,
     SESSION_NAME_RE: SESSION_NAME_RE,

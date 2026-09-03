@@ -231,7 +231,7 @@ def test_selection_uses_click_not_touchstart(console_js):
     import re
     regs = re.findall(r"addEventListener\('touchstart',([^\n]*)", console_js)
     assert len(regs) == 1, regs
-    assert "touching = true" in regs[0] and "passive: true" in regs[0]
+    assert "touchLease()" in regs[0] and "passive: true" in regs[0]
     assert "onLineTap" not in regs[0]
 
 
