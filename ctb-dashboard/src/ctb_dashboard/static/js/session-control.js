@@ -52,9 +52,10 @@
     dark: {
       scheme: 'dark',
       sheet: '#0b1220', well: '#020617', text: '#e5e7eb', muted: '#9ca3af',
-      dim: '#6b7280', line: '#1f2937', line2: '#374151', 'tail-weight': '400',
-      btn: '#111827', btn2: '#1f2937', active: '#1e3a8a', 'active-line': '#3b82f6',
-      send: '#1d4ed8', stop: '#3f1d1d', copybar: '#173a2a',
+      dim: '#6b7280', line: '#1f2937', 'tail-weight': '400',
+      btn: '#1a2333', 'btn-hover': '#243044', active: '#1e3a8a',
+      stop: '#3f1d1d', 'stop-text': '#fca5a5', copybar: '#173a2a',
+      accent: '#3b82f6', 'accent-hover': '#4f8ff7', 'accent-soft': 'rgba(59,130,246,0.18)', 'well-edge': 'inset 0 0 0 1px rgba(255,255,255,0.05)',
       ok: '#34d399', warn: '#fbbf24', err: '#ef4444', link: '#7dd3fc', info: '#60a5fa',
       overlay: 'rgba(2,6,23,0.72)', 'hint-bg': 'rgba(15,13,20,0.92)',
       shadow: '0 18px 48px rgba(0,0,0,0.55)',
@@ -70,9 +71,12 @@
        * brightness outdoors -- at semibold, and the sheet around the well is
        * a shade darker so the pane has an edge to sit in. */
       sheet: '#ece8df', well: '#fbfaf6', text: '#0b0f14', muted: '#4b5563',
-      dim: '#6b7280', line: '#cfc9bb', line2: '#b8b1a2', 'tail-weight': '600',
-      btn: '#ece8df', btn2: '#e4dfd3', active: '#dbe6ff', 'active-line': 'var(--con-active-line)',
-      send: '#2563eb', stop: '#fbe1e1', copybar: '#d7f1e3',
+      dim: '#6b7280', line: '#cfc9bb', 'tail-weight': '600',
+      /* Controls are white shapes on the grey sheet, the way a grouped iOS
+       * list sits: the sheet is the ground, everything on it is lighter. */
+      btn: '#fbfaf6', 'btn-hover': '#ffffff', active: '#dbe6ff',
+      stop: '#fbe1e1', 'stop-text': '#991b1b', copybar: '#d7f1e3',
+      accent: '#2563eb', 'accent-hover': '#1d4ed8', 'accent-soft': 'rgba(37,99,235,0.14)', 'well-edge': 'inset 0 1px 2px rgba(60,50,30,0.08)',
       ok: '#047857', warn: '#b45309', err: '#dc2626', link: '#0b63a8', info: '#1d4ed8',
       overlay: 'rgba(70,60,45,0.45)', 'hint-bg': 'rgba(255,252,247,0.95)',
       shadow: '0 18px 48px rgba(40,30,10,0.22)',
@@ -106,8 +110,59 @@
     if (mq.addEventListener) mq.addEventListener('change', applyTheme);
   }
 
+  /* The sheet's own stylesheet. Inline cssText cannot express :active,
+   * :hover, :focus-visible or reduced-motion, and those are where a control
+   * stops looking like a painted rectangle and starts feeling like a button.
+   * The visual vocabulary is small on purpose -- every control is a tonal
+   * shape on the sheet, no 1px borders, one accent, one radius rule: pills
+   * for the keys, 12px for the rest, 16px for the well. */
+  function injectStyle() {
+    if (document.getElementById('ctb-console-style')) return;
+    var css = [
+      '#ctb-console .con-btn{display:inline-flex;align-items:center;justify-content:center;',
+      'gap:6px;border:0;border-radius:12px;background:var(--con-btn);color:var(--con-text);',
+      'font:600 13px/1 ui-sans-serif,system-ui,sans-serif;min-height:44px;padding:0 14px;',
+      'cursor:pointer;touch-action:manipulation;flex-shrink:0;-webkit-tap-highlight-color:transparent;',
+      'transition:transform .12s ease,background-color .15s ease;user-select:none;-webkit-user-select:none}',
+      '#ctb-console .con-btn:active{transform:scale(.95)}',
+      '#ctb-console .con-btn:focus-visible{outline:2px solid var(--con-accent);outline-offset:2px}',
+      '@media(hover:hover){#ctb-console .con-btn:hover{background:var(--con-btn-hover)}}',
+      '#ctb-console .con-btn--icon{width:44px;padding:0;border-radius:50%;font-size:15px}',
+      "#ctb-console .con-btn--key{border-radius:999px;min-width:44px;padding:0 13px;",
+      "font:600 14px/1 ui-monospace,'SF Mono',Menlo,monospace}",
+      /* The tinted variants restate their ground under :hover: the neutral
+       * hover rule above outranks a bare variant class, and 중단 going grey
+       * under the pointer is the kind of thing that gets noticed. */
+      '#ctb-console .con-btn--primary,#ctb-console .con-btn--primary:hover{background:var(--con-accent);color:#fff;padding:0 18px}',
+      '@media(hover:hover){#ctb-console .con-btn--primary:hover{background:var(--con-accent-hover)}}',
+      '#ctb-console .con-btn--danger,#ctb-console .con-btn--danger:hover{background:var(--con-stop);color:var(--con-stop-text)}',
+      '#ctb-console .con-btn--ok,#ctb-console .con-btn--ok:hover{background:var(--con-copybar);color:var(--con-ok)}',
+      '#ctb-console .con-chip{display:flex;align-items:center;gap:6px;flex:0 0 auto;max-width:45%;',
+      'scroll-snap-align:start;border:0;border-radius:999px;padding:7px 12px;cursor:pointer;',
+      'text-align:left;overflow:hidden;touch-action:manipulation;-webkit-tap-highlight-color:transparent;',
+      'background:transparent;color:var(--con-muted);font:500 12px/1 ui-sans-serif,system-ui,sans-serif;',
+      'user-select:none;-webkit-user-select:none;min-height:34px;',
+      'transition:background-color .15s ease,color .15s ease}',
+      '#ctb-console .con-chip[aria-current="true"]{background:var(--con-accent-soft);color:var(--con-text);font-weight:700}',
+      '#ctb-console .con-chip:active{transform:scale(.97)}',
+      '#ctb-console .con-chip:focus-visible{outline:2px solid var(--con-accent);outline-offset:1px}',
+      '#ctb-console .con-well{border:0;border-radius:16px;box-shadow:var(--con-well-edge)}',
+      '#ctb-console .con-input{border:0;border-radius:14px;background:var(--con-well);color:var(--con-text);',
+      'box-shadow:var(--con-well-edge);transition:box-shadow .15s ease;outline:none}',
+      '#ctb-console .con-input:focus{box-shadow:var(--con-well-edge),0 0 0 2px var(--con-accent)}',
+      '#ctb-console .con-input::placeholder{color:var(--con-dim)}',
+      '@media(prefers-reduced-motion:reduce){#ctb-console .con-btn,#ctb-console .con-chip,#ctb-console .con-input{transition:none}',
+      '#ctb-console .con-btn:active,#ctb-console .con-chip:active{transform:none}}',
+    ].join('');
+    var style = document.createElement('style');
+    style.id = 'ctb-console-style';
+    style.textContent = css;
+    document.head.appendChild(style);
+  }
+
   function build() {
     if (el.root) return;
+    injectStyle();
 
     var root = document.createElement('div');
     root.id = 'ctb-console';
@@ -151,12 +206,12 @@
 
     var header = document.createElement('div');
     header.style.cssText =
-      'display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-shrink:0;';
+      'display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-shrink:0;';
 
     var title = document.createElement('div');
     title.style.cssText =
-      "flex:1;min-width:0;font-family:'JetBrains Mono',monospace;font-size:13px;" +
-      'font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+      'flex:1;min-width:0;font-size:16px;font-weight:700;letter-spacing:-0.01em;' +
+      'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
 
     /* Why no notification came, where the question is asked. "핀 고정 아님" is
      * the one reason the page cannot show: the alerts switch reports the
@@ -174,7 +229,7 @@
       'display:none;font-size:12px;flex-shrink:0;cursor:help;opacity:0.75;';
 
     var status = document.createElement('span');
-    status.style.cssText = 'font-size:11px;color:var(--con-muted);flex-shrink:0;';
+    status.style.cssText = 'font-size:12px;font-weight:500;color:var(--con-muted);flex-shrink:0;';
 
     /* The palette had one entrance and it was a chord. On a phone there is no
      * Ctrl and no Cmd unless a keyboard is attached, so with seventy sessions
@@ -184,7 +239,7 @@
     find.textContent = '\ud83d\udd0e';
     find.title = '\uc138\uc158 \uac80\uc0c9 (Ctrl/Cmd+F)';
     find.setAttribute('aria-label', '\uc138\uc158 \uac80\uc0c9 \uc5f4\uae30');
-    find.style.cssText = btnCss('var(--con-btn2)', '36px');
+    styleBtn(find, 'icon');
     find.addEventListener('click', function () {
       if (searchOpen()) return;
       hideHints();
@@ -197,14 +252,14 @@
     copy.textContent = '\ud83d\udccb';
     copy.title = '\ud654\uba74 \ub0b4\uc6a9 \ubcf5\uc0ac';
     copy.setAttribute('aria-label', '\ud654\uba74 \ub0b4\uc6a9 \ubcf5\uc0ac');
-    copy.style.cssText = btnCss('var(--con-btn2)', '36px');
+    styleBtn(copy, 'icon');
     copy.addEventListener('click', copyTail);
 
     var close = document.createElement('button');
     close.type = 'button';
     close.textContent = '✕';
     close.setAttribute('aria-label', '콘솔 닫기');
-    close.style.cssText = btnCss('var(--con-btn2)', '36px');
+    styleBtn(close, 'icon');
     close.addEventListener('click', hide);
 
     header.appendChild(title);
@@ -216,10 +271,10 @@
 
     var tail = document.createElement('pre');
     tail.setAttribute('aria-live', 'polite');
+    tail.className = 'con-well';
     tail.style.cssText = [
-      'flex:1', 'min-height:120px', 'overflow:auto', 'margin:0 0 8px',
-      'padding:8px', 'border-radius:10px', 'background:var(--con-well)',
-      'border:1px solid var(--con-line)',
+      'flex:1', 'min-height:120px', 'overflow:auto', 'margin:0 0 10px',
+      'padding:12px 12px', 'background:var(--con-well)',
       /* The system's own monospace first: SF Mono on an iPhone is cut for
        * that screen and reads at 12px where a web font at 11px went thin
        * and pale, and if the web font never arrives the fallback was Courier,
@@ -250,14 +305,13 @@
     var barCopy = document.createElement('button');
     barCopy.type = 'button';
     barCopy.textContent = '\ubcf5\uc0ac';
-    barCopy.style.cssText = btnCss('var(--con-copybar)', 'auto') +
-      'padding:6px 14px;font-weight:600;color:var(--con-ok);border-color:rgba(52,211,153,0.45);';
+    styleBtn(barCopy, 'ok');
     barCopy.addEventListener('click', copySelection);
 
     var barClear = document.createElement('button');
     barClear.type = 'button';
     barClear.textContent = '\ud574\uc81c';
-    barClear.style.cssText = btnCss('var(--con-btn2)', 'auto') + 'padding:6px 12px;';
+    styleBtn(barClear, '');
     barClear.addEventListener('click', clearSelection);
 
     bar.appendChild(barLabel);
@@ -268,7 +322,7 @@
      * need in a hurry, and send_prompt refuses while one is pending. */
     var keys = document.createElement('div');
     keys.style.cssText =
-      'display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;flex-shrink:0;';
+      'display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;flex-shrink:0;';
     [
       /* Answering, then moving, then editing. The keys are grouped by what you
        * are doing with them rather than by how the pane reads them, and the
@@ -287,7 +341,7 @@
       b.textContent = spec[0];
       b.title = spec[2];
       b.setAttribute('aria-label', spec[2] + ' 키 전송');
-      b.style.cssText = btnCss('var(--con-btn)', 'auto') + 'padding:6px 11px;';
+      styleBtn(b, 'key');
       b.addEventListener('click', function () { sendKey(spec[1]); });
       keys.appendChild(b);
     });
@@ -308,7 +362,7 @@
      * interrupt, so nothing that is running stops. */
     clearLine.title = 'Ctrl+U 전송 — 입력 줄 지우기 (진행 중 작업은 중단되지 않음) · 단축키 Ctrl+U';
     clearLine.setAttribute('aria-label', '세션 입력 지우기 키 전송');
-    clearLine.style.cssText = btnCss('var(--con-btn)', 'auto') + 'padding:6px 11px;';
+    styleBtn(clearLine, '');
     clearLine.addEventListener('click', function () { sendKey('C-u'); });
     keys.appendChild(clearLine);
 
@@ -316,8 +370,7 @@
     stop.type = 'button';
     stop.textContent = '⛔ 중단';
     stop.setAttribute('aria-label', '작업 중단');
-    stop.style.cssText =
-      btnCss('var(--con-stop)', 'auto') + 'padding:6px 11px;margin-left:auto;';
+    styleBtn(stop, 'danger', 'margin-left:auto;');
     stop.addEventListener('click', interrupt);
     keys.appendChild(stop);
 
@@ -328,9 +381,9 @@
     input.rows = 2;
     input.placeholder = '지시 입력 (Enter 전송 · Shift+Enter 줄바꿈)';
     input.setAttribute('aria-label', '프롬프트 입력');
+    input.className = 'con-input';
     input.style.cssText = [
-      'flex:1', 'resize:none', 'padding:9px 10px', 'border-radius:10px',
-      'background:var(--con-well)', 'color:var(--con-text)', 'border:1px solid var(--con-line2)',
+      'flex:1', 'resize:none', 'padding:11px 13px',
       /* 16px, and not a pixel less. Below that, iOS zooms the page in when the
        * field takes focus -- and it does not zoom back out when focus leaves,
        * so every tap on the box left the user pinching to get the screen back.
@@ -422,7 +475,7 @@
     send.type = 'button';
     send.textContent = '전송';
     send.setAttribute('aria-label', '프롬프트 전송');
-    send.style.cssText = btnCss('var(--con-send)', 'auto') + 'padding:10px 16px;font-weight:600;';
+    styleBtn(send, 'primary');
     send.addEventListener('click', submit);
 
     row.appendChild(input);
@@ -569,14 +622,11 @@
     });
   }
 
-  function btnCss(bg, size) {
-    return [
-      'background:' + bg, 'color:var(--con-text)', 'border:1px solid var(--con-line2)',
-      'border-radius:9px', 'cursor:pointer', 'font-size:12px',
-      'touch-action:manipulation', 'flex-shrink:0',
-      size !== 'auto' ? 'width:' + size + ';height:' + size : '',
-      'display:inline-flex', 'align-items:center', 'justify-content:center',
-    ].filter(Boolean).join(';') + ';';
+  /* Every button is a .con-btn (see injectStyle); `kind` picks the variant,
+   * `extra` is the inline layout the spot needs (margins, flex). */
+  function styleBtn(b, kind, extra) {
+    b.className = 'con-btn' + (kind ? ' con-btn--' + kind : '');
+    if (extra) b.style.cssText = extra;
   }
 
   function fitViewport() {
@@ -773,24 +823,14 @@
       /* Content-sized, not one-third of the sheet: three fixed slots wasted the
        * row on short names and forced a scroll to reach the fourth session.
        * Capped so one long name cannot take the whole bar. */
-      chip.style.cssText = [
-        'flex:0 0 auto', 'max-width:45%', 'scroll-snap-align:start',
-        'display:flex', 'align-items:center', 'gap:5px',
-        'padding:5px 8px', 'border-radius:9px', 'cursor:pointer',
-        'text-align:left', 'overflow:hidden',
-        'touch-action:manipulation',
-        'background:' + (active ? 'var(--con-active)' : 'var(--con-btn)'),
-        'border:1px solid ' + (active ? 'var(--con-active-line)' : 'var(--con-line)'),
-        'color:' + (active ? 'var(--con-text)' : 'var(--con-muted)'),
-      ].join(';');
+      chip.className = 'con-chip';
 
       var dot = document.createElement('span');
       dot.style.cssText = 'width:7px;height:7px;border-radius:50%;flex-shrink:0;' +
         'background:' + (STATE_DOT[item.state] || '#6b7280') + ';';
 
       var text = document.createElement('span');
-      text.style.cssText = "min-width:0;font-family:'JetBrains Mono',monospace;" +
-        'font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;' +
+      text.style.cssText = 'min-width:0;white-space:nowrap;overflow:hidden;' +
         'text-overflow:ellipsis;';
       text.textContent = item.branch ? item.label + ' ⎇' + item.branch : item.label;
       chip.title = item.name;
@@ -1838,7 +1878,10 @@
    * console looking frozen while it is in fact live. */
   function setFrozen(on) {
     if (el.frozen) el.frozen.style.display = on ? 'block' : 'none';
-    if (el.tail) el.tail.style.borderColor = on ? 'rgba(245,158,11,0.55)' : 'var(--con-line)';
+    /* The well has no border; the freeze shows as an amber ring in the
+     * shadow channel, on top of the well's own edge. */
+    if (el.tail) el.tail.style.boxShadow = on
+      ? 'var(--con-well-edge), inset 0 0 0 2px rgba(245,158,11,0.55)' : '';
   }
 
   function updateBar() {
