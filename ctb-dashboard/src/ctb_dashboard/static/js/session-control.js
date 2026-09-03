@@ -64,11 +64,13 @@
     },
     light: {
       scheme: 'light',
-      /* Thin monospace at 11px reads pale on paper where the same face
-       * reads fine on black -- light-on-dark bleeds and looks heavier.
-       * So the light tail goes to near-black at weight 500. */
-      sheet: '#f4f1ea', well: '#ffffff', text: '#111318', muted: '#4b5563',
-      dim: '#6b7280', line: '#d6d1c4', line2: '#bfb9ab', 'tail-weight': '500',
+      /* Monospace that reads fine on black goes pale on paper: light-on-dark
+       * bleeds and looks heavier than it is. So the light tail is ink on
+       * warm off-white -- not pure white, which glares on an OLED at full
+       * brightness outdoors -- at semibold, and the sheet around the well is
+       * a shade darker so the pane has an edge to sit in. */
+      sheet: '#ece8df', well: '#fbfaf6', text: '#0b0f14', muted: '#4b5563',
+      dim: '#6b7280', line: '#cfc9bb', line2: '#b8b1a2', 'tail-weight': '600',
       btn: '#ece8df', btn2: '#e4dfd3', active: '#dbe6ff', 'active-line': 'var(--con-active-line)',
       send: '#2563eb', stop: '#fbe1e1', copybar: '#d7f1e3',
       ok: '#047857', warn: '#b45309', err: '#dc2626', link: '#0b63a8', info: '#1d4ed8',
@@ -224,7 +226,10 @@
        * the thinnest face on the device. JetBrains Mono stays for platforms
        * whose ui-monospace is poor. */
       "font-family:ui-monospace,'SF Mono',Menlo,'JetBrains Mono',Consolas,monospace",
-      'font-size:12px', 'font-weight:var(--con-tail-weight)',
+      /* A phone is read at arm's length with a thumb on the glass; 12px on a
+       * desk is 13px there. Touch is the tell, not the width. */
+      'font-size:' + (window.matchMedia && window.matchMedia('(pointer: coarse)').matches ? '13px' : '12px'),
+      'font-weight:var(--con-tail-weight)',
       'line-height:1.5', 'white-space:pre-wrap', 'word-break:break-word',
       '-webkit-overflow-scrolling:touch',
       '-webkit-user-select:text', 'user-select:text',
