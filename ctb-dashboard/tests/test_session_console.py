@@ -42,7 +42,7 @@ def test_index_only_gains_the_trigger_not_the_logic(index_html):
     assert "/static/js/session-control.js" in index_html
     # Console implementation must not have leaked into the template. Only
     # console-specific markers -- index.html has its own unrelated timers.
-    for marker in ("/prompt", "/key", "/interrupt", "ctb-console", "visualViewport"):
+    for marker in ("/prompt", "/key", "ctb-console", "visualViewport"):
         assert marker not in index_html, f"{marker!r} belongs in the JS module"
 
 
@@ -253,8 +253,10 @@ def test_copied_text_is_cleaned(console_js):
     assert "cleanLines(state.lines.slice())" in console_js
 
 
-def test_interrupt_control_exists(console_js):
-    assert "/interrupt" in console_js
+def test_no_separate_interrupt_control(console_js):
+    """중단 sent one Escape -- the same key the esc key sends. One control."""
+    assert "/interrupt" not in console_js
+    assert "'Escape'" in console_js
 
 
 # --- card tap routing -------------------------------------------------------

@@ -33,7 +33,7 @@
                 fitted: false, fails: 0, warned: false, cols: 0,
                 pending: null, sent: null,
                 depth: TAIL_LINES, growing: false, exhausted: false,
-                drafts: {}, boxTouched: null };
+                drafts: {}, boxTouched: null, ghost: false };
   var el = {};
 
   /* --- markup ------------------------------------------------------------ */
@@ -126,7 +126,6 @@
     tab: 'M4 12h13M12 7l5 5-5 5M20 6v12',
     enter: 'M20 5v7a2 2 0 0 1-2 2H5M9 10l-4 4 4 4',
     clear: 'M3 12h4M17 12h4M12 3v4M12 17v4M8 8l8 8M16 8l-8 8',
-    stop: 'M12 3l6.4 3.7v7.4L12 21l-6.4-3.7V6.7zM9 9h6v6H9z',
     bellOff: 'M6 17h12l-1.5-2V11a4.5 4.5 0 0 0-7-3.7M6.8 8.7A4.5 4.5 0 0 0 6.5 11v4L5 17M10 20h4M4 4l16 16',
     pause: 'M8 5v14M16 5v14',
     check: 'M5 12.5l4.5 4.5L19 7',
@@ -397,7 +396,7 @@
       [icon('up'), 'Up', '위'], [icon('down'), 'Down', '아래'],
       [icon('left'), 'Left', '왼쪽'], [icon('right'), 'Right', '오른쪽'],
       [icon('backspace'), 'BSpace', '한 글자 지우기'], [icon('tab'), 'Tab', 'Tab'],
-      [icon('enter'), 'Enter', 'Enter'], ['esc', 'Escape', 'Escape'],
+      [icon('enter'), 'Enter', 'Enter'], ['esc', 'Escape', 'Escape — 진행 중인 작업 중단 · 메뉴 닫기'],
     ].forEach(function (spec) {
       var b = document.createElement('button');
       b.type = 'button';
@@ -413,7 +412,7 @@
     /* Clearing what is half-typed in the PANE -- not in the box above, whose
      * own draft is cleared by sending it. Ctrl+U is a kill-line, so it takes
      * the whole input and leaves anything already running alone; Escape-Escape
-     * rewinds the conversation and ⛔ interrupts the work, and neither of those
+     * rewinds the conversation and Escape interrupts the work, and neither of those
      * is what "I mistyped, start the line again" should cost. Ctrl+Y in the
      * session pastes it back if the finger was wrong. */
     var clearLine = document.createElement('button');
@@ -430,15 +429,6 @@
     styleBtn(clearLine, '');
     clearLine.addEventListener('click', function () { sendKey('C-u'); });
     keys.appendChild(clearLine);
-
-    var stop = document.createElement('button');
-    stop.type = 'button';
-    stop.appendChild(icon('stop', 16));
-    stop.appendChild(document.createTextNode('중단'));
-    stop.setAttribute('aria-label', '작업 중단');
-    styleBtn(stop, 'danger', 'margin-left:auto;');
-    stop.addEventListener('click', interrupt);
-    keys.appendChild(stop);
 
     var row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:8px;align-items:flex-end;flex-shrink:0;';
@@ -1938,12 +1928,21 @@
        * board's waiting colour and had nothing to do with either. */
       if (pending && i === pending.index) {
         var touched = state.boxTouched !== null && state.boxTouched === pending.text;
-        nodes[i].style.background = touched ? 'rgba(16,185,129,0.14)' : 'rgba(37,99,235,0.10)';
-        nodes[i].style.boxShadow = 'inset 3px 0 0 ' + (touched ? '#10b981' : '#3b82f6');
-        nodes[i].title = pendingHint(pending.text);
+        /* Grey, dashed edge: a ghost suggestion, not yet anyone's -- a Tab
+         * would take it. Blue: real text waiting to be sent. Green: the
+         * last key changed the box. The server reads the dim attribute the
+         * plain capture drops, so ghost and typed no longer look the same. */
+        var ghost = !touched && state.ghost;
+        nodes[i].style.background = touched ? 'rgba(16,185,129,0.14)'
+          : ghost ? 'rgba(107,114,128,0.10)' : 'rgba(37,99,235,0.10)';
+        nodes[i].style.boxShadow = touched ? 'inset 3px 0 0 #10b981'
+          : ghost ? 'inset 3px 0 0 var(--con-dim)' : 'inset 3px 0 0 #3b82f6';
+        nodes[i].style.opacity = ghost ? '0.7' : '';
+        nodes[i].title = ghost ? '제안된 입력 — Tab(⇥)으로 확정' : pendingHint(pending.text);
         continue;
       }
       nodes[i].style.background = '';
+      nodes[i].style.opacity = '';
       nodes[i].style.boxShadow = '';
       nodes[i].title = '';
     }
@@ -2115,6 +2114,7 @@
          * chosen lines out from under the user. */
         if (state.selStart !== null) return;
         state.cols = data.cols || 0;
+        state.ghost = data.ghost === true;
         var atBottom =
           el.tail.scrollTop + el.tail.clientHeight >= el.tail.scrollHeight - 24;
         /* Scrolled up into history: leave the view alone. The window is a
@@ -2381,17 +2381,6 @@
     node.classList.add('con-flash');
   }
 
-  function interrupt() {
-    if (!state.session) return;
-    setStatus('중단 신호 전송…', 'var(--con-muted)');
-    post('/interrupt')
-      .then(function (res) {
-        setStatus(res.ok ? '중단 신호 전송됨' : '중단 실패 (' + res.status + ')',
-                  res.ok ? 'var(--con-ok)' : 'var(--con-err)');
-        pollTail();
-      })
-      .catch(function () { setStatus('네트워크 오류', 'var(--con-err)'); });
-  }
 
   /* --- drafts ------------------------------------------------------------ */
 

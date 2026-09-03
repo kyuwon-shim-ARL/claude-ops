@@ -953,6 +953,49 @@ _PANE_COLS_TTL = 10.0
 _PANE_COLS: dict[str, tuple[int, float]] = {}
 
 
+_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
+_DIM_RE = re.compile(r"\x1b\[(?:[0-9;]*;)?2(?:;[0-9;]*)?m")
+_BOX_RE = re.compile(r"^[\s\u00a0]*\u276f[\s\u00a0]*(.*)$")
+
+
+def box_is_ghost(raw_lines: list[str]) -> bool | None:
+    """Whether the text in Claude Code's input box is a ghost suggestion.
+
+    Claude Code draws a suggested prompt in the box as dim text (SGR 2); a
+    Tab makes it real, and typed text is never dim. Plain capture-pane drops
+    the attribute, so the two look identical to the client -- this reads the
+    escape-coded capture and answers for the last box line. None when there
+    is no box with text in it.
+    """
+    for raw in reversed(raw_lines):
+        plain = _SGR_RE.sub("", raw)
+        m = _BOX_RE.match(plain)
+        if not m:
+            continue
+        text = m.group(1).rstrip()
+        if not text:
+            return None
+        # Dim opened before the first character of the text, and not reset
+        # in between: the escapes after the ❯ and before that character.
+        head = raw[: raw.index(text[0], raw.index("\u276f"))]
+        after_prompt = head[head.index("\u276f"):]
+        return bool(_DIM_RE.search(after_prompt))
+    return None
+
+
+def _box_ghost(name: str) -> bool | None:
+    try:
+        r = subprocess.run(
+            ["tmux", "capture-pane", "-t", name, "-p", "-e", "-S-15"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+    if r.returncode != 0:
+        return None
+    return box_is_ghost(r.stdout.split("\n"))
+
+
 def _pane_cols(name: str) -> int:
     """The pane's width, so the console can tell a wrapped line from a whole one.
 
@@ -1008,7 +1051,11 @@ async def get_session_log(name: str, lines: int = 50, fit: int = 0):
         )
         if result.returncode != 0:
             raise HTTPException(status_code=404, detail="Session not found")
-        return {"session": name, "log": result.stdout, "cols": _pane_cols(name)}
+        return {
+            "session": name, "log": result.stdout, "cols": _pane_cols(name),
+            # Ghost or typed: the client cannot tell from the plain capture.
+            "ghost": _box_ghost(name),
+        }
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="tmux timeout")
 
