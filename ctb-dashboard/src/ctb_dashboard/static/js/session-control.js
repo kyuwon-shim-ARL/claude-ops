@@ -214,6 +214,18 @@
       'box-shadow:0 1px 2px rgba(16,24,40,0.10)}',
       '#ctb-console .con-rail{background:var(--con-tray);border-radius:14px;padding:4px}',
       '#ctb-console .con-tray{background:var(--con-tray);border-radius:16px;padding:8px}',
+      /* A phone screen is short, and the pane is what it is for. On narrow
+       * screens the keys shrink to the size of the system keyboard's own
+       * (38px) and pack nine to a row, so the pad is two rows -- about half
+       * the height of the desktop layout -- and the pane keeps the rest. */
+      '@media(max-width:480px){',
+      '#ctb-console .con-tray{padding:6px;gap:5px!important;border-radius:14px}',
+      "#ctb-console .con-btn--key{min-width:36px;min-height:38px;padding:0 9px;font-size:13px;border-radius:10px}",
+      '#ctb-console .con-tray .con-btn{min-height:38px;border-radius:10px}',
+      '#ctb-console .con-tray .con-btn svg{width:16px;height:16px}',
+      /* Icon only on a phone: with the word it was a third row by itself. */
+      '#ctb-console .con-key-label{display:none}',
+      '}',
       /* A key that changed the input box: the box line pulses once so the
        * eye lands on what the key did, not only on the status text. */
       '@keyframes con-flash{0%{background:rgba(16,185,129,0.35)}100%{background:transparent}}',
@@ -445,7 +457,10 @@
     var clearLine = document.createElement('button');
     clearLine.type = 'button';
     clearLine.appendChild(icon('clear', 16));
-    clearLine.appendChild(document.createTextNode('입력 지우기'));
+    var clearLabel = document.createElement('span');
+    clearLabel.className = 'con-key-label';
+    clearLabel.textContent = '입력 지우기';
+    clearLine.appendChild(clearLabel);
     /* Names the key, not an outcome: Ctrl+U clears the input line in Claude
      * Code and in a readline shell, which is every pane this pad is aimed
      * at, but a pane running vim or less does its own thing with it. What
