@@ -33,7 +33,8 @@
                 fitted: false, fails: 0, warned: false, cols: 0,
                 pending: null, sent: null,
                 depth: TAIL_LINES, growing: false, exhausted: false,
-                drafts: {}, boxTouched: null, ghost: false, hash: '', cache: {} };
+                drafts: {}, boxTouched: null, ghost: false, hash: '', cache: {},
+                pinned: true };
   var el = {};
 
   /* --- markup ------------------------------------------------------------ */
@@ -311,7 +312,12 @@
     var status = document.createElement('div');
     status.setAttribute('role', 'status');
     status.setAttribute('aria-live', 'polite');
-    status.style.cssText = 'display:none;align-items:center;gap:6px;min-height:22px;' +
+    /* Always laid out, shown or not: when this line appeared it took its
+     * height from the pane above, the pane's scrollTop stayed put, and the
+     * poll's "is the reader at the bottom" check said no from then on -- the
+     * console froze on the first status message. Reserving the space keeps
+     * the pane's geometry constant. */
+    status.style.cssText = 'display:flex;visibility:hidden;align-items:center;gap:6px;min-height:22px;' +
       'margin:-4px 2px 8px;font-size:12px;font-weight:600;color:var(--con-muted);flex-shrink:0;';
 
     /* The palette had one entrance and it was a chord. On a phone there is no
@@ -627,6 +633,10 @@
       var goingUp = top < lastTop;
       lastTop = top;
       noteScrolling();
+      /* Pinned to the bottom is a reader's intent, recorded when they scroll,
+       * not a geometry the poll re-measures: the keyboard, a status line or
+       * a rotation can move the numbers without the reader moving at all. */
+      state.pinned = top + tail.clientHeight >= tail.scrollHeight - 48;
       if (!goingUp || top > tail.clientHeight) return;
       /* Opening a session empties the tail to show '불러오는 중…', which drops
        * scrollTop to 0 and fires this -- a scroll the user never made, which
@@ -1471,11 +1481,11 @@
   function setStatus(text, color) {
     if (!el.status) return;
     el.status.textContent = '';
-    if (!text) { el.status.style.display = 'none'; return; }
+    if (!text) { el.status.style.visibility = 'hidden'; return; }
     var name = STATUS_ICON[color] || 'dot';
     el.status.appendChild(icon(name, 15));
     el.status.appendChild(document.createTextNode(text));
-    el.status.style.display = 'flex';
+    el.status.style.visibility = 'visible';
     el.status.style.color = color || 'var(--con-muted)';
   /* Ctrl+U — the kill-line every terminal has, and the same key the ⌧ 입력
    * 지우기 button sends. The browser spends it on view-source, which is never
@@ -2145,8 +2155,12 @@
         if (state.selStart !== null) return;
         state.cols = data.cols || 0;
         state.ghost = data.ghost === true;
-        var atBottom =
-          el.tail.scrollTop + el.tail.clientHeight >= el.tail.scrollHeight - 24;
+        /* Within two lines of the bottom counts as at the bottom: the
+         * keyboard, a status line, a rotated phone all move the geometry by
+         * a little, and a reader who never scrolled up must not be unpinned
+         * by any of them. */
+        var atBottom = state.pinned
+          || el.tail.scrollTop + el.tail.clientHeight >= el.tail.scrollHeight - 48;
         /* Scrolled up into history: leave the view alone. The window is a
          * fixed number of lines off the end of the pane, so a repaint with
          * fresh output shifts everything above the bottom, and a repaint
@@ -2161,6 +2175,7 @@
         var fromBottom = el.tail.scrollHeight - el.tail.scrollTop;
         renderTail(data.log || '');
         el.tail.scrollTop = atBottom ? el.tail.scrollHeight : el.tail.scrollHeight - fromBottom;
+        if (atBottom) state.pinned = true;
         rememberTail(name, data);
       })
       .catch(function () {
@@ -2527,6 +2542,7 @@
     state.growing = false;
     state.exhausted = false;
     state.hash = '';
+    state.pinned = true;
     if (el.bar) el.bar.style.display = 'none';
     setFrozen(false);
     el.title.textContent = name.replace(/^claude[_-]/, '');
