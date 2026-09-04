@@ -77,7 +77,8 @@ def test_single_poll_timer(console_js):
     """
     callbacks = re.findall(r"setInterval\(\s*([A-Za-z_$][\w$]*)", console_js)
     assert callbacks.count("pollTail") == 1
-    assert set(callbacks) <= {"pollTail", "paintHints"}, callbacks
+    # paintClock: the recording bar's clock, DOM only, alive only while recording.
+    assert set(callbacks) <= {"pollTail", "paintHints", "paintClock"}, callbacks
 
 
 def test_polling_targets_only_the_open_session(console_js):
@@ -230,9 +231,12 @@ def test_selection_uses_click_not_touchstart(console_js):
     # (passive, no selection): a touch must never pick a line.
     import re
     regs = re.findall(r"addEventListener\('touchstart',([^\n]*)", console_js)
-    assert len(regs) == 1, regs
-    assert "touchLease()" in regs[0] and "passive: true" in regs[0]
-    assert "onLineTap" not in regs[0]
+    # Two: the tail's scroll flag, and the mic key's claim on the touch (so the
+    # textarea keeps focus). Neither selects anything.
+    assert len(regs) == 2, regs
+    tail_reg = [r for r in regs if "touchLease()" in r]
+    assert len(tail_reg) == 1 and "passive: true" in tail_reg[0]
+    assert all("onLineTap" not in r for r in regs)
 
 
 def test_tail_refresh_is_frozen_while_selecting(console_js):

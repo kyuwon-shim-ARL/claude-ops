@@ -59,3 +59,21 @@ def test_hold_and_tap_toggle_both_exist():
 def test_mutation_guard_no_autosend_flag():
     """No 'auto send' knob exists anywhere: the design is Enter-only."""
     assert "autoSend" not in CONSOLE_JS.read_text()
+
+
+def test_mic_press_keeps_the_keyboard_up():
+    """A button press blurs the textarea on iOS and folds the keyboard, which
+    threw the sheet around on every recording. The touch is claimed."""
+    block = _stt_block()
+    assert "addEventListener('touchstart', function (e) { e.preventDefault(); }, { passive: false })" in block
+    assert "setPointerCapture" in block and "'pointerleave'" not in block
+
+
+def test_recording_state_is_shown_over_the_input_row_with_a_clock():
+    js = CONSOLE_JS.read_text()
+    assert "con-recbar" in js
+    block = _stt_block()
+    assert "recBarShow('recording'" in block and "recBarShow('transcribing'" in block
+    assert "recBarHide()" in block
+    # every exit path from a recording hides the bar: finish (ok/err/network), abort, too-short
+    assert block.count("recBarHide()") >= 5

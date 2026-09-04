@@ -231,6 +231,18 @@
       '@keyframes con-listen{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0.45)}50%{box-shadow:0 0 0 6px rgba(239,68,68,0)}}',
       '#ctb-console .con-mic[data-listening]{background:#ef4444!important;color:#fff!important;animation:con-listen 1.2s ease-out infinite}',
       '@media(prefers-reduced-motion:reduce){#ctb-console .con-mic[data-listening]{animation:none}}',
+      '#ctb-console .con-recbar{position:absolute;left:0;right:0;top:0;bottom:0;z-index:3;',
+      'display:flex;align-items:center;justify-content:center;gap:10px;border-radius:14px;',
+      'font:700 15px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.01em;pointer-events:none;',
+      'color:#fff;background:rgba(239,68,68,0.94);box-shadow:0 0 0 2px rgba(239,68,68,0.35)}',
+      '#ctb-console .con-recbar[data-phase="transcribing"]{background:rgba(245,158,11,0.94);box-shadow:0 0 0 2px rgba(245,158,11,0.35)}',
+      '#ctb-console .con-recbar b{font-family:\'JetBrains Mono\',monospace;font-weight:700;min-width:3.2em;text-align:left}',
+      '#ctb-console .con-recbar i{width:10px;height:10px;border-radius:50%;background:#fff;animation:con-blink 1s steps(2,start) infinite}',
+      '@keyframes con-blink{to{visibility:hidden}}',
+      '@media(prefers-reduced-motion:reduce){#ctb-console .con-recbar i{animation:none}}',
+      /* The mic and send keys stay clickable through the bar: it covers only the box. */
+      '#ctb-console .con-recbar{right:96px}',
+      '@media(max-width:480px){#ctb-console .con-recbar{right:88px}}',
       '#ctb-console .con-tray{background:var(--con-tray);border-radius:16px;padding:8px}',
       /* A phone screen is short, and the pane is what it is for. On narrow
        * screens the keys shrink to the size of the system keyboard's own
@@ -243,6 +255,8 @@
       '#ctb-console .con-tray .con-btn svg{width:16px;height:16px}',
       /* Icon only on a phone: with the word it was a third row by itself. */
       '#ctb-console .con-key-label{display:none}',
+      /* The input row: two 40px keys, the rest is the box. */
+      '#ctb-console .con-mic,#ctb-console .con-send{min-width:40px!important;width:40px;padding:0!important;justify-content:center}',
       '}',
       /* A key that changed the input box: the box line pulses once so the
        * eye lands on what the key did, not only on the status text. */
@@ -589,9 +603,21 @@
 
     var send = document.createElement('button');
     send.type = 'button';
-    send.textContent = '전송';
+    /* The word on a desktop, the arrow alone on a phone: with the mic beside
+     * it the row was three controls wide and the box had shrunk to a slot.
+     * Both keys are 40px on a phone, so the box keeps most of its width. */
+    send.className = 'con-send';
+    send.appendChild(icon('enter', 16));
+    var sendLabel = document.createElement('span');
+    sendLabel.className = 'con-key-label';
+    sendLabel.textContent = '전송';
+    send.appendChild(sendLabel);
     send.setAttribute('aria-label', '프롬프트 전송');
+    send.title = '전송 (Enter)';
     styleBtn(send, 'primary');
+    send.style.display = 'inline-flex';
+    send.style.alignItems = 'center';
+    send.style.gap = '6px';
     send.addEventListener('click', submit);
 
     /* Push-to-talk. Hidden until /api/stt/config says there is a key, and
@@ -612,6 +638,17 @@
     row.appendChild(input);
     row.appendChild(mic);
     row.appendChild(send);
+
+    /* The recording state, where the eye is: a red bar over the input row
+     * with a running clock, not a line of small text elsewhere. Amber while
+     * the clip is being transcribed. */
+    row.style.position = 'relative';
+    var recBar = document.createElement('div');
+    recBar.className = 'con-recbar';
+    recBar.setAttribute('role', 'status');
+    recBar.setAttribute('aria-live', 'polite');
+    recBar.style.display = 'none';
+    row.appendChild(recBar);
 
     /* The pause a selection causes was invisible: the tail simply stopped
      * growing, which reads as a dead console rather than a held one. The badge
@@ -648,7 +685,7 @@
     keepCaret(root, input);
     document.body.appendChild(root);
 
-    el = { root: root, strip: strip, title: title, status: status, tail: tail, mic: mic,
+    el = { root: root, strip: strip, title: title, status: status, tail: tail, mic: mic, recBar: recBar,
            frozen: frozen, bar: bar, barLabel: barLabel, input: input,
            send: send, silent: silent };
 
@@ -2394,6 +2431,35 @@
   var stt = { rec: null, stream: null, chunks: [], startedAt: 0, holding: false,
               enabled: false, busy: false };
 
+  var recTick = null;
+  function recBarShow(phase, text) {
+    var bar = el.recBar;
+    if (!bar) return;
+    bar.textContent = '';
+    bar.setAttribute('data-phase', phase);
+    if (phase === 'recording') {
+      var blink = document.createElement('i');
+      var clock = document.createElement('b');
+      clock.textContent = '0:00';
+      bar.appendChild(blink);
+      bar.appendChild(clock);
+      bar.appendChild(document.createTextNode(text));
+      if (recTick) clearInterval(recTick);
+      var paintClock = function () {
+        var sec = Math.floor((Date.now() - stt.startedAt) / 1000);
+        clock.textContent = Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+      };
+      recTick = setInterval(paintClock, 250);
+    } else {
+      bar.appendChild(document.createTextNode(text));
+    }
+    bar.style.display = 'flex';
+  }
+  function recBarHide() {
+    if (recTick) { clearInterval(recTick); recTick = null; }
+    if (el.recBar) el.recBar.style.display = 'none';
+  }
+
   function sttAvailable() {
     return stt.enabled && !IS_VSCODE && !!(navigator.mediaDevices
       && navigator.mediaDevices.getUserMedia) && typeof MediaRecorder !== 'undefined';
@@ -2431,7 +2497,9 @@
       rec.addEventListener('stop', sttFinish);
       rec.start();
       if (el.mic) el.mic.setAttribute('data-listening', '');
-      setStatus('듣는 중… 손을 떼면 전사', 'var(--con-err)');
+      recBarShow('recording', stt.holding ? '녹음 중 · 손을 떼면 전사' : '녹음 중 · 탭하면 정지');
+      if (navigator.vibrate) { try { navigator.vibrate(15); } catch (e) { /* no haptics */ } }
+      setStatus('듣는 중…', 'var(--con-err)');
     }).catch(function (err) {
       stt.busy = false;
       var denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
@@ -2452,6 +2520,7 @@
     var rec = stt.rec;
     if (!rec) return;
     if (el.mic) el.mic.removeAttribute('data-listening');
+    recBarHide();
     stt.holding = false;
     rec.removeEventListener('stop', sttFinish);
     if (rec.state !== 'inactive') { try { rec.stop(); } catch (e) { /* already */ } }
@@ -2472,7 +2541,8 @@
     var forSession = state.session;
     sttRelease();
     /* A brush of the key, or a clip too short to hold a word. */
-    if (held < 400 || blob.size < 1200) { setStatus('', ''); return; }
+    if (held < 400 || blob.size < 1200) { recBarHide(); setStatus('', ''); return; }
+    recBarShow('transcribing', '전사 중…');
     setStatus('전사 중…', 'var(--con-muted)');
     window.ctbControl.send('/api/stt?session=' + encodeURIComponent(forSession), {
       method: 'POST', body: blob, headers: { 'Content-Type': mime },
@@ -2481,6 +2551,7 @@
         return { status: res.status, body: body };
       });
     }).then(function (r) {
+      recBarHide();
       if (state.session !== forSession) return;   /* switched away meanwhile */
       if (r.status !== 200) {
         setStatus('전사 실패 (' + r.status + ')' + (r.body.detail ? ' · ' + String(r.body.detail).slice(0, 80) : ''), 'var(--con-err)');
@@ -2491,6 +2562,7 @@
       sttDraft(text);
       setStatus('초안 삽입됨 · 확인 후 Enter', 'var(--con-ok)');
     }).catch(function () {
+      recBarHide();
       if (state.session === forSession) setStatus('전사 실패 · 네트워크', 'var(--con-err)');
     });
   }
@@ -2525,18 +2597,31 @@
       pressedAt = Date.now();
       if (stt.rec) { sttStop(); pressedAt = 0; return; }   /* tap-toggle: second tap stops */
       stt.holding = true;
+      /* The release must reach us even if the thumb drifts off the key while
+       * talking; capture makes pointerup ours wherever it lands. */
+      if (btn.setPointerCapture && e.pointerId != null) {
+        try { btn.setPointerCapture(e.pointerId); } catch (err) { /* mouse without capture */ }
+      }
       sttStart();
     });
+    /* Keep the caret -- and the soft keyboard -- in the box. A button press
+     * blurs the textarea on iOS unless the touch is claimed here, and the
+     * keyboard folding away made the whole sheet jump on every recording. */
+    btn.addEventListener('touchstart', function (e) { e.preventDefault(); }, { passive: false });
+    btn.addEventListener('mousedown', function (e) { e.preventDefault(); });
     var up = function () {
       if (!stt.holding) return;
       stt.holding = false;
       /* A short press is a toggle: leave it recording until the next tap. */
-      if (Date.now() - pressedAt < 350) { setStatus('녹음 중 · 탭하면 정지', 'var(--con-err)'); return; }
+      if (Date.now() - pressedAt < 350) {
+        if (stt.rec) recBarShow('recording', '녹음 중 · 탭하면 정지');
+        setStatus('녹음 중 · 탭하면 정지', 'var(--con-err)');
+        return;
+      }
       sttStop();
     };
     btn.addEventListener('pointerup', up);
     btn.addEventListener('pointercancel', up);
-    btn.addEventListener('pointerleave', function () { if (stt.holding) up(); });
     btn.addEventListener('contextmenu', function (e) { e.preventDefault(); });
   }
 
