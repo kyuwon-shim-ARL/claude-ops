@@ -1184,6 +1184,7 @@
   });
 
   /* Ctrl/Cmd+` walks UP the rail one session at a time, from wherever the open one sits, wrapping at the top.
+   * Ctrl/Cmd+Shift+` does the same over the 긴급+중요 (Q1) sessions only.
    *
    * The digits are for jumping to a session you can see; this is for working
    * through them. The board sorts what needs attention to the top, so starting
@@ -1196,8 +1197,29 @@
    * deliberately does NOT release it: holding the accelerator and pressing `
    * repeatedly walks one list, instead of re-deriving the numbering from a
    * board that re-sorts under every step. */
-  function stepDownSession() {
+  function stepDownSession(urgentOnly) {
     var list = hintOrder || sessionOrder();
+    /* With Shift held the walk visits only the 긴급+중요 (Q1) sessions, in
+     * rail order: the ones worth taking first, without stepping over the
+     * rest by hand. From a session that is not Q1 it goes to the nearest Q1
+     * above it. */
+    if (urgentOnly) {
+      var quadOf = window.ctbQuadOf || {};
+      var here0 = -1;
+      for (var k = 0; k < list.length; k++) {
+        if (list[k].name === state.session) { here0 = k; break; }
+      }
+      var q1 = list.filter(function (it, idx) {
+        return quadOf[it.name] === 'Q1' && idx !== here0;
+      });
+      if (!q1.length) return null;
+      if (here0 === -1) return q1[q1.length - 1];
+      var above = null;
+      for (var j = 0; j < list.length && j < here0; j++) {
+        if (quadOf[list[j].name] === 'Q1') above = list[j];
+      }
+      return above || q1[q1.length - 1];
+    }
     var n = list.length;
     if (!n) return null;
     var here = -1;
@@ -1213,14 +1235,15 @@
   }
 
   document.addEventListener('keydown', function (e) {
-    if (searchOpen() || e.shiftKey) return;
+    if (searchOpen()) return;
     /* `code` as well as `key`: a layout where the key is not backquote still
      * reports Backquote for the physical key, and a dead-key layout may give
-     * no `key` at all. */
-    if (e.key !== '`' && e.code !== 'Backquote') return;
+     * no `key` at all. Shifted, a US layout reports '~'. */
+    if (e.key !== '`' && e.key !== '~' && e.code !== 'Backquote') return;
     if (!accelHeld(e)) return;
     e.preventDefault();
-    var item = stepDownSession();
+    /* Ctrl/Cmd+Shift+` walks the 긴급+중요 sessions only. */
+    var item = stepDownSession(e.shiftKey);
     if (!item || (hintOrder && !inCatalog(item.name))) return;
     if (item.name === state.session) return;
     /* Closed console in the VSCode webview: the same rule the digits follow --

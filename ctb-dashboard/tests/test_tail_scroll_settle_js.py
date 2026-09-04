@@ -158,6 +158,47 @@ def test_step_with_nothing_open_starts_at_the_end_of_the_rail():
     assert _step(order, None) == "s12"
 
 
+# --- Ctrl+Shift+` walks only the 긴급+중요 (Q1) sessions ------------------------
+
+def _step_q1(order, quad_of, current):
+    body = (
+        f"window.ctbSessionOrder = {json.dumps([{'name': n, 'label': n, 'state': 'idle'} for n in order])};"
+        f"window.ctbQuadOf = {json.dumps(quad_of)};"
+        f"c._state.session = {json.dumps(current)};"
+        "const it = c._stepDownSession(true); mark(it ? it.name : null);"
+    )
+    return _run(body, wait_ms=50)[0][0]
+
+
+_Q = {"s2": "Q1", "s5": "Q1", "s7": "Q2", "s9": "Q1"}
+_ORDER = [f"s{i}" for i in range(1, 13)]
+
+
+def test_q1_step_skips_everything_that_is_not_q1():
+    assert _step_q1(_ORDER, _Q, "s9") == "s5"
+
+
+def test_q1_step_from_a_non_q1_session_goes_to_the_nearest_q1_above():
+    assert _step_q1(_ORDER, _Q, "s7") == "s5"
+
+
+def test_q1_step_wraps_from_the_first_q1_to_the_last():
+    assert _step_q1(_ORDER, _Q, "s2") == "s9"
+
+
+def test_q1_step_with_nothing_open_starts_at_the_last_q1():
+    assert _step_q1(_ORDER, _Q, None) == "s9"
+
+
+def test_q1_step_with_no_q1_sessions_goes_nowhere():
+    assert _step_q1(_ORDER, {"s7": "Q2"}, "s7") is None
+
+
+def test_shift_backquote_is_routed_to_the_q1_walk():
+    js = CONSOLE_JS.read_text()
+    assert "stepDownSession(e.shiftKey)" in js
+
+
 def test_a_finger_whose_touchend_never_arrives_releases_on_its_own():
     """touchend is lost when the touched line was replaced by a poll; the
     lease must lapse by itself so polling does not stay skipped forever."""
