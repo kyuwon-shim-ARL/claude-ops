@@ -537,3 +537,15 @@ def test_the_last_pin_in_flight_decides_the_repaint(index_html):
     assert fn.index("_writePins") < fn.index("const last = "), (
         "'am I the last one?' must be asked after the write, not before"
     )
+
+
+def test_pending_input_is_painted_on_its_text_not_the_whole_row(console_js):
+    """The marking used to be a full-width bar on the ❯ line only. Now every
+    line of the box carries a text span, and the wash goes on the span."""
+    paint = console_js[console_js.index("function paintSelection()"):console_js.index("function onLineTap")]
+    assert "i >= pending.index && i <= pending.end" in paint
+    assert "span.style.background = wash" in paint
+    # the row itself gets no wash on the pending path, only the thin edge
+    pend = paint[paint.index("if (pending && i >= pending.index"):paint.index("continue;", paint.index("if (pending && i >= pending.index"))]
+    assert "nodes[i].style.background = ''" in pend
+    assert "data-pending-text" in console_js

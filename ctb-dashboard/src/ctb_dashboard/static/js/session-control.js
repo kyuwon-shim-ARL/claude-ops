@@ -2055,7 +2055,9 @@
    * distinction is the whole test, and it is what keeps "❯ No, exit" on a
    * trust prompt from being painted as unsent input.
    *
-   * -> {index, text} for the pending input, or null. Pure; tested. */
+   * A box can hold several lines: the ❯ line, then continuation lines
+   * indented under it, down to the rule below. All of them are the input,
+   * so all of them are marked. -> {index, end, text} or null. Pure; tested. */
   var PROMPT_RE = /^[\s\u00a0]*\u276f[\s\u00a0]*(.*)$/;
   var RULE_RE = /^[\s\u00a0]*[\u2500-\u257f]{10,}[\s\u00a0]*$/;
 
@@ -2070,7 +2072,18 @@
       if (!text) return null;          /* an empty box is not pending input */
       /* The rule above, skipping nothing -- the box is drawn tight. */
       if (i === 0 || !RULE_RE.test(lines[i - 1])) return null;
-      return { index: i, text: text };
+      /* Continuation lines run to the rule below. Without one in reach the
+       * box is cut off at the bottom of the capture: mark the ❯ line only. */
+      var end = i;
+      var parts = [text];
+      for (var j = i + 1; j < lines.length && j <= i + 12; j++) {
+        if (RULE_RE.test(lines[j])) {
+          end = j - 1;
+          for (var k = i + 1; k <= end; k++) parts.push(lines[k].replace(/^[\s\u00a0]+|[\s\u00a0]+$/g, ''));
+          break;
+        }
+      }
+      return { index: i, end: end, text: parts.join('\n') };
     }
     return null;
   }
@@ -2082,17 +2095,28 @@
     el.tail.textContent = '';
     var frag = document.createDocumentFragment();
     var segments = linkifyLines(lines, state.cols);
+    var pend = state.pending;
     lines.forEach(function (line, i) {
       var div = document.createElement('div');
       div.setAttribute('data-line', String(i));
       div.style.cssText = 'padding:1px 3px;border-radius:3px;min-height:1.45em;';
+      /* Input-box lines carry their text in a span, so the marking can sit on
+       * the words alone rather than a full-width bar. */
+      var host = div;
+      if (pend && i >= pend.index && i <= pend.end) {
+        host = document.createElement('span');
+        host.setAttribute('data-pending-text', '');
+        host.style.cssText = 'border-radius:3px;padding:0 2px;margin:0 -2px;' +
+          '-webkit-box-decoration-break:clone;box-decoration-break:clone;';
+        div.appendChild(host);
+      }
       var parts = segments[i];
       if (parts.length === 1 && !parts[0].url) {
-        div.textContent = line;
+        host.textContent = line;
       } else {
         parts.forEach(function (part) {
           if (!part.url) {
-            div.appendChild(document.createTextNode(part.text));
+            host.appendChild(document.createTextNode(part.text));
             return;
           }
           var a = document.createElement('a');
@@ -2104,7 +2128,7 @@
           a.style.cssText =
             'color:var(--con-link);text-decoration:underline;text-underline-offset:2px;' +
             'cursor:pointer;word-break:break-all;';
-          div.appendChild(a);
+          host.appendChild(a);
         });
       }
       frag.appendChild(div);
@@ -2154,15 +2178,20 @@
        * held until the box changes again -- so before and after a key look
        * different, not just "something is there" both times. Amber is the
        * board's waiting colour and had nothing to do with either. */
-      if (pending && i === pending.index) {
+      if (pending && i >= pending.index && i <= pending.end) {
         var touched = state.boxTouched !== null && state.boxTouched === pending.text;
         /* Grey, dashed edge: a ghost suggestion, not yet anyone's -- a Tab
          * would take it. Blue: real text waiting to be sent. Green: the
          * last key changed the box. The server reads the dim attribute the
-         * plain capture drops, so ghost and typed no longer look the same. */
+         * plain capture drops, so ghost and typed no longer look the same.
+         * The colour goes on the text span, every line of the box; the row
+         * keeps only the thin edge. */
         var ghost = !touched && state.ghost;
-        nodes[i].style.background = touched ? 'rgba(16,185,129,0.14)'
-          : ghost ? 'rgba(107,114,128,0.10)' : 'rgba(37,99,235,0.10)';
+        var span = nodes[i].querySelector('[data-pending-text]');
+        var wash = touched ? 'rgba(16,185,129,0.18)'
+          : ghost ? 'rgba(107,114,128,0.14)' : 'rgba(37,99,235,0.14)';
+        if (span) span.style.background = wash;
+        nodes[i].style.background = '';
         nodes[i].style.boxShadow = touched ? 'inset 3px 0 0 var(--con-ok)'
           : ghost ? 'inset 3px 0 0 var(--con-dim)' : 'inset 3px 0 0 var(--con-accent)';
         nodes[i].style.opacity = ghost ? '0.7' : '';
@@ -2834,11 +2863,13 @@
 
   function flashPending() {
     if (!el.tail || !state.pending) return;
-    var node = el.tail.children[state.pending.index];
-    if (!node) return;
-    node.classList.remove('con-flash');
-    void node.offsetWidth;   /* restart the animation if it is still running */
-    node.classList.add('con-flash');
+    for (var i = state.pending.index; i <= state.pending.end; i++) {
+      var node = el.tail.children[i];
+      if (!node) continue;
+      node.classList.remove('con-flash');
+      void node.offsetWidth;   /* restart the animation if it is still running */
+      node.classList.add('con-flash');
+    }
   }
 
 

@@ -466,7 +466,7 @@ def pending(lines):
 
 def test_text_waiting_in_the_input_box_is_found():
     lines = ["● done", RULE, "❯ /exit", RULE, "  branch:main"]
-    assert pending(lines) == {"index": 2, "text": "/exit"}
+    assert pending(lines) == {"index": 2, "end": 2, "text": "/exit"}
 
 
 def test_an_empty_input_box_is_not_pending_input():
@@ -493,11 +493,22 @@ def test_a_menu_cursor_is_not_pending_input():
 
 def test_the_last_box_wins_when_the_scrollback_holds_older_ones():
     lines = [RULE, "❯ old command", RULE, "● ran it", RULE, "❯ new command", RULE]
-    assert pending(lines) == {"index": 5, "text": "new command"}
+    assert pending(lines) == {"index": 5, "end": 5, "text": "new command"}
 
 
 def test_trailing_padding_is_not_content():
-    assert pending([RULE, "❯ hi\u00a0   ", RULE]) == {"index": 1, "text": "hi"}
+    assert pending([RULE, "❯ hi\u00a0   ", RULE]) == {"index": 1, "end": 1, "text": "hi"}
+
+
+def test_a_multi_line_box_is_marked_to_its_last_line():
+    """A pasted or Shift+Enter prompt spans lines; every one is the input."""
+    lines = [RULE, "❯ first line", "  second line", "  third\u00a0", RULE, "  branch:main"]
+    assert pending(lines) == {"index": 1, "end": 3, "text": "first line\nsecond line\nthird"}
+
+
+def test_a_box_cut_off_at_the_bottom_marks_only_the_prompt_line():
+    lines = [RULE, "❯ first", "  more", "  and more"]
+    assert pending(lines) == {"index": 1, "end": 1, "text": "first"}
 
 
 def test_a_prompt_with_no_rule_above_it_is_left_alone():
