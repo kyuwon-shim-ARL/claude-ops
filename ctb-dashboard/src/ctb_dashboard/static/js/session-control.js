@@ -153,6 +153,7 @@
     check: 'M5 12.5l4.5 4.5L19 7',
     alert: 'M12 4l9 16H3zM12 10v4M12 17.5v.5',
     dot: 'M12 12m-2.5 0a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0',
+    mic: 'M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM6 11a6 6 0 0 0 12 0M12 17v4M9 21h6',
   };
   function icon(name, size) {
     var svgNS = 'http://www.w3.org/2000/svg';
@@ -225,6 +226,11 @@
       '#ctb-console .con-chip[aria-current="true"][data-quad="Q3"]{background:var(--con-btn);box-shadow:inset 0 0 0 1.5px rgba(96,165,250,0.5),0 1px 2px rgba(16,24,40,0.10)}',
       '#ctb-console .con-chip[aria-current="true"][data-quad="Q4"]{background:var(--con-btn);box-shadow:inset 0 0 0 1.5px rgba(139,133,160,0.45),0 1px 2px rgba(16,24,40,0.10)}',
       '#ctb-console .con-rail{background:var(--con-tray);border-radius:14px;padding:4px}',
+      /* The mic while it listens: a red key, pulsing, so a held finger can
+       * see the recording is on without reading the status line. */
+      '@keyframes con-listen{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0.45)}50%{box-shadow:0 0 0 6px rgba(239,68,68,0)}}',
+      '#ctb-console .con-mic[data-listening]{background:#ef4444!important;color:#fff!important;animation:con-listen 1.2s ease-out infinite}',
+      '@media(prefers-reduced-motion:reduce){#ctb-console .con-mic[data-listening]{animation:none}}',
       '#ctb-console .con-tray{background:var(--con-tray);border-radius:16px;padding:8px}',
       /* A phone screen is short, and the pane is what it is for. On narrow
        * screens the keys shrink to the size of the system keyboard's own
@@ -588,7 +594,23 @@
     styleBtn(send, 'primary');
     send.addEventListener('click', submit);
 
+    /* Push-to-talk. Hidden until /api/stt/config says there is a key, and
+     * never in the VSCode webview, whose proxy forwards only GET. What comes
+     * back is put into the box as a draft; Enter is still the user's. */
+    var mic = document.createElement('button');
+    mic.type = 'button';
+    mic.className = 'con-mic';
+    mic.appendChild(icon('mic', 18));
+    mic.title = '누르고 말하기 · 짧게 탭하면 녹음 시작/정지 · 결과는 입력창에 초안으로만';
+    mic.setAttribute('aria-label', '음성 입력');
+    styleBtn(mic, '');
+    mic.style.display = 'none';
+    mic.style.minWidth = '44px';
+    mic.style.touchAction = 'manipulation';
+    bindMic(mic);
+
     row.appendChild(input);
+    row.appendChild(mic);
     row.appendChild(send);
 
     /* The pause a selection causes was invisible: the tail simply stopped
@@ -616,6 +638,7 @@
     tailWrap.appendChild(frozen);
 
     root.appendChild(strip);
+    sttInit();
     root.appendChild(header);
     root.appendChild(tailWrap);
     root.appendChild(bar);
@@ -625,7 +648,7 @@
     keepCaret(root, input);
     document.body.appendChild(root);
 
-    el = { root: root, strip: strip, title: title, status: status, tail: tail,
+    el = { root: root, strip: strip, title: title, status: status, tail: tail, mic: mic,
            frozen: frozen, bar: bar, barLabel: barLabel, input: input,
            send: send, silent: silent };
 
@@ -2361,6 +2384,162 @@
     state.timer = null;
   }
 
+  /* --- speech to text ---------------------------------------------------- */
+
+  /* Hold the key and talk; let go and the clip goes to /api/stt. A short tap
+   * (under 350ms) starts a recording that the next tap stops -- a long
+   * sentence with the finger off the glass. Either way the words land in the
+   * input box as a draft, appended at the caret, and nothing is sent: the
+   * transcript can be wrong, and Enter is the check. */
+  var stt = { rec: null, stream: null, chunks: [], startedAt: 0, holding: false,
+              enabled: false, busy: false };
+
+  function sttAvailable() {
+    return stt.enabled && !IS_VSCODE && !!(navigator.mediaDevices
+      && navigator.mediaDevices.getUserMedia) && typeof MediaRecorder !== 'undefined';
+  }
+
+  function sttInit() {
+    fetch(api('/api/stt/config'), { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (cfg) {
+        stt.enabled = !!(cfg && cfg.enabled);
+        if (el.mic) el.mic.style.display = sttAvailable() ? '' : 'none';
+      })
+      .catch(function () { /* no mic, no harm */ });
+  }
+
+  function sttMime() {
+    var picks = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'];
+    for (var i = 0; i < picks.length; i++) {
+      if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(picks[i])) return picks[i];
+    }
+    return '';
+  }
+
+  function sttStart() {
+    if (stt.rec || stt.busy || !state.session) return;
+    stt.busy = true;
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      stt.busy = false;
+      var mime = sttMime();
+      var rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      stt.rec = rec; stt.stream = stream; stt.chunks = []; stt.startedAt = Date.now();
+      rec.addEventListener('dataavailable', function (e) {
+        if (e.data && e.data.size) stt.chunks.push(e.data);
+      });
+      rec.addEventListener('stop', sttFinish);
+      rec.start();
+      if (el.mic) el.mic.setAttribute('data-listening', '');
+      setStatus('듣는 중… 손을 떼면 전사', 'var(--con-err)');
+    }).catch(function (err) {
+      stt.busy = false;
+      var denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+      setStatus(denied ? '마이크 권한이 거부됨' : '마이크를 열 수 없음', 'var(--con-err)');
+    });
+  }
+
+  function sttStop() {
+    var rec = stt.rec;
+    if (!rec) return;
+    if (el.mic) el.mic.removeAttribute('data-listening');
+    if (rec.state !== 'inactive') rec.stop(); else sttFinish();
+  }
+
+  /* Closing or switching mid-recording: drop the clip, it was for a session
+   * that is no longer in front of the user. */
+  function sttAbort() {
+    var rec = stt.rec;
+    if (!rec) return;
+    if (el.mic) el.mic.removeAttribute('data-listening');
+    stt.holding = false;
+    rec.removeEventListener('stop', sttFinish);
+    if (rec.state !== 'inactive') { try { rec.stop(); } catch (e) { /* already */ } }
+    sttRelease();
+  }
+
+  function sttRelease() {
+    if (stt.stream) stt.stream.getTracks().forEach(function (t) { t.stop(); });
+    stt.stream = null; stt.rec = null; stt.chunks = [];
+  }
+
+  function sttFinish() {
+    var rec = stt.rec;
+    if (!rec) return;
+    var mime = rec.mimeType || sttMime() || 'audio/webm';
+    var blob = new Blob(stt.chunks, { type: mime });
+    var held = Date.now() - stt.startedAt;
+    var forSession = state.session;
+    sttRelease();
+    /* A brush of the key, or a clip too short to hold a word. */
+    if (held < 400 || blob.size < 1200) { setStatus('', ''); return; }
+    setStatus('전사 중…', 'var(--con-muted)');
+    window.ctbControl.send('/api/stt?session=' + encodeURIComponent(forSession), {
+      method: 'POST', body: blob, headers: { 'Content-Type': mime },
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (body) {
+        return { status: res.status, body: body };
+      });
+    }).then(function (r) {
+      if (state.session !== forSession) return;   /* switched away meanwhile */
+      if (r.status !== 200) {
+        setStatus('전사 실패 (' + r.status + ')' + (r.body.detail ? ' · ' + String(r.body.detail).slice(0, 80) : ''), 'var(--con-err)');
+        return;
+      }
+      var text = (r.body.text || '').trim();
+      if (!text) { setStatus('들리는 말이 없음', 'var(--con-warn)'); return; }
+      sttDraft(text);
+      setStatus('초안 삽입됨 · 확인 후 Enter', 'var(--con-ok)');
+    }).catch(function () {
+      if (state.session === forSession) setStatus('전사 실패 · 네트워크', 'var(--con-err)');
+    });
+  }
+
+  /* Into the box at the caret, with a space where two pieces of text meet,
+   * saved as the session's draft like typed text, and flashed so the eye
+   * finds it. Never submitted. */
+  function sttDraft(text) {
+    var box = el.input;
+    if (!box) return;
+    var v = box.value;
+    var a = typeof box.selectionStart === 'number' ? box.selectionStart : v.length;
+    var b = typeof box.selectionEnd === 'number' ? box.selectionEnd : a;
+    var before = v.slice(0, a), after = v.slice(b);
+    if (before && !/\s$/.test(before)) text = ' ' + text;
+    if (after && !/^\s/.test(after)) text = text + ' ';
+    box.value = before + text + after;
+    var caret = before.length + text.length;
+    try { box.setSelectionRange(caret, caret); } catch (e) { /* not focusable yet */ }
+    if (state.session) { state.drafts[state.session] = box.value; saveDrafts(); }
+    box.classList.remove('con-flash');
+    void box.offsetWidth;
+    box.classList.add('con-flash');
+    box.focus();
+  }
+
+  function bindMic(btn) {
+    var pressedAt = 0;
+    btn.addEventListener('pointerdown', function (e) {
+      if (e.button && e.button !== 0) return;
+      e.preventDefault();
+      pressedAt = Date.now();
+      if (stt.rec) { sttStop(); pressedAt = 0; return; }   /* tap-toggle: second tap stops */
+      stt.holding = true;
+      sttStart();
+    });
+    var up = function () {
+      if (!stt.holding) return;
+      stt.holding = false;
+      /* A short press is a toggle: leave it recording until the next tap. */
+      if (Date.now() - pressedAt < 350) { setStatus('녹음 중 · 탭하면 정지', 'var(--con-err)'); return; }
+      sttStop();
+    };
+    btn.addEventListener('pointerup', up);
+    btn.addEventListener('pointercancel', up);
+    btn.addEventListener('pointerleave', function () { if (stt.holding) up(); });
+    btn.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  }
+
   /* --- actions ---------------------------------------------------------- */
 
   function post(path, body) {
@@ -2611,7 +2790,7 @@
     }
     /* Remember where we came from so Ctrl+Tab can bounce back -- the pair you
      * are actually working in is almost always two sessions, not nine. */
-    if (state.session && state.session !== name) state.prev = state.session;
+    if (state.session && state.session !== name) { state.prev = state.session; sttAbort(); }
     state.boxTouched = null;   /* the mark belongs to the box it was made in */
     state.session = name;
     state.selStart = null;
@@ -2665,6 +2844,7 @@
 
   function hide() {
     stopPolling();
+    sttAbort();
     if (el.input && state.session) {
       state.drafts[state.session] = el.input.value;
       saveDrafts();

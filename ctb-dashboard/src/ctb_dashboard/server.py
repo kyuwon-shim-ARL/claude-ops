@@ -55,6 +55,7 @@ from .session_input import (
 )
 from .dangerous_commands import is_dangerous_command
 from .session_readiness import classify_readiness, is_shell
+from . import stt as _stt
 from .control_audit import RateLimiter as _RateLimiter
 from .control_audit import limiter as _rate_limiter, record as _audit
 
@@ -1454,6 +1455,68 @@ async def push_unsubscribe(body: dict):
         raise HTTPException(status_code=422, detail="endpoint is required")
     push.remove_subscription(endpoint)
     return {"status": "unsubscribed"}
+
+
+# --- speech to text ----------------------------------------------------------
+
+# Twenty seconds of Opus is well under a megabyte; ten is a clip that was
+# never meant for this.
+_STT_MAX_BYTES = 10 * 1024 * 1024
+_STT_SCREEN_LINES = 40
+
+
+def _screen_lines_for_stt(name: str) -> list[str]:
+    """The last screen of the session, for the terms the model should hear."""
+    try:
+        result = subprocess.run(
+            ["tmux", "capture-pane", "-t", name, "-p", "-J", f"-S-{_STT_SCREEN_LINES}"],
+            capture_output=True, text=True, timeout=3,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return []
+    return result.stdout.splitlines() if result.returncode == 0 else []
+
+
+@app.get("/api/stt/config")
+async def stt_config():
+    """Whether the mic button has anything to talk to. Open, like every read."""
+    return {"enabled": _stt.enabled(), "model": _stt.MODEL}
+
+
+@app.post("/api/stt", dependencies=[Depends(require_control_token)])
+async def stt_transcribe(request: Request, session: str = ""):
+    """One recorded clip in, its words out. Nothing is typed anywhere: the
+    console puts the text into its input box as a draft and the user's Enter
+    is what sends it. The clip goes to OpenAI with a prompt naming the
+    session, its branch, the identifiers on its screen and the user's
+    glossary, which is what makes mixed Korean/English come out right."""
+    client = request.client.host if request.client else None
+    if session and not _SESSION_NAME_RE.match(session):
+        _audit("stt", session, client, False, "invalid_name")
+        raise HTTPException(status_code=422, detail="Invalid session name")
+    if not _stt.enabled():
+        raise HTTPException(status_code=503, detail="STT disabled: OPENAI_API_KEY is not set")
+    if not _rate_limiter.allow():
+        _audit("stt", session, client, False, "rate_limited")
+        raise HTTPException(status_code=429, detail="Too many control requests")
+    audio = await request.body()
+    if len(audio) > _STT_MAX_BYTES:
+        _audit("stt", session, client, False, "too_large")
+        raise HTTPException(status_code=413, detail="Clip too large")
+    if not audio:
+        raise HTTPException(status_code=400, detail="Empty clip")
+    mime = request.headers.get("content-type", "") or "audio/webm"
+
+    loop = asyncio.get_running_loop()
+    lines = await loop.run_in_executor(None, _screen_lines_for_stt, session) if session else []
+    prompt = _stt.build_prompt(session, lines, _stt.read_glossary())
+    try:
+        result = await loop.run_in_executor(None, _stt.transcribe, audio, mime, prompt)
+    except _stt.TranscribeError as e:
+        _audit("stt", session, client, False, f"upstream_{e.status}")
+        raise HTTPException(status_code=502, detail=f"transcription failed ({e.status}): {e}")
+    _audit("stt", session, client, True, f"{result.get('seconds')}s")
+    return result
 
 
 @app.get("/api/pinned")
