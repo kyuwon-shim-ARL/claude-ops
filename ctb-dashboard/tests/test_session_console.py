@@ -77,8 +77,7 @@ def test_single_poll_timer(console_js):
     """
     callbacks = re.findall(r"setInterval\(\s*([A-Za-z_$][\w$]*)", console_js)
     assert callbacks.count("pollTail") == 1
-    # paintClock: the recording bar's clock, DOM only, alive only while recording.
-    assert set(callbacks) <= {"pollTail", "paintHints", "paintClock"}, callbacks
+    assert set(callbacks) <= {"pollTail", "paintHints"}, callbacks
 
 
 def test_polling_targets_only_the_open_session(console_js):

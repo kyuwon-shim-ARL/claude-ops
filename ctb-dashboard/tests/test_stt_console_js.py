@@ -69,11 +69,12 @@ def test_mic_press_keeps_the_keyboard_up():
     assert "setPointerCapture" in block and "'pointerleave'" not in block
 
 
-def test_recording_state_is_shown_over_the_input_row_with_a_clock():
+def test_recording_state_lives_on_the_mic_key_only():
+    """No bar, no toast: the key is red while listening, amber while the clip
+    is out, plain otherwise -- and every exit path resets it."""
     js = CONSOLE_JS.read_text()
-    assert "con-recbar" in js
+    assert "con-recbar" not in js and "recBarShow" not in js
+    assert '.con-mic[data-listening]' in js and '.con-mic[data-transcribing]' in js
     block = _stt_block()
-    assert "recBarShow('recording'" in block and "recBarShow('transcribing'" in block
-    assert "recBarHide()" in block
-    # every exit path from a recording hides the bar: finish (ok/err/network), abort, too-short
-    assert block.count("recBarHide()") >= 5
+    assert "micPhase('recording')" in block and "micPhase('transcribing')" in block
+    assert block.count("micPhase('')") >= 4

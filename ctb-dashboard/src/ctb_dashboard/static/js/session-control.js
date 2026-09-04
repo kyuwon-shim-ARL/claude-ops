@@ -231,18 +231,12 @@
       '@keyframes con-listen{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0.45)}50%{box-shadow:0 0 0 6px rgba(239,68,68,0)}}',
       '#ctb-console .con-mic[data-listening]{background:#ef4444!important;color:#fff!important;animation:con-listen 1.2s ease-out infinite}',
       '@media(prefers-reduced-motion:reduce){#ctb-console .con-mic[data-listening]{animation:none}}',
-      '#ctb-console .con-recbar{position:absolute;left:0;right:0;top:0;bottom:0;z-index:3;',
-      'display:flex;align-items:center;justify-content:center;gap:10px;border-radius:14px;',
-      'font:700 15px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.01em;pointer-events:none;',
-      'color:#fff;background:rgba(239,68,68,0.94);box-shadow:0 0 0 2px rgba(239,68,68,0.35)}',
-      '#ctb-console .con-recbar[data-phase="transcribing"]{background:rgba(245,158,11,0.94);box-shadow:0 0 0 2px rgba(245,158,11,0.35)}',
-      '#ctb-console .con-recbar b{font-family:\'JetBrains Mono\',monospace;font-weight:700;min-width:3.2em;text-align:left}',
-      '#ctb-console .con-recbar i{width:10px;height:10px;border-radius:50%;background:#fff;animation:con-blink 1s steps(2,start) infinite}',
-      '@keyframes con-blink{to{visibility:hidden}}',
-      '@media(prefers-reduced-motion:reduce){#ctb-console .con-recbar i{animation:none}}',
-      /* The mic and send keys stay clickable through the bar: it covers only the box. */
-      '#ctb-console .con-recbar{right:96px}',
-      '@media(max-width:480px){#ctb-console .con-recbar{right:88px}}',
+      /* While the clip is out for transcription the key turns amber and its
+       * icon spins slowly; the key is the only indicator, by request. */
+      '@keyframes con-spin{to{transform:rotate(360deg)}}',
+      '#ctb-console .con-mic[data-transcribing]{background:#f59e0b!important;color:#fff!important}',
+      '#ctb-console .con-mic[data-transcribing] svg{animation:con-spin 1.4s linear infinite}',
+      '@media(prefers-reduced-motion:reduce){#ctb-console .con-mic[data-transcribing] svg{animation:none}}',
       '#ctb-console .con-tray{background:var(--con-tray);border-radius:16px;padding:8px}',
       /* A phone screen is short, and the pane is what it is for. On narrow
        * screens the keys shrink to the size of the system keyboard's own
@@ -639,16 +633,6 @@
     row.appendChild(mic);
     row.appendChild(send);
 
-    /* The recording state, where the eye is: a red bar over the input row
-     * with a running clock, not a line of small text elsewhere. Amber while
-     * the clip is being transcribed. */
-    row.style.position = 'relative';
-    var recBar = document.createElement('div');
-    recBar.className = 'con-recbar';
-    recBar.setAttribute('role', 'status');
-    recBar.setAttribute('aria-live', 'polite');
-    recBar.style.display = 'none';
-    row.appendChild(recBar);
 
     /* The pause a selection causes was invisible: the tail simply stopped
      * growing, which reads as a dead console rather than a held one. The badge
@@ -685,7 +669,7 @@
     keepCaret(root, input);
     document.body.appendChild(root);
 
-    el = { root: root, strip: strip, title: title, status: status, tail: tail, mic: mic, recBar: recBar,
+    el = { root: root, strip: strip, title: title, status: status, tail: tail, mic: mic,
            frozen: frozen, bar: bar, barLabel: barLabel, input: input,
            send: send, silent: silent };
 
@@ -2431,33 +2415,14 @@
   var stt = { rec: null, stream: null, chunks: [], startedAt: 0, holding: false,
               enabled: false, busy: false };
 
-  var recTick = null;
-  function recBarShow(phase, text) {
-    var bar = el.recBar;
-    if (!bar) return;
-    bar.textContent = '';
-    bar.setAttribute('data-phase', phase);
-    if (phase === 'recording') {
-      var blink = document.createElement('i');
-      var clock = document.createElement('b');
-      clock.textContent = '0:00';
-      bar.appendChild(blink);
-      bar.appendChild(clock);
-      bar.appendChild(document.createTextNode(text));
-      if (recTick) clearInterval(recTick);
-      var paintClock = function () {
-        var sec = Math.floor((Date.now() - stt.startedAt) / 1000);
-        clock.textContent = Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
-      };
-      recTick = setInterval(paintClock, 250);
-    } else {
-      bar.appendChild(document.createTextNode(text));
-    }
-    bar.style.display = 'flex';
-  }
-  function recBarHide() {
-    if (recTick) { clearInterval(recTick); recTick = null; }
-    if (el.recBar) el.recBar.style.display = 'none';
+  /* The key shows the phase: red and pulsing while listening, amber with a
+   * turning icon while the clip is being transcribed, plain otherwise. */
+  function micPhase(phase) {
+    if (!el.mic) return;
+    el.mic.removeAttribute('data-listening');
+    el.mic.removeAttribute('data-transcribing');
+    if (phase === 'recording') el.mic.setAttribute('data-listening', '');
+    if (phase === 'transcribing') el.mic.setAttribute('data-transcribing', '');
   }
 
   function sttAvailable() {
@@ -2496,8 +2461,7 @@
       });
       rec.addEventListener('stop', sttFinish);
       rec.start();
-      if (el.mic) el.mic.setAttribute('data-listening', '');
-      recBarShow('recording', stt.holding ? '녹음 중 · 손을 떼면 전사' : '녹음 중 · 탭하면 정지');
+      micPhase('recording');
       if (navigator.vibrate) { try { navigator.vibrate(15); } catch (e) { /* no haptics */ } }
       setStatus('듣는 중…', 'var(--con-err)');
     }).catch(function (err) {
@@ -2510,7 +2474,6 @@
   function sttStop() {
     var rec = stt.rec;
     if (!rec) return;
-    if (el.mic) el.mic.removeAttribute('data-listening');
     if (rec.state !== 'inactive') rec.stop(); else sttFinish();
   }
 
@@ -2519,8 +2482,7 @@
   function sttAbort() {
     var rec = stt.rec;
     if (!rec) return;
-    if (el.mic) el.mic.removeAttribute('data-listening');
-    recBarHide();
+    micPhase('');
     stt.holding = false;
     rec.removeEventListener('stop', sttFinish);
     if (rec.state !== 'inactive') { try { rec.stop(); } catch (e) { /* already */ } }
@@ -2541,8 +2503,8 @@
     var forSession = state.session;
     sttRelease();
     /* A brush of the key, or a clip too short to hold a word. */
-    if (held < 400 || blob.size < 1200) { recBarHide(); setStatus('', ''); return; }
-    recBarShow('transcribing', '전사 중…');
+    if (held < 400 || blob.size < 1200) { micPhase(''); setStatus('', ''); return; }
+    micPhase('transcribing');
     setStatus('전사 중…', 'var(--con-muted)');
     window.ctbControl.send('/api/stt?session=' + encodeURIComponent(forSession), {
       method: 'POST', body: blob, headers: { 'Content-Type': mime },
@@ -2551,7 +2513,7 @@
         return { status: res.status, body: body };
       });
     }).then(function (r) {
-      recBarHide();
+      micPhase('');
       if (state.session !== forSession) return;   /* switched away meanwhile */
       if (r.status !== 200) {
         setStatus('전사 실패 (' + r.status + ')' + (r.body.detail ? ' · ' + String(r.body.detail).slice(0, 80) : ''), 'var(--con-err)');
@@ -2562,7 +2524,7 @@
       sttDraft(text);
       setStatus('초안 삽입됨 · 확인 후 Enter', 'var(--con-ok)');
     }).catch(function () {
-      recBarHide();
+      micPhase('');
       if (state.session === forSession) setStatus('전사 실패 · 네트워크', 'var(--con-err)');
     });
   }
@@ -2614,7 +2576,6 @@
       stt.holding = false;
       /* A short press is a toggle: leave it recording until the next tap. */
       if (Date.now() - pressedAt < 350) {
-        if (stt.rec) recBarShow('recording', '녹음 중 · 탭하면 정지');
         setStatus('녹음 중 · 탭하면 정지', 'var(--con-err)');
         return;
       }
