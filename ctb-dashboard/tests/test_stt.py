@@ -28,9 +28,15 @@ def test_prompt_picks_identifiers_off_the_screen_not_prose():
     assert "그냥" not in p  # plain words are not glossary
 
 
-def test_prompt_carries_the_users_glossary_first():
+def test_prompt_puts_the_session_and_its_screen_before_the_glossary():
     p = stt.build_prompt("claude_ops", ["pytest"], ["Uni-Mol", "scaffold split"])
-    assert p.index("Uni-Mol") < p.index("pytest")
+    assert p.index("ops") < p.index("pytest") < p.index("Uni-Mol")
+
+
+def test_a_big_glossary_cannot_crowd_out_the_screen():
+    glossary = [f"repo-number-{i}" for i in range(300)]
+    p = stt.build_prompt("claude_ops", ["run pytest on server.py"], glossary)
+    assert "pytest" in p and "server.py" in p and len(p) <= stt.PROMPT_MAX_CHARS
 
 
 def test_prompt_is_bounded():

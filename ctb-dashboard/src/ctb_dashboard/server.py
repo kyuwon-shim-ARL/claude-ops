@@ -56,6 +56,7 @@ from .session_input import (
 from .dangerous_commands import is_dangerous_command
 from .session_readiness import classify_readiness, is_shell
 from . import stt as _stt
+from . import stt_corpus as _stt_corpus
 from .control_audit import RateLimiter as _RateLimiter
 from .control_audit import limiter as _rate_limiter, record as _audit
 
@@ -1483,8 +1484,21 @@ async def stt_config():
     return {"enabled": _stt.enabled(), "model": _stt.MODEL}
 
 
+def _refresh_glossary_if_stale() -> None:
+    """Once a day, from what the user has typed to sessions and what is in
+    ~/projects. Runs in the executor on the way to a transcription; a failure
+    leaves the old file in place."""
+    if not _stt_corpus.glossary_is_stale():
+        return
+    try:
+        n = _stt_corpus.rebuild_glossary()
+        logger.info("stt glossary rebuilt: %d terms", n)
+    except Exception as e:  # noqa: BLE001 -- a hint list must never block a clip
+        logger.warning("stt glossary rebuild failed: %s", e)
+
+
 @app.post("/api/stt", dependencies=[Depends(require_control_token)])
-async def stt_transcribe(request: Request, session: str = ""):
+async def stt_transcribe(request: Request, session: str = "", hints: int = 1):
     """One recorded clip in, its words out. Nothing is typed anywhere: the
     console puts the text into its input box as a draft and the user's Enter
     is what sends it. The clip goes to OpenAI with a prompt naming the
@@ -1508,8 +1522,13 @@ async def stt_transcribe(request: Request, session: str = ""):
     mime = request.headers.get("content-type", "") or "audio/webm"
 
     loop = asyncio.get_running_loop()
-    lines = await loop.run_in_executor(None, _screen_lines_for_stt, session) if session else []
-    prompt = _stt.build_prompt(session, lines, _stt.read_glossary())
+    if hints:
+        await loop.run_in_executor(None, _refresh_glossary_if_stale)
+        lines = await loop.run_in_executor(None, _screen_lines_for_stt, session) if session else []
+        prompt = _stt.build_prompt(session, lines, _stt.read_glossary())
+    else:
+        # The lab's A/B: the same clip with no terms, to see what the hints buy.
+        prompt = ""
     try:
         result = await loop.run_in_executor(None, _stt.transcribe, audio, mime, prompt)
     except _stt.TranscribeError as e:
@@ -1517,6 +1536,85 @@ async def stt_transcribe(request: Request, session: str = ""):
         raise HTTPException(status_code=502, detail=f"transcription failed ({e.status}): {e}")
     _audit("stt", session, client, True, f"{result.get('seconds')}s")
     return result
+
+
+# --- the STT lab: read a sentence, record it, score it, learn from it -----------
+
+@app.get("/stt-lab")
+async def stt_lab_page():
+    from fastapi.responses import FileResponse  # noqa: PLC0415
+    return FileResponse(os.path.join(static_dir, "stt-lab.html"), media_type="text/html")
+
+
+@app.get("/api/stt/eval/set")
+async def stt_eval_set():
+    loop = asyncio.get_running_loop()
+    names = await loop.run_in_executor(None, lambda: sorted(get_all_claude_sessions()))
+    return await loop.run_in_executor(None, _stt_corpus.load_or_build_eval_set,
+                                      _stt_corpus.EVAL_SET_PATH, names)
+
+
+@app.get("/api/stt/eval/results")
+async def stt_eval_results():
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _stt_eval_stats)
+
+
+def _stt_eval_stats() -> dict:
+    return _stt_corpus.aggregate(_stt_corpus.RESULTS_PATH, len(_stt.read_glossary()))
+
+
+class SttEvalRequest(BaseModel):
+    id: str
+    ref: str
+    hyp: str
+    engine: str = "gpt"
+    hints: bool = True
+    seconds: float | None = None
+    category: str = ""
+
+
+@app.post("/api/stt/eval", dependencies=[Depends(require_control_token)])
+async def stt_eval(req: SttEvalRequest, request: Request):
+    """Score one reading and keep it. Terms the model missed go straight into
+    the glossary's learned section, so the next clip already has them."""
+    if req.engine not in ("gpt", "ios"):
+        raise HTTPException(status_code=422, detail="engine must be gpt or ios")
+    score = _stt_corpus.cer(req.ref, req.hyp)
+    missed = _stt_corpus.missed_terms(req.ref, req.hyp)
+    loop = asyncio.get_running_loop()
+
+    def _persist() -> dict:
+        _stt_corpus.append_result(_stt_corpus.RESULTS_PATH, {
+            "id": req.id, "ref": req.ref, "hyp": req.hyp, "engine": req.engine,
+            "hints": req.hints, "seconds": req.seconds, "category": req.category,
+            "cer": round(score, 4), "missed": missed,
+        })
+        if missed and req.engine == "gpt" and req.hints:
+            _stt_corpus.promote_learned(missed)
+        return _stt_eval_stats()
+
+    stats = await loop.run_in_executor(None, _persist)
+    client = request.client.host if request.client else None
+    _audit("stt_eval", req.id, client, True, f"{req.engine} cer={score:.3f}")
+    return {"cer": round(score, 4), "missed": missed, "stats": stats}
+
+
+@app.post("/api/stt/eval/rebuild", dependencies=[Depends(require_control_token)])
+async def stt_eval_rebuild(request: Request):
+    loop = asyncio.get_running_loop()
+
+    def _rebuild() -> dict:
+        prompts = list(_stt_corpus.iter_user_prompts())
+        g = _stt_corpus.rebuild_glossary(prompts=prompts)
+        names = sorted(get_all_claude_sessions())
+        data = _stt_corpus.load_or_build_eval_set(_stt_corpus.EVAL_SET_PATH, names, rebuild=True)
+        return {"glossary_size": g, "set_size": len(data["items"]), "source_prompts": len(prompts)}
+
+    out = await loop.run_in_executor(None, _rebuild)
+    client = request.client.host if request.client else None
+    _audit("stt_rebuild", "-", client, True, f"g={out['glossary_size']}")
+    return out
 
 
 @app.get("/api/pinned")

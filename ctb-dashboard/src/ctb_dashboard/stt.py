@@ -80,11 +80,13 @@ def read_glossary(path: str = GLOSSARY_PATH) -> list[str]:
 
 
 def build_prompt(session: str, screen_lines: Iterable[str], glossary: Iterable[str]) -> str:
-    """One line of context, then the terms: glossary first, then the session,
-    then what is on the screen, newest last, deduplicated and bounded."""
+    """One line of context, then the terms: the session first, then what is
+    on its screen, then the glossary until the budget runs out. The glossary
+    can hold hundreds of terms; the ones about this session must not be the
+    ones that get cut."""
     seen: set[str] = set()
     terms: list[str] = []
-    for t in [*glossary, *session_terms(session), *screen_terms(screen_lines)]:
+    for t in [*session_terms(session), *screen_terms(screen_lines), *glossary]:
         key = t.lower()
         if key in seen:
             continue
