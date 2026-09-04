@@ -1816,6 +1816,15 @@
       // only, so an unpinned one finishing is silent by design and used to be
       // indistinguishable from a notification that failed.
       window.ctbPinned = [...pinned];
+      // And which quadrant each pin sits in: the grid tints a card by its
+      // importance, and the console rail paints its chips the same hue, so
+      // the urgent session can be told apart above the terminal too.
+      const _quadOf = {};
+      const _quads = getQuadrants();
+      for (const qid of ['Q1', 'Q2', 'Q3', 'Q4']) {
+        for (const n of _quads[qid] || []) _quadOf[n] = qid;
+      }
+      window.ctbQuadOf = _quadOf;
 
       if (visible.length === 0) {
         Array.from(grid.children).forEach(el => { if (el !== emptyState) el.remove(); });

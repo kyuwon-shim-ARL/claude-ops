@@ -212,6 +212,18 @@
        * tray -- rather than a tinted one; tint is kept for the accent. */
       '#ctb-console .con-chip[aria-current="true"]{background:var(--con-btn);color:var(--con-text);font-weight:700;',
       'box-shadow:0 1px 2px rgba(16,24,40,0.10)}',
+      /* A pinned session wears its quadrant's hue -- the same hue the grid
+       * tints its card with -- as a ring and a wash, so importance can be
+       * read on the rail. The active chip keeps its raised white key and
+       * only the ring stays. Hues match getQuadConfig() in index.html. */
+      '#ctb-console .con-chip[data-quad="Q1"]{box-shadow:inset 0 0 0 1.5px rgba(251,113,133,0.75);background:rgba(220,100,90,0.14)}',
+      '#ctb-console .con-chip[data-quad="Q2"]{box-shadow:inset 0 0 0 1.5px rgba(240,165,0,0.8);background:rgba(217,119,6,0.14)}',
+      '#ctb-console .con-chip[data-quad="Q3"]{box-shadow:inset 0 0 0 1.5px rgba(96,165,250,0.8);background:rgba(37,99,235,0.12)}',
+      '#ctb-console .con-chip[data-quad="Q4"]{box-shadow:inset 0 0 0 1.5px rgba(139,133,160,0.7);background:rgba(107,114,128,0.12)}',
+      '#ctb-console .con-chip[aria-current="true"][data-quad="Q1"]{background:var(--con-btn);box-shadow:inset 0 0 0 2px rgba(251,113,133,0.9),0 1px 2px rgba(16,24,40,0.10)}',
+      '#ctb-console .con-chip[aria-current="true"][data-quad="Q2"]{background:var(--con-btn);box-shadow:inset 0 0 0 2px rgba(240,165,0,0.9),0 1px 2px rgba(16,24,40,0.10)}',
+      '#ctb-console .con-chip[aria-current="true"][data-quad="Q3"]{background:var(--con-btn);box-shadow:inset 0 0 0 2px rgba(96,165,250,0.9),0 1px 2px rgba(16,24,40,0.10)}',
+      '#ctb-console .con-chip[aria-current="true"][data-quad="Q4"]{background:var(--con-btn);box-shadow:inset 0 0 0 2px rgba(139,133,160,0.9),0 1px 2px rgba(16,24,40,0.10)}',
       '#ctb-console .con-rail{background:var(--con-tray);border-radius:14px;padding:4px}',
       '#ctb-console .con-tray{background:var(--con-tray);border-radius:16px;padding:8px}',
       /* A phone screen is short, and the pane is what it is for. On narrow
@@ -856,6 +868,9 @@
 
   /* --- switcher strip ---------------------------------------------------- */
 
+  /* Mirrors QUAD_LABELS in index.html. */
+  var QUAD_LABELS = { Q1: '긴급+중요', Q2: '중요', Q3: '긴급', Q4: '일반' };
+
   var STATE_DOT = {
     working: '#34d399', stuck_after_agent: '#f97316', waiting: '#fbbf24',
     error: '#ef4444', context_limit: '#a78bfa', idle: '#6b7280',
@@ -937,6 +952,8 @@
        * row on short names and forced a scroll to reach the fourth session.
        * Capped so one long name cannot take the whole bar. */
       chip.className = 'con-chip';
+      var quad = window.ctbQuadOf && window.ctbQuadOf[item.name];
+      if (quad) chip.setAttribute('data-quad', quad);
 
       var dot = document.createElement('span');
       dot.style.cssText = 'width:7px;height:7px;border-radius:50%;flex-shrink:0;' +
@@ -946,7 +963,7 @@
       text.style.cssText = 'min-width:0;white-space:nowrap;overflow:hidden;' +
         'text-overflow:ellipsis;';
       text.textContent = item.branch ? item.label + ' ⎇' + item.branch : item.label;
-      chip.title = item.name;
+      chip.title = quad ? item.name + ' · ' + (QUAD_LABELS[quad] || quad) : item.name;
 
       chip.appendChild(dot);
       /* While the numbers are frozen the chip carries the number that will
@@ -2718,6 +2735,8 @@
     _stepDownSession: stepDownSession,
     _linkifyLines: linkifyLines,
     _whenSettled: whenSettled,
+    _renderStrip: renderStrip,
+    _el: function () { return el; },
     _describeBox: describeBox,
     _THEMES: THEMES,
     _noteScrolling: noteScrolling,
