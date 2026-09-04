@@ -216,14 +216,14 @@
        * tints its card with -- as a ring and a wash, so importance can be
        * read on the rail. The active chip keeps its raised white key and
        * only the ring stays. Hues match getQuadConfig() in index.html. */
-      '#ctb-console .con-chip[data-quad="Q1"]{box-shadow:inset 0 0 0 1.5px rgba(251,113,133,0.75);background:rgba(220,100,90,0.14)}',
-      '#ctb-console .con-chip[data-quad="Q2"]{box-shadow:inset 0 0 0 1.5px rgba(240,165,0,0.8);background:rgba(217,119,6,0.14)}',
-      '#ctb-console .con-chip[data-quad="Q3"]{box-shadow:inset 0 0 0 1.5px rgba(96,165,250,0.8);background:rgba(37,99,235,0.12)}',
-      '#ctb-console .con-chip[data-quad="Q4"]{box-shadow:inset 0 0 0 1.5px rgba(139,133,160,0.7);background:rgba(107,114,128,0.12)}',
-      '#ctb-console .con-chip[aria-current="true"][data-quad="Q1"]{background:var(--con-btn);box-shadow:inset 0 0 0 2px rgba(251,113,133,0.9),0 1px 2px rgba(16,24,40,0.10)}',
-      '#ctb-console .con-chip[aria-current="true"][data-quad="Q2"]{background:var(--con-btn);box-shadow:inset 0 0 0 2px rgba(240,165,0,0.9),0 1px 2px rgba(16,24,40,0.10)}',
-      '#ctb-console .con-chip[aria-current="true"][data-quad="Q3"]{background:var(--con-btn);box-shadow:inset 0 0 0 2px rgba(96,165,250,0.9),0 1px 2px rgba(16,24,40,0.10)}',
-      '#ctb-console .con-chip[aria-current="true"][data-quad="Q4"]{background:var(--con-btn);box-shadow:inset 0 0 0 2px rgba(139,133,160,0.9),0 1px 2px rgba(16,24,40,0.10)}',
+      '#ctb-console .con-chip[data-quad="Q1"]{box-shadow:inset 0 0 0 1px rgba(251,113,133,0.35);background:rgba(220,100,90,0.06)}',
+      '#ctb-console .con-chip[data-quad="Q2"]{box-shadow:inset 0 0 0 1px rgba(240,165,0,0.35);background:rgba(217,119,6,0.06)}',
+      '#ctb-console .con-chip[data-quad="Q3"]{box-shadow:inset 0 0 0 1px rgba(96,165,250,0.35);background:rgba(37,99,235,0.05)}',
+      '#ctb-console .con-chip[data-quad="Q4"]{box-shadow:inset 0 0 0 1px rgba(139,133,160,0.3);background:rgba(107,114,128,0.05)}',
+      '#ctb-console .con-chip[aria-current="true"][data-quad="Q1"]{background:var(--con-btn);box-shadow:inset 0 0 0 1.5px rgba(251,113,133,0.5),0 1px 2px rgba(16,24,40,0.10)}',
+      '#ctb-console .con-chip[aria-current="true"][data-quad="Q2"]{background:var(--con-btn);box-shadow:inset 0 0 0 1.5px rgba(240,165,0,0.5),0 1px 2px rgba(16,24,40,0.10)}',
+      '#ctb-console .con-chip[aria-current="true"][data-quad="Q3"]{background:var(--con-btn);box-shadow:inset 0 0 0 1.5px rgba(96,165,250,0.5),0 1px 2px rgba(16,24,40,0.10)}',
+      '#ctb-console .con-chip[aria-current="true"][data-quad="Q4"]{background:var(--con-btn);box-shadow:inset 0 0 0 1.5px rgba(139,133,160,0.45),0 1px 2px rgba(16,24,40,0.10)}',
       '#ctb-console .con-rail{background:var(--con-tray);border-radius:14px;padding:4px}',
       '#ctb-console .con-tray{background:var(--con-tray);border-radius:16px;padding:8px}',
       /* A phone screen is short, and the pane is what it is for. On narrow
