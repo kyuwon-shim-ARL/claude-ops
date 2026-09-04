@@ -24,6 +24,7 @@ MUTATING = [
     ("/api/sessions/some-session/delete", {"force": False}),
     ("/api/pinned", {"sessions": []}),
     ("/api/focus-session", {"session": "some-session"}),
+    ("/api/sessions/restore", {}),
 ]
 
 

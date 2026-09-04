@@ -38,6 +38,7 @@ from .state_detector import SessionStateAnalyzer, SessionState
 from . import push
 from .sessions import get_all_claude_sessions, get_session_path, get_sessions_activity
 from .session_delete import check_delete_safety, delete_session
+from . import session_restore as _restore
 from .session_create import (
     CreateError,
     create_session,
@@ -1258,7 +1259,7 @@ async def session_delete(name: str, req: DeleteRequest, request: Request):
     if not _SESSION_NAME_RE.match(name):
         raise HTTPException(status_code=422, detail="Invalid session name")
     loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(None, delete_session, name, req.force)
+    result = await loop.run_in_executor(None, _delete_and_remember, name, req.force)
     _audit(
         "delete", name, request.client.host if request.client else None,
         result.get("status") == "deleted",
@@ -1271,6 +1272,50 @@ async def session_delete(name: str, req: DeleteRequest, request: Request):
             media_type="application/json",
         )
     return result
+
+
+_CLOSED_HISTORY_PATH = _restore.history_path(_STATE_DIR)
+
+
+def _delete_and_remember(name: str, force: bool) -> dict:
+    """What restore needs is read while the session is alive, so it is taken
+    before the kill and kept only if the delete went through."""
+    entry = _restore.describe(name)
+    result = delete_session(name, force)
+    if result.get("status") == "deleted" and entry.get("path"):
+        try:
+            _restore.record(_CLOSED_HISTORY_PATH, entry)
+        except OSError as e:
+            logger.warning("closed-session history not written: %s", e)
+    return result
+
+
+@app.get("/api/sessions/closed")
+async def sessions_closed():
+    """Recently closed sessions, newest first -- what Ctrl+Shift+Q would bring back."""
+    return {"closed": _restore.peek(_CLOSED_HISTORY_PATH)}
+
+
+@app.post("/api/sessions/restore", dependencies=[Depends(require_control_token)])
+async def sessions_restore(request: Request):
+    """Bring back the most recent closed session. One per call, like a
+    browser reopening the last closed tab; 404 when nothing is left."""
+    client = request.client.host if request.client else None
+    if not _rate_limiter.allow():
+        _audit("restore", "-", client, False, "rate_limited")
+        raise HTTPException(status_code=429, detail="Too many control requests")
+    loop = asyncio.get_running_loop()
+    try:
+        out = await loop.run_in_executor(
+            None, _restore.restore_last, _CLOSED_HISTORY_PATH, get_all_claude_sessions)
+    except CreateError as e:
+        _audit("restore", "-", client, False, e.code)
+        raise HTTPException(status_code=502, detail=e.message)
+    if out is None:
+        _audit("restore", "-", client, False, "nothing_to_restore")
+        raise HTTPException(status_code=404, detail="복원할 세션이 없습니다")
+    _audit("restore", out["session"], client, True, out.get("status"))
+    return out
 
 
 # The project/worktree reads run git, and unlike every write they are not

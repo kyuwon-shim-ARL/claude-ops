@@ -1297,6 +1297,107 @@
     show(item.name, true);
   });
 
+  /* Ctrl/Cmd+Q closes the open session the way the trash does, and as fast as
+   * a browser closes a tab: when the same git checks the trash runs say it is
+   * safe (clean tree, pushed, and a worktree merged), the session is gone
+   * with no dialog and the console moves to the neighbour on the rail. When
+   * they do not, nothing happens but a line of reasons -- the forced delete
+   * stays where it is, behind the card's trash and its second confirmation.
+   *
+   * Ctrl/Cmd+Shift+Q brings back the last closed session, one per press,
+   * newest first, the way a browser reopens closed tabs. The server kept its
+   * directory when it was closed and starts Claude there again; with a
+   * transcript in that directory it resumes the conversation.
+   *
+   * Alt is bound too: Cmd+Q on a Mac and Ctrl+Q in Firefox on Linux quit the
+   * browser before the page sees them. */
+  var closing = false;
+
+  function neighbourAfterClose(list, name) {
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].name === name) return list[i + 1] || list[i - 1] || null;
+    }
+    return null;
+  }
+
+  function dropFromOrders(name) {
+    var keep = function (it) { return it.name !== name; };
+    if (Array.isArray(window.ctbSessionOrder)) window.ctbSessionOrder = window.ctbSessionOrder.filter(keep);
+    if (Array.isArray(window.ctbSessionAll)) window.ctbSessionAll = window.ctbSessionAll.filter(keep);
+    if (Array.isArray(state.order)) state.order = state.order.filter(keep);
+  }
+
+  function closeSession() {
+    if (!state.session || closing || state.busy) return;
+    var name = state.session;
+    closing = true;
+    setStatus('닫는 중…', 'var(--con-muted)');
+    window.ctbControl.send('/api/sessions/' + encodeURIComponent(name) + '/delete', {
+      method: 'POST', body: JSON.stringify({ force: false }),
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (body) {
+        return { status: res.status, body: body };
+      });
+    }).then(function (r) {
+      closing = false;
+      if (r.status === 200 && r.body.status === 'deleted') {
+        var next = neighbourAfterClose(sessionOrder(), name);
+        dropFromOrders(name);
+        delete state.drafts[name];
+        saveDrafts();
+        if (next) show(next.name, true); else hide();
+        return;
+      }
+      if (state.session !== name) return;
+      if (r.status === 409) {
+        var reasons = (r.body.check && r.body.check.reasons) || [];
+        setStatus('닫기 보류 · ' + (reasons.join(' · ') || '안전하지 않음') + ' · 강제 삭제는 카드의 🗑', 'var(--con-warn)');
+      } else if (r.status === 200) {
+        setStatus('닫기 실패 · ' + (r.body.error || r.body.status || ''), 'var(--con-err)');
+      } else {
+        setStatus('닫기 실패 (' + r.status + ')', 'var(--con-err)');
+      }
+    }).catch(function () {
+      closing = false;
+      if (state.session === name) setStatus('닫기 실패 · 네트워크', 'var(--con-err)');
+    });
+  }
+
+  function restoreSession() {
+    if (closing) return;
+    closing = true;
+    setStatus('복원 중…', 'var(--con-muted)');
+    window.ctbControl.send('/api/sessions/restore', { method: 'POST', body: '{}' })
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (body) {
+          return { status: res.status, body: body };
+        });
+      }).then(function (r) {
+        closing = false;
+        if (r.status === 200 && r.body.session) {
+          show(r.body.session, true);
+          setStatus('복원됨 · ' + r.body.session, 'var(--con-ok)');
+        } else if (r.status === 404) {
+          setStatus('복원할 세션이 없습니다', 'var(--con-warn)');
+        } else {
+          setStatus('복원 실패 (' + r.status + ')' + (r.body.detail ? ' · ' + r.body.detail : ''), 'var(--con-err)');
+        }
+      }).catch(function () {
+        closing = false;
+        setStatus('복원 실패 · 네트워크', 'var(--con-err)');
+      });
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (searchOpen()) return;
+    if (e.code !== 'KeyQ' && String(e.key).toLowerCase() !== 'q') return;
+    if (!accelHeld(e)) return;
+    /* Restore works with the console closed as well; closing needs one open. */
+    if (!e.shiftKey && !state.session) return;
+    e.preventDefault();
+    if (e.shiftKey) restoreSession(); else closeSession();
+  });
+
   /* Ctrl/Cmd+Tab bounces between the last two sessions, the way Alt+Tab does.
    * It sits on the same modifier as the Ctrl+` walk on purpose: moving between
    * sessions is one gesture with the accelerator held down, and the hand never
@@ -2982,6 +3083,7 @@
     _splitLinks: splitLinks,
     _findPendingInput: findPendingInput,
     _stepDownSession: stepDownSession,
+    _neighbourAfterClose: neighbourAfterClose,
     _linkifyLines: linkifyLines,
     _whenSettled: whenSettled,
     _renderStrip: renderStrip,
