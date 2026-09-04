@@ -132,71 +132,79 @@ def test_every_theme_defines_the_same_tokens():
     assert themes["light"] == themes["dark"] == themes["parchment"]
 
 
-# --- Ctrl+` walks the whole rail ---------------------------------------------
+# --- Ctrl+[ and Ctrl+] walk the rail; with Shift, only the Q1 sessions ------
 
-def _step(order, current):
+def _step(order, current, direction, urgent=False, quad_of=None):
     body = (
         f"window.ctbSessionOrder = {json.dumps([{'name': n, 'label': n, 'state': 'idle'} for n in order])};"
+        f"window.ctbQuadOf = {json.dumps(quad_of or {})};"
         f"c._state.session = {json.dumps(current)};"
-        "const it = c._stepDownSession(); mark(it ? it.name : null);"
+        f"const it = c._stepSession({direction}, {json.dumps(urgent)}); mark(it ? it.name : null);"
     )
     return _run(body, wait_ms=50)[0][0]
 
 
-def test_step_moves_one_up_from_the_eleventh_session():
-    order = [f"s{i}" for i in range(1, 13)]
-    assert _step(order, "s11") == "s10"
-
-
-def test_step_from_the_top_wraps_to_the_last_session_not_the_ninth():
-    order = [f"s{i}" for i in range(1, 13)]
-    assert _step(order, "s1") == "s12"
-
-
-def test_step_with_nothing_open_starts_at_the_end_of_the_rail():
-    order = [f"s{i}" for i in range(1, 13)]
-    assert _step(order, None) == "s12"
-
-
-# --- Ctrl+Shift+` walks only the 긴급+중요 (Q1) sessions ------------------------
-
-def _step_q1(order, quad_of, current):
-    body = (
-        f"window.ctbSessionOrder = {json.dumps([{'name': n, 'label': n, 'state': 'idle'} for n in order])};"
-        f"window.ctbQuadOf = {json.dumps(quad_of)};"
-        f"c._state.session = {json.dumps(current)};"
-        "const it = c._stepDownSession(true); mark(it ? it.name : null);"
-    )
-    return _run(body, wait_ms=50)[0][0]
-
-
-_Q = {"s2": "Q1", "s5": "Q1", "s7": "Q2", "s9": "Q1"}
 _ORDER = [f"s{i}" for i in range(1, 13)]
+_Q = {"s2": "Q1", "s5": "Q1", "s7": "Q2", "s9": "Q1"}
 
 
-def test_q1_step_skips_everything_that_is_not_q1():
-    assert _step_q1(_ORDER, _Q, "s9") == "s5"
+def test_left_moves_one_up_from_the_eleventh_session():
+    assert _step(_ORDER, "s11", -1) == "s10"
 
 
-def test_q1_step_from_a_non_q1_session_goes_to_the_nearest_q1_above():
-    assert _step_q1(_ORDER, _Q, "s7") == "s5"
+def test_right_moves_one_down():
+    assert _step(_ORDER, "s10", 1) == "s11"
 
 
-def test_q1_step_wraps_from_the_first_q1_to_the_last():
-    assert _step_q1(_ORDER, _Q, "s2") == "s9"
+def test_left_from_the_top_wraps_to_the_last_session():
+    assert _step(_ORDER, "s1", -1) == "s12"
 
 
-def test_q1_step_with_nothing_open_starts_at_the_last_q1():
-    assert _step_q1(_ORDER, _Q, None) == "s9"
+def test_right_from_the_bottom_wraps_to_the_first():
+    assert _step(_ORDER, "s12", 1) == "s1"
 
 
-def test_q1_step_with_no_q1_sessions_goes_nowhere():
-    assert _step_q1(_ORDER, {"s7": "Q2"}, "s7") is None
+def test_with_nothing_open_left_starts_at_the_end_and_right_at_the_head():
+    assert _step(_ORDER, None, -1) == "s12"
+    assert _step(_ORDER, None, 1) == "s1"
 
 
-def test_shift_backquote_is_routed_to_the_q1_walk():
+def test_q1_left_skips_everything_that_is_not_q1():
+    assert _step(_ORDER, "s9", -1, True, _Q) == "s5"
+
+
+def test_q1_right_skips_everything_that_is_not_q1():
+    assert _step(_ORDER, "s2", 1, True, _Q) == "s5"
+
+
+def test_q1_from_a_non_q1_session_goes_to_the_nearest_q1_in_that_direction():
+    assert _step(_ORDER, "s7", -1, True, _Q) == "s5"
+    assert _step(_ORDER, "s7", 1, True, _Q) == "s9"
+
+
+def test_q1_wraps_both_ways():
+    assert _step(_ORDER, "s2", -1, True, _Q) == "s9"
+    assert _step(_ORDER, "s9", 1, True, _Q) == "s2"
+
+
+def test_q1_with_nothing_open_starts_at_the_far_end():
+    assert _step(_ORDER, None, -1, True, _Q) == "s9"
+    assert _step(_ORDER, None, 1, True, _Q) == "s2"
+
+
+def test_q1_with_no_q1_sessions_goes_nowhere():
+    assert _step(_ORDER, "s7", -1, True, {"s7": "Q2"}) is None
+
+
+def test_the_only_q1_session_open_goes_nowhere():
+    assert _step(_ORDER, "s2", 1, True, {"s2": "Q1"}) is None
+
+
+def test_brackets_are_bound_and_backquote_is_gone():
     js = CONSOLE_JS.read_text()
-    assert "stepDownSession(e.shiftKey)" in js
+    assert "'BracketLeft'" in js and "'BracketRight'" in js
+    assert "stepSession(dir, e.shiftKey)" in js
+    assert "Backquote" not in js and "e.key !== '`'" not in js
 
 
 def test_a_finger_whose_touchend_never_arrives_releases_on_its_own():

@@ -1227,67 +1227,54 @@
     if (item.name !== state.session) show(item.name, true);
   });
 
-  /* Ctrl/Cmd+` walks UP the rail one session at a time, from wherever the open one sits, wrapping at the top.
-   * Ctrl/Cmd+Shift+` does the same over the 긴급+중요 (Q1) sessions only.
+  /* Ctrl/Cmd+[ walks UP the rail one session at a time and Ctrl/Cmd+] walks
+   * DOWN, from wherever the open one sits, wrapping at either end. With Shift
+   * held ({ and }) the walk visits only the 긴급+중요 (Q1) sessions: the ones
+   * worth taking first, without stepping over the rest by hand. From a
+   * session that is not Q1 it goes to the nearest Q1 in that direction.
    *
    * The digits are for jumping to a session you can see; this is for working
-   * through them. The board sorts what needs attention to the top, so starting
-   * at the bottom of the numbered range and stepping down means the queue is
-   * taken in order, without choosing at each step -- and with nothing open it
-   * starts at the last numbered session rather than the first, which is where
-   * that walk begins.
+   * through them. The board sorts what needs attention to the top, so with
+   * nothing open the up-walk starts at the end of the rail and the down-walk
+   * at its head.
    *
    * The order is the same frozen snapshot the digits use, and this handler
-   * deliberately does NOT release it: holding the accelerator and pressing `
-   * repeatedly walks one list, instead of re-deriving the numbering from a
-   * board that re-sorts under every step. */
-  function stepDownSession(urgentOnly) {
+   * deliberately does NOT release it: holding the accelerator and pressing
+   * the bracket repeatedly walks one list, instead of re-deriving the
+   * numbering from a board that re-sorts under every step.
+   *
+   * Alt is bound as well: Cmd+[ and Cmd+] are history back/forward on a Mac
+   * and a browser may take them before the page does. */
+  function stepSession(dir, urgentOnly) {
     var list = hintOrder || sessionOrder();
-    /* With Shift held the walk visits only the 긴급+중요 (Q1) sessions, in
-     * rail order: the ones worth taking first, without stepping over the
-     * rest by hand. From a session that is not Q1 it goes to the nearest Q1
-     * above it. */
-    if (urgentOnly) {
-      var quadOf = window.ctbQuadOf || {};
-      var here0 = -1;
-      for (var k = 0; k < list.length; k++) {
-        if (list[k].name === state.session) { here0 = k; break; }
-      }
-      var q1 = list.filter(function (it, idx) {
-        return quadOf[it.name] === 'Q1' && idx !== here0;
-      });
-      if (!q1.length) return null;
-      if (here0 === -1) return q1[q1.length - 1];
-      var above = null;
-      for (var j = 0; j < list.length && j < here0; j++) {
-        if (quadOf[list[j].name] === 'Q1') above = list[j];
-      }
-      return above || q1[q1.length - 1];
-    }
     var n = list.length;
     if (!n) return null;
+    var quadOf = window.ctbQuadOf || {};
+    var ok = function (it) { return !urgentOnly || quadOf[it.name] === 'Q1'; };
     var here = -1;
     for (var i = 0; i < n; i++) {
       if (list[i].name === state.session) { here = i; break; }
     }
-    /* From wherever the open session sits in the rail -- the whole rail,
-     * not only the nine that carry numbers. It used to jump to slot 9 from
-     * anything past it, which with a dozen sessions meant the tenth and
-     * eleventh were skipped over every time. Nothing open: start at the end. */
-    var next = here === -1 ? n - 1 : (here - 1 + n) % n;
-    return list[next];
+    /* Nothing open: the walk begins at the far end of its direction. */
+    var idx = here === -1 ? (dir < 0 ? n : -1) : here;
+    for (var step = 1; step <= n; step++) {
+      var j = (idx + dir * step + n * step) % n;
+      if (j === here) break;
+      if (ok(list[j])) return list[j];
+    }
+    return null;
   }
 
   document.addEventListener('keydown', function (e) {
     if (searchOpen()) return;
-    /* `code` as well as `key`: a layout where the key is not backquote still
-     * reports Backquote for the physical key, and a dead-key layout may give
-     * no `key` at all. Shifted, a US layout reports '~'. */
-    if (e.key !== '`' && e.key !== '~' && e.code !== 'Backquote') return;
+    /* `code` names the physical key: a shifted US layout reports { and },
+     * and another layout may put something else on the cap entirely. */
+    var dir = e.code === 'BracketLeft' || e.key === '[' || e.key === '{' ? -1
+            : e.code === 'BracketRight' || e.key === ']' || e.key === '}' ? 1 : 0;
+    if (!dir) return;
     if (!accelHeld(e)) return;
     e.preventDefault();
-    /* Ctrl/Cmd+Shift+` walks the 긴급+중요 sessions only. */
-    var item = stepDownSession(e.shiftKey);
+    var item = stepSession(dir, e.shiftKey);
     if (!item || (hintOrder && !inCatalog(item.name))) return;
     if (item.name === state.session) return;
     /* Closed console in the VSCode webview: the same rule the digits follow --
@@ -1399,13 +1386,13 @@
   });
 
   /* Ctrl/Cmd+Tab bounces between the last two sessions, the way Alt+Tab does.
-   * It sits on the same modifier as the Ctrl+` walk on purpose: moving between
+   * It sits on the same modifier as the Ctrl+[ ] walk on purpose: moving between
    * sessions is one gesture with the accelerator held down, and the hand never
    * has to swap modifiers mid-thought to get back to where it was.
    *
    * A browser tab keeps this chord for its own tab switching and the page
    * never sees it; an installed PWA window and the VSCode webview have no tab
-   * strip, so there it arrives. In a plain browser tab the Ctrl+` walk is the
+   * strip, so there it arrives. In a plain browser tab the Ctrl+[ ] walk is the
    * one that always gets through. */
   document.addEventListener('keydown', function (e) {
     if (!state.session || searchOpen() || e.key !== 'Tab') return;
@@ -3082,7 +3069,7 @@
     _cleanLines: cleanLines,
     _splitLinks: splitLinks,
     _findPendingInput: findPendingInput,
-    _stepDownSession: stepDownSession,
+    _stepSession: stepSession,
     _neighbourAfterClose: neighbourAfterClose,
     _linkifyLines: linkifyLines,
     _whenSettled: whenSettled,
