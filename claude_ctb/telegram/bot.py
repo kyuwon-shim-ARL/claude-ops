@@ -2373,7 +2373,9 @@ class TelegramBridge:
                 category_idx = int(parts[2])
 
                 # Validate indices
-                from .command_picker import COMMAND_CATEGORIES
+                from .command_picker import (
+                    COMMAND_CATEGORIES, build_commands_keyboard, get_category_name,
+                )
                 if category_idx < 0 or category_idx >= len(COMMAND_CATEGORIES):
                     await query.answer("Invalid category")
                     return
@@ -2392,7 +2394,7 @@ class TelegramBridge:
                 cmd_idx = int(parts[3])
 
                 # Validate indices
-                from .command_picker import COMMAND_CATEGORIES
+                from .command_picker import COMMAND_CATEGORIES, get_command
                 if category_idx < 0 or category_idx >= len(COMMAND_CATEGORIES):
                     await query.answer("Invalid category")
                     return
@@ -2428,6 +2430,7 @@ class TelegramBridge:
 
             elif action == "back":
                 # Back to categories
+                from .command_picker import build_category_keyboard
                 keyboard = build_category_keyboard()
                 await query.edit_message_text(
                     "🎯 Select a command category:",
@@ -3290,7 +3293,7 @@ class TelegramBridge:
                     hint = last_prompt
                 return f"\n📝{hint}"
             return ""
-        except:
+        except Exception:
             return ""
     
     async def _session_grid_callback(self, query, context, session_name):

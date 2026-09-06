@@ -161,7 +161,6 @@ def test_safe_delete_removes_merged_worktree(repo, monkeypatch):
 # "저장되지 않은 변경사항이 영구히 사라집니다" for both, which is untrue for the
 # regular case and talks people out of a harmless action.
 
-from pathlib import Path
 
 _INDEX = (Path(__file__).resolve().parents[1]
           / "src" / "ctb_dashboard" / "templates" / "index.html")

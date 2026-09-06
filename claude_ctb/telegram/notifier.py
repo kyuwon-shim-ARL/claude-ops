@@ -393,7 +393,7 @@ class SmartNotifier:
                 working_dir = result.stdout.strip()
             else:
                 working_dir = self.config.working_directory
-        except:
+        except Exception:
             working_dir = self.config.working_directory
 
         # Get last user prompt for context recall
@@ -878,7 +878,7 @@ Claude가 작업을 완료했습니다.
             
             # Use plain text format to avoid markdown issues
             return header + f"```\n{context_text}\n```"
-        except:
+        except Exception:
             return f"```\n{context_text}\n```"
     
     def escape_markdown(self, text: str) -> str:

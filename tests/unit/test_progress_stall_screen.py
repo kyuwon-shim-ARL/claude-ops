@@ -48,6 +48,10 @@ def monitor(tmp_path):
     mon.thread_lock = MagicMock()
     mon.notifier = MagicMock()
     mon.state_analyzer = MagicMock()
+    # c6c2342 made the nudge path read self.config.auto_intervene; the
+    # fixture predates it. The nudge tests patch subprocess.run and assert on
+    # it, so the gate has to be open here.
+    mon.config = MagicMock(auto_intervene=True)
     return mon
 
 

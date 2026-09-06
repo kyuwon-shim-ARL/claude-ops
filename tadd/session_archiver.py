@@ -645,7 +645,7 @@ Context will be loaded from previous session summary...
         # Try to get creation time from filesystem
         try:
             return datetime.fromtimestamp(os.path.getctime(session_path))
-        except:
+        except Exception:
             return datetime.now()
     
     def _parse_summary_metadata(self, content: str) -> Dict[str, Any]:

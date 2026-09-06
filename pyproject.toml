@@ -49,3 +49,13 @@ markers = [
 
 [tool.setuptools]
 packages = ["claude_ctb", "tadd"]
+
+[tool.ruff.lint]
+# The CI lint gate is for defects, not tidiness. Ruff's defaults flagged 211
+# findings here, 207 of them cosmetic (unused imports, empty f-strings) --
+# which drowned four real F821 NameErrors in bot.py and turned every push
+# into a red mail nobody reads. This set is the subset that fails at runtime:
+#   E9   syntax / IO errors      F63  invalid comparisons
+#   F7   misplaced statements    F81  redefinition of an unused name
+#   F82  undefined name          E722 bare except
+select = ["E9", "F63", "F7", "F81", "F82", "E722"]
