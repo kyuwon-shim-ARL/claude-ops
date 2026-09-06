@@ -231,6 +231,7 @@
       '@keyframes con-listen{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0.45)}50%{box-shadow:0 0 0 6px rgba(239,68,68,0)}}',
       '#ctb-console .con-mic[data-listening]{background:#ef4444!important;color:#fff!important;animation:con-listen 1.2s ease-out infinite}',
       '@media(prefers-reduced-motion:reduce){#ctb-console .con-mic[data-listening]{animation:none}}',
+      '#ctb-console .con-mic[data-level]{animation:none}',
       /* While the clip is out for transcription the key turns amber and its
        * icon spins slowly; the key is the only indicator, by request. */
       '@keyframes con-spin{to{transform:rotate(360deg)}}',
@@ -619,11 +620,11 @@
      * back is put into the box as a draft; Enter is still the user's. */
     var mic = document.createElement('button');
     mic.type = 'button';
-    mic.className = 'con-mic';
     mic.appendChild(icon('mic', 18));
     mic.title = '누르고 말하기 · 짧게 탭하면 녹음 시작/정지 · 결과는 입력창에 초안으로만';
     mic.setAttribute('aria-label', '음성 입력');
     styleBtn(mic, '');
+    mic.classList.add('con-mic');   /* after styleBtn -- it rewrites className */
     mic.style.display = 'none';
     mic.style.minWidth = '44px';
     mic.style.touchAction = 'manipulation';
@@ -2530,11 +2531,85 @@
    * input box as a draft, appended at the caret, and nothing is sent: the
    * transcript can be wrong, and Enter is the check. */
   var stt = { rec: null, stream: null, chunks: [], startedAt: 0, holding: false,
-              enabled: false, busy: false };
+              enabled: false, busy: false, tick: null,
+              audio: null, raf: 0, level: 0, quiet: false };
 
   /* The key shows the phase: red and pulsing while listening, amber with a
    * turning icon while the clip is being transcribed, plain otherwise. */
+  /* A live meter off the local stream: the ring around the key grows with
+   * what the mic actually hears. It costs nothing -- no server, no API --
+   * and it is the honest answer to "is my voice going in", which a canned
+   * pulse cannot give. A mic that is connected but dead (a bad earbud) shows
+   * a flat ring, and after a second of that the status line says so. */
+  function micLevelStart(stream) {
+    micLevelStop();
+    var Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx || !el.mic) return;
+    var ctx;
+    try { ctx = new Ctx(); } catch (e) { return; }
+    if (ctx.resume) { try { ctx.resume(); } catch (e) { /* already running */ } }
+    var analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.5;
+    try { ctx.createMediaStreamSource(stream).connect(analyser); }
+    catch (e) { try { ctx.close(); } catch (e2) { /* gone */ } return; }
+
+    stt.audio = ctx;
+    stt.quiet = false;
+    el.mic.setAttribute('data-level', '');   /* stands down the canned pulse */
+
+    var buf = new Uint8Array(analyser.fftSize);
+    var loudAt = Date.now();
+    var frame = function () {
+      analyser.getByteTimeDomainData(buf);
+      var sum = 0;
+      for (var i = 0; i < buf.length; i++) {
+        var v = (buf[i] - 128) / 128;
+        sum += v * v;
+      }
+      /* RMS is small for speech; the root spreads the quiet end where the
+       * eye needs the resolution. */
+      var level = Math.min(1, Math.sqrt(Math.sqrt(sum / buf.length) * 3));
+      stt.level = level;
+      if (level > 0.12) loudAt = Date.now();
+      stt.quiet = Date.now() - loudAt > 1500;
+      if (el.mic) {
+        el.mic.style.boxShadow = '0 0 0 ' + (2 + level * 12).toFixed(1) + 'px rgba(239,68,68,' +
+          (0.15 + level * 0.35).toFixed(2) + ')';
+      }
+      stt.raf = requestAnimationFrame(frame);
+    };
+    stt.raf = requestAnimationFrame(frame);
+  }
+
+  function micLevelStop() {
+    if (stt.raf) { cancelAnimationFrame(stt.raf); stt.raf = 0; }
+    if (stt.audio) { try { stt.audio.close(); } catch (e) { /* already */ } stt.audio = null; }
+    stt.level = 0; stt.quiet = false;
+    if (el.mic) { el.mic.style.boxShadow = ''; el.mic.removeAttribute('data-level'); }
+  }
+
+  /* Neither recording nor transcribing showed the clock running, so a long
+   * upload was indistinguishable from a frozen one. The count ticks in the
+   * status line for both. */
+  function micTick(label, color, since) {
+    micTickStop();
+    var paint = function () {
+      var secs = ((Date.now() - since) / 1000).toFixed(1);
+      if (stt.quiet) { setStatus('소리가 안 들어옵니다 · 마이크 확인 · ' + secs + '초', 'var(--con-warn)'); return; }
+      setStatus(label + ' · ' + secs + '초', color);
+    };
+    paint();
+    stt.tick = setInterval(paint, 100);
+  }
+
+  function micTickStop() {
+    if (stt.tick) { clearInterval(stt.tick); stt.tick = null; }
+  }
+
   function micPhase(phase) {
+    if (!phase) micTickStop();
+    if (phase !== 'recording') micLevelStop();
     if (!el.mic) return;
     el.mic.removeAttribute('data-listening');
     el.mic.removeAttribute('data-transcribing');
@@ -2579,8 +2654,9 @@
       rec.addEventListener('stop', sttFinish);
       rec.start();
       micPhase('recording');
+      micLevelStart(stream);
       if (navigator.vibrate) { try { navigator.vibrate(15); } catch (e) { /* no haptics */ } }
-      setStatus('듣는 중…', 'var(--con-err)');
+      micTick('듣는 중', 'var(--con-err)', stt.startedAt);
     }).catch(function (err) {
       stt.busy = false;
       var denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
@@ -2622,7 +2698,7 @@
     /* A brush of the key, or a clip too short to hold a word. */
     if (held < 400 || blob.size < 1200) { micPhase(''); setStatus('', ''); return; }
     micPhase('transcribing');
-    setStatus('전사 중…', 'var(--con-muted)');
+    micTick('전사 중', 'var(--con-warn)', Date.now());
     window.ctbControl.send('/api/stt?session=' + encodeURIComponent(forSession), {
       method: 'POST', body: blob, headers: { 'Content-Type': mime },
     }).then(function (res) {

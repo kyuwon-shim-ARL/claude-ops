@@ -366,6 +366,169 @@
       .catch(function () { setStatus('재생성 실패 · 네트워크', 'var(--err)'); });
   }
 
+  /* --- mic probe --------------------------------------------------------
+   * Can this device pick its microphone at all? iOS routes audio input at
+   * the OS level, so a deviceId constraint asking for the built-in mic may
+   * be silently ignored while earbuds are connected. Only the phone can
+   * answer that, so this records a real clip per device and reports the
+   * requested ID vs the ID the track actually opened -- plus playback, since
+   * a matching ID still does not prove where the sound came from. */
+
+  var probe = { devices: [], defaultId: '', defaultLabel: '', busy: false, url: '' };
+
+  function probeStatus(text, color) {
+    if (!el.probeStatus) return;
+    el.probeStatus.textContent = text || '';
+    el.probeStatus.style.color = color || 'var(--muted)';
+  }
+
+  function stopStream(stream) {
+    if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
+  }
+
+  function shortId(id) {
+    if (!id) return '(없음)';
+    return id.length > 14 ? id.slice(0, 14) + '…' : id;
+  }
+
+  function deviceName(dev) {
+    return (dev && dev.label) || ('입력 ' + shortId(dev && dev.deviceId));
+  }
+
+  function probeList() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+      probeStatus('이 브라우저는 장치 열거를 지원하지 않습니다.', 'var(--err)');
+      return;
+    }
+    probeStatus('권한 확인 중…');
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      var track = stream.getAudioTracks()[0];
+      var settings = (track && track.getSettings) ? track.getSettings() : {};
+      probe.defaultId = settings.deviceId || '';
+      probe.defaultLabel = (track && track.label) || '';
+      stopStream(stream);
+      return navigator.mediaDevices.enumerateDevices();
+    }).then(function (devices) {
+      if (!devices) return;
+      probe.devices = devices.filter(function (d) { return d.kind === 'audioinput'; });
+      renderProbe();
+      probeStatus('입력 장치 ' + probe.devices.length + '개', 'var(--ok)');
+    }).catch(function (err) {
+      probeStatus('마이크를 열 수 없음: ' + ((err && err.name) || 'unknown'), 'var(--err)');
+    });
+  }
+
+  function renderProbe() {
+    if (!el.probeList) return;
+    el.probeList.innerHTML = '';
+
+    var head = document.createElement('div');
+    head.className = 'stt-stat-row';
+    head.textContent = '기본(audio: true) → ' + (probe.defaultLabel || '(라벨 없음)') +
+      ' · id ' + shortId(probe.defaultId);
+    el.probeList.appendChild(head);
+
+    if (!probe.devices.length) {
+      var none = document.createElement('div');
+      none.className = 'stt-stat-row';
+      none.textContent = '열거된 입력 장치가 없습니다. iOS는 흔히 "Default" 하나만 돌려줍니다.';
+      el.probeList.appendChild(none);
+      return;
+    }
+
+    probe.devices.forEach(function (dev) {
+      var row = document.createElement('div');
+      row.className = 'stt-probe-row';
+
+      var name = document.createElement('div');
+      name.className = 'stt-probe-name';
+      name.textContent = deviceName(dev) +
+        (dev.deviceId === probe.defaultId ? ' · 현재 기본' : '');
+      row.appendChild(name);
+
+      var btn = document.createElement('button');
+      btn.className = 'stt-btn';
+      btn.type = 'button';
+      btn.textContent = '3초 녹음';
+      btn.addEventListener('click', function () { probeTry(dev, btn); });
+      row.appendChild(btn);
+
+      el.probeList.appendChild(row);
+    });
+  }
+
+  function probeVerdict(dev, gotId, gotLabel, errName) {
+    if (!el.probeVerdict) return;
+    el.probeVerdict.hidden = false;
+    el.probeVerdict.innerHTML = '';
+
+    function line(text, cls) {
+      var d = document.createElement('div');
+      d.className = 'stt-stat-row' + (cls ? ' ' + cls : '');
+      d.textContent = text;
+      el.probeVerdict.appendChild(d);
+    }
+
+    line('요청: ' + deviceName(dev) + ' · id ' + shortId(dev.deviceId));
+    if (errName) {
+      line('실패: ' + errName);
+      line(errName === 'OverconstrainedError'
+        ? '판정: 이 장치는 지정해서 열 수 없습니다 — 선택 불가.'
+        : '판정: 열지 못했습니다.');
+      return;
+    }
+    line('실제: ' + (gotLabel || '(라벨 없음)') + ' · id ' + shortId(gotId));
+    if (gotId && gotId === dev.deviceId) {
+      line('판정: ID는 요청대로 열렸습니다. 다만 iOS는 ID만 되돌려주고 실제 라우팅은 OS가 정할 수 있으니, 아래 재생을 들어보고 이어폰 소리인지 폰 소리인지 판단하세요.');
+    } else {
+      line('판정: 요청과 다른 장치가 열렸습니다 — 이 기기는 마이크 선택을 무시합니다.');
+    }
+  }
+
+  function probeTry(dev, btn) {
+    if (probe.busy) return;
+    probe.busy = true;
+    if (btn) { btn.setAttribute('data-recording', ''); btn.textContent = '녹음 중…'; }
+    var release = function () {
+      probe.busy = false;
+      if (btn) { btn.removeAttribute('data-recording'); btn.textContent = '3초 녹음'; }
+    };
+    probeStatus('"' + deviceName(dev) + '" 로 3초 녹음 중…', 'var(--err)');
+    navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: dev.deviceId } } })
+      .then(function (stream) {
+        var track = stream.getAudioTracks()[0];
+        var settings = (track && track.getSettings) ? track.getSettings() : {};
+        var gotId = settings.deviceId || '';
+        var gotLabel = (track && track.label) || '';
+        var mime = sttMime();
+        var rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+        var chunks = [];
+        rec.addEventListener('dataavailable', function (e) {
+          if (e.data && e.data.size) chunks.push(e.data);
+        });
+        rec.addEventListener('stop', function () {
+          stopStream(stream);
+          release();
+          probeVerdict(dev, gotId, gotLabel, null);
+          var blob = new Blob(chunks, { type: rec.mimeType || mime || 'audio/webm' });
+          if (el.probeAudio) {
+            if (probe.url) URL.revokeObjectURL(probe.url);
+            probe.url = URL.createObjectURL(blob);
+            el.probeAudio.src = probe.url;
+            el.probeAudio.hidden = false;
+          }
+          probeStatus('녹음 완료 · 재생해서 확인하세요', 'var(--ok)');
+        });
+        rec.start();
+        setTimeout(function () { if (rec.state !== 'inactive') rec.stop(); }, 3000);
+      })
+      .catch(function (err) {
+        release();
+        probeVerdict(dev, '', '', (err && err.name) || 'unknown');
+        probeStatus('녹음 실패', 'var(--err)');
+      });
+  }
+
   /* --- wiring ------------------------------------------------------- */
 
   function init() {
@@ -398,6 +561,13 @@
     el.statMissed = $('stt-stat-missed');
     el.statGlossary = $('stt-stat-glossary');
     el.rebuildBtn = $('stt-rebuild');
+    el.probeBtn = $('stt-probe-scan');
+    el.probeStatus = $('stt-probe-status');
+    el.probeList = $('stt-probe-list');
+    el.probeVerdict = $('stt-probe-verdict');
+    el.probeAudio = $('stt-probe-audio');
+    el.probeToggle = $('stt-probe-toggle');
+    el.probePanel = $('stt-probe-panel');
 
     bindMic(el.mic);
     if (el.iosScore) el.iosScore.addEventListener('click', submitIosScore);
@@ -414,6 +584,12 @@
       });
     }
     if (el.rebuildBtn) el.rebuildBtn.addEventListener('click', rebuild);
+    if (el.probeBtn) el.probeBtn.addEventListener('click', probeList);
+    if (el.probeToggle && el.probePanel) {
+      el.probeToggle.addEventListener('click', function () {
+        el.probePanel.hidden = !el.probePanel.hidden;
+      });
+    }
 
     loadConfig();
     loadSet();

@@ -98,6 +98,18 @@
   .stt-stat-row { font-size: 13px; color: var(--text); padding: 2px 0; }
   #stt-stat-missed { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
   .stt-stat-foot { font-size: 12px; color: var(--muted); margin-top: 10px; display: flex; justify-content: space-between; align-items: center; }
+
+  .stt-probe-row {
+    display: flex; align-items: center; gap: 10px; padding: 6px 0;
+    border-top: 1px solid var(--line);
+  }
+  .stt-probe-name { flex: 1 1 auto; font-size: 13px; word-break: break-all; }
+  .stt-probe-row button.stt-btn { flex: 0 0 auto; padding: 0 14px; }
+  .stt-probe-row button.stt-btn[data-recording] {
+    background: var(--err); border-color: var(--err); color: #fff;
+  }
+  #stt-probe-verdict { margin-top: 10px; background: var(--sheet); border-radius: 10px; padding: 10px 12px; }
+  #stt-probe-audio { width: 100%; margin-top: 10px; }
 </style>
 </head>
 <body>
@@ -189,6 +201,26 @@
         <span>용어집 크기: <span id="stt-stat-glossary">--</span></span>
         <button class="stt-btn" id="stt-rebuild" type="button">용어집·평가셋 재생성</button>
       </div>
+    </div>
+  </section>
+
+  <section class="stt-card">
+    <div class="stt-stats-header" id="stt-probe-toggle">
+      <h2>마이크 진단</h2>
+      <span class="stt-chip">펼치기/접기</span>
+    </div>
+    <div id="stt-probe-panel" hidden>
+      <div class="stt-stat-row">
+        이어폰을 연결한 채로 실행하세요. 내장 마이크를 지정해서 열 수 있는지,
+        아니면 OS가 무시하고 이어폰으로 붙이는지 확인합니다.
+      </div>
+      <div class="stt-btn-row">
+        <button class="stt-btn primary" id="stt-probe-scan" type="button">입력 장치 확인</button>
+      </div>
+      <div id="stt-probe-status" style="font-size: 13px; color: var(--muted); min-height: 1.4em;"></div>
+      <div id="stt-probe-list"></div>
+      <div id="stt-probe-verdict" hidden></div>
+      <audio id="stt-probe-audio" controls hidden></audio>
     </div>
   </section>
 </main>
