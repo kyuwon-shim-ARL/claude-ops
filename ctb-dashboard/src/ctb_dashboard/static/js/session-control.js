@@ -313,7 +313,7 @@
     strip.className = 'con-rail';
     strip.style.cssText = [
       'display:flex', 'gap:4px', 'flex-shrink:0', 'margin-bottom:10px',
-      'overflow-x:auto', 'overflow-y:hidden',
+      'overflow-x:auto', 'overflow-y:hidden', 'overscroll-behavior:contain',
       'scroll-snap-type:x proximity', '-webkit-overflow-scrolling:touch',
       'scrollbar-width:none',
     ].join(';');
@@ -401,6 +401,12 @@
     tail.className = 'con-well';
     tail.style.cssText = [
       'flex:1', 'min-height:120px', 'overflow:auto', 'margin:0 0 10px',
+      /* Without this, a scroll that reaches either end of the tail carries on
+       * into the dashboard behind the sheet: the pane stops moving and the
+       * grid underneath starts, which reads as the console having died. The
+       * page behind is fixed while the console is open (lockPage) and this
+       * stops the chain before it gets there. */
+      'overscroll-behavior:contain',
       'padding:12px 12px', 'background:var(--con-well)',
       /* The system's own monospace first: SF Mono on an iPhone is cut for
        * that screen and reads at 12px where a web font at 11px went thin
@@ -1284,6 +1290,52 @@
     return null;
   }
 
+  /* Page the tail by a screenful, for a keyboard on an iPad or a phone where
+   * scrolling otherwise means putting a hand on the glass.
+   *
+   * The step is measured, not assumed: clientHeight is what this device is
+   * actually showing, and dividing it by the computed line height gives the
+   * lines on screen. One of them is kept as overlap -- the line you finish on
+   * is the line you start the next screen with -- which is what a terminal's
+   * own PgUp does and what stops a reader losing their place. A pane too
+   * short to hold two lines still moves by one rather than not at all.
+   *
+   * Nothing here touches focus: the caret stays in the box, so a page-up
+   * mid-sentence costs nothing to come back from. -> did it move. */
+  function pageTail(dir) {
+    var tail = el.tail;
+    if (!tail) return false;
+    var cs = window.getComputedStyle(tail);
+    var lh = parseFloat(cs.lineHeight);
+    if (!(lh > 0)) lh = (parseFloat(cs.fontSize) || 12) * 1.5;
+    var visible = Math.floor(tail.clientHeight / lh);
+    var step = Math.max(1, visible - 1) * lh;
+    var max = Math.max(0, tail.scrollHeight - tail.clientHeight);
+    var from = tail.scrollTop;
+    var to = Math.max(0, Math.min(max, from + dir * step));
+    if (Math.abs(to - from) < 1) return false;
+    tail.scrollTop = to;
+    return true;
+  }
+
+  /* Cmd/Ctrl+Shift+Up / Down. Not the bracket keys: those already walk the
+   * session rail, and Shift there means "urgent and important only". */
+  document.addEventListener('keydown', function (e) {
+    if (!state.session || searchOpen()) return;
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    if (e.isComposing || e.keyCode === 229) return;
+    if (!accelHeld(e) || !e.shiftKey) return;
+    e.preventDefault();
+    var dir = e.key === 'ArrowUp' ? -1 : 1;
+    if (pageTail(dir)) {
+      /* The tail's own scroll handler has already recorded whether this
+       * landed at the bottom, so following resumes by itself down there. */
+      setStatus(dir < 0 ? '\u2191 \ud55c \ud654\uba74' : '\u2193 \ud55c \ud654\uba74', 'var(--con-muted)');
+    } else {
+      setStatus(dir < 0 ? '\ub9e8 \uc704' : '\ub9e8 \uc544\ub798 \u00b7 \uc790\ub3d9 \ub530\ub77c\uac00\uae30', 'var(--con-muted)');
+    }
+  });
+
   document.addEventListener('keydown', function (e) {
     if (searchOpen()) return;
     /* `code` names the physical key: a shifted US layout reports { and },
@@ -1547,7 +1599,8 @@
 
     var list = document.createElement('div');
     list.style.cssText =
-      'overflow-y:auto;max-height:min(52vh,420px);-webkit-overflow-scrolling:touch;';
+      'overflow-y:auto;overscroll-behavior:contain;' +
+      'max-height:min(52vh,420px);-webkit-overflow-scrolling:touch;';
     list.addEventListener('click', function (e) {
       var row = e.target.closest && e.target.closest('[data-search-session]');
       if (row) pick(row.getAttribute('data-search-session'));
@@ -3099,7 +3152,45 @@
    * shortcut -- should leave them able to type immediately. Opening the
    * console does NOT pass it: on iOS the keyboard would cover the pane before
    * it has been read, which is why there is no autofocus on open. */
-  function show(name, focusInput) {
+/* The sheet is fixed and full-bleed, but a fixed overlay does not stop the
+   * document behind it from scrolling: a touch that lands anywhere the sheet
+   * does not itself scroll, or that runs past the end of the tail, moves the
+   * dashboard instead. Nothing behind the console is meant to be reachable
+   * while it is open, so the page is parked -- position:fixed at its current
+   * offset, which is the one lock iOS honours -- and put back exactly where
+   * it was on close. overscroll-behavior handles the chaining case; this
+   * handles the rest. */
+  var LOCK_PROPS = ['position', 'top', 'left', 'right', 'width', 'overflow'];
+  var pageLock = { active: false, x: 0, y: 0, prev: null };
+
+  function lockPage() {
+    if (pageLock.active) return;
+    pageLock.x = window.pageXOffset || document.documentElement.scrollLeft || 0;
+    pageLock.y = window.pageYOffset || document.documentElement.scrollTop || 0;
+    /* Property by property, not the whole style attribute: the board writes
+     * its theme colours inline on body, and restoring a snapshot would undo
+     * anything set while the console was open. An empty string is a faithful
+     * "this was not set". */
+    pageLock.prev = {};
+    LOCK_PROPS.forEach(function (prop) { pageLock.prev[prop] = document.body.style[prop]; });
+    document.body.style.position = 'fixed';
+    document.body.style.top = (-pageLock.y) + 'px';
+    document.body.style.left = (-pageLock.x) + 'px';
+    document.body.style.right = '0';
+    document.body.style.width = '100%';
+    document.body.style.overflow = 'hidden';
+    pageLock.active = true;
+  }
+
+  function unlockPage() {
+    if (!pageLock.active) return;
+    pageLock.active = false;
+    var prev = pageLock.prev || {};
+    LOCK_PROPS.forEach(function (prop) { document.body.style[prop] = prev[prop] || ''; });
+    window.scrollTo(pageLock.x, pageLock.y);
+  }
+
+    function show(name, focusInput) {
     build();
     loadDrafts();
     /* A half-typed prompt belongs to the session it was written for. Switching
@@ -3154,6 +3245,7 @@
     }
     setStatus('');
     el.root.style.display = 'flex';
+    lockPage();
     renderStrip();
     fetchOrder();
     fitViewport();
@@ -3188,6 +3280,7 @@
     setFrozen(false);
     hideHints();
     if (el.root) el.root.style.display = 'none';
+    unlockPage();
   }
 
   /* Stop polling when the tab is hidden -- a backgrounded phone should not keep
@@ -3263,6 +3356,12 @@
     _splitLinks: splitLinks,
     _findPendingInput: findPendingInput,
     _findLastSubmitted: findLastSubmitted,
+    _pageTail: pageTail,
+    /* build() reassigns el, so hand back the live object, not the one that
+     * happened to be current when this table was built. */
+    _els: function () { return el; },
+    _lockPage: lockPage,
+    _unlockPage: unlockPage,
     _stepSession: stepSession,
     _neighbourAfterClose: neighbourAfterClose,
     _linkifyLines: linkifyLines,

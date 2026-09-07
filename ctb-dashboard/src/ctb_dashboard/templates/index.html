@@ -2641,6 +2641,12 @@
     // Keyboard navigation between cards: arrows move focus, Enter activates
     // (same as a click). Cards carry tabindex="0" in renderCard().
     grid.addEventListener('keydown', (e) => {
+      /* The console is drawn over this grid, and opening it from a card's 💬
+       * leaves focus on that card. Without this, a chord aimed at the console
+       * -- Cmd+Shift+Arrow pages its output -- also walked focus to the card
+       * behind the sheet, and the next bare Enter opened whatever session it
+       * had landed on. Same guard the Ctrl+F handler above uses. */
+      if (window.ctbConsole && window.ctbConsole.isOpen && window.ctbConsole.isOpen()) return;
       const card = e.target.closest('[data-session-name]');
       if (!card) return;
       if (e.key === 'Enter') {
