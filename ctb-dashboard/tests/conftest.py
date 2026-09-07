@@ -91,6 +91,11 @@ def _no_live_system(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "_TS_PERSIST_PATH", str(tmp_path / "timestamps.json"))
     # The VSCode extension watches this and focuses the terminal it names.
     monkeypatch.setattr(server, "_FOCUS_SIGNAL_PATH", str(tmp_path / "focus-signal.json"))
+    # The speech budget is money. A suite run that reached the STT success path
+    # would spend the user's real daily allowance and, once it ran out, start
+    # failing that test for a reason that has nothing to do with the code.
+    monkeypatch.setattr(server, "_STT_USAGE_PATH", str(tmp_path / "stt-usage.json"))
+    monkeypatch.setattr(server, "_stt_spent", {"day": "", "seconds": 0.0})
 
     # The audit log is the user's record of who drove their sessions. Test runs
     # were filling it -- 2726 entries at one point, which buried the handful of

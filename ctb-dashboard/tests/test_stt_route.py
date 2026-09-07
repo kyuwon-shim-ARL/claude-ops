@@ -66,7 +66,13 @@ def test_stt_transcribes_with_a_prompt_built_from_the_session(client, monkeypatc
     monkeypatch.setattr(stt, "transcribe", fake)
     r = client.post("/api/stt?session=claude_uni-mol-QSAR", content=b"opus-bytes", headers=_AUDIO)
     assert r.status_code == 200
-    assert r.json() == {"text": "pytest 돌려줘", "seconds": 4}
+    body = r.json()
+    assert body["text"] == "pytest 돌려줘"
+    assert body["seconds"] == 4
+    # The response also carries the day's meter, so the console can warn as
+    # the budget runs down.
+    assert body["spent_today"] == 4.0
+    assert body["daily_limit"] == _srv._STT_DAILY_SECONDS
     assert seen["audio"] == b"opus-bytes"
     assert seen["mime"].startswith("audio/webm")
     for term in ("Uni-Mol", "uni-mol-QSAR", "test_stt.py"):
@@ -151,3 +157,102 @@ def test_hints_off_sends_no_prompt(client, monkeypatch):
 def test_lab_page_is_served(client):
     r = client.get("/stt-lab")
     assert r.status_code == 200 and "text/html" in r.headers["content-type"]
+
+
+# --- the spend cap ----------------------------------------------------------
+#
+# The transcriber bills by the minute of audio. Nothing else in the request
+# path bounds money: the size limit bounds one upload and the rate limiter
+# bounds requests per minute, and neither knows what a clip costs. These are
+# the tests for the one guard that does -- including the failure that would
+# retire it silently.
+
+@pytest.fixture
+def billed(client, monkeypatch):
+    """A transcriber that reports a duration, and a record of what it was
+    asked to do."""
+    calls = []
+
+    def _fake(audio, mime, prompt, **kw):
+        calls.append(len(audio))
+        return {"text": "네", "seconds": 600.0}
+
+    monkeypatch.setattr(stt, "transcribe", _fake)
+    monkeypatch.setattr(_srv, "_clip_seconds", lambda audio, mime: 5.0)
+    return calls
+
+
+def test_a_clip_adds_its_billed_seconds_to_the_day(client, billed):
+    r = client.post("/api/stt?session=claude_ops&hints=0", content=b"x" * 999, headers=_AUDIO)
+    assert r.status_code == 200
+    assert r.json()["spent_today"] == 600.0
+    r = client.post("/api/stt?session=claude_ops&hints=0", content=b"x" * 999, headers=_AUDIO)
+    assert r.json()["spent_today"] == 1200.0
+
+
+def test_the_day_closes_once_the_budget_is_spent(client, billed, monkeypatch):
+    monkeypatch.setattr(_srv, "_STT_DAILY_SECONDS", 600.0)   # one clip spends it
+    assert client.post("/api/stt?hints=0", content=b"x" * 99, headers=_AUDIO).status_code == 200
+    r = client.post("/api/stt?hints=0", content=b"x" * 99, headers=_AUDIO)
+    assert r.status_code == 429
+    assert "budget" in r.json()["detail"].lower()
+    assert len(billed) == 1, "the second clip must not reach the biller"
+
+
+def test_the_cap_survives_a_state_file_it_cannot_write(client, billed, monkeypatch):
+    """An unwritable state dir must not quietly turn the budget off."""
+    monkeypatch.setattr(_srv, "_STT_DAILY_SECONDS", 600.0)
+    monkeypatch.setattr(_srv, "_STT_USAGE_PATH", "/proc/nonexistent/stt-usage.json")
+    assert client.post("/api/stt?hints=0", content=b"x" * 99, headers=_AUDIO).status_code == 200
+    assert client.post("/api/stt?hints=0", content=b"x" * 99, headers=_AUDIO).status_code == 429
+    assert len(billed) == 1
+
+
+def test_a_clip_longer_than_the_budget_leaves_is_refused(client, billed, monkeypatch):
+    """The gate on what is spent bounds the NEXT clip at zero, not this one:
+    with ten seconds of budget left, a twenty-second clip is still a clip that
+    would overrun it."""
+    monkeypatch.setattr(_srv, "_STT_DAILY_SECONDS", 610.0)
+    assert client.post("/api/stt?hints=0", content=b"x" * 99, headers=_AUDIO).status_code == 200
+    monkeypatch.setattr(_srv, "_clip_seconds", lambda audio, mime: 20.0)
+    r = client.post("/api/stt?hints=0", content=b"x" * 99, headers=_AUDIO)
+    assert r.status_code == 429
+    assert len(billed) == 1, "a clip that would overrun the day must not be sent"
+
+
+def test_a_clip_longer_than_the_console_can_record_is_refused(client, billed, monkeypatch):
+    monkeypatch.setattr(_srv, "_clip_seconds", lambda audio, mime: 400.0)
+    r = client.post("/api/stt?hints=0", content=b"x" * 99, headers=_AUDIO)
+    assert r.status_code == 413
+    assert not billed
+
+
+def test_an_unreadable_clip_still_goes_through_on_the_size_limit_alone(client, billed, monkeypatch):
+    """ffprobe missing, or a container it cannot parse: fall back, do not fail."""
+    monkeypatch.setattr(_srv, "_clip_seconds", lambda audio, mime: None)
+    assert client.post("/api/stt?hints=0", content=b"x" * 99, headers=_AUDIO).status_code == 200
+
+
+def test_a_transcriber_that_reports_no_duration_does_not_crash_the_meter(client, monkeypatch):
+    monkeypatch.setattr(stt, "transcribe", lambda *a, **k: {"text": "네", "seconds": None})
+    monkeypatch.setattr(_srv, "_clip_seconds", lambda audio, mime: 5.0)
+    r = client.post("/api/stt?hints=0", content=b"x" * 99, headers=_AUDIO)
+    assert r.status_code == 200
+    assert r.json()["spent_today"] == 0.0
+
+
+def test_a_junk_usage_file_reads_as_an_unspent_day(client, billed, tmp_path, monkeypatch):
+    bad = tmp_path / "stt-usage.json"
+    bad.write_text('{"day": "2026-01-01", "seconds": ["not", "a", "number"]}')
+    monkeypatch.setattr(_srv, "_STT_USAGE_PATH", str(bad))
+    assert client.post("/api/stt?hints=0", content=b"x" * 99, headers=_AUDIO).status_code == 200
+
+
+def test_a_commented_env_value_does_not_take_the_service_down(monkeypatch):
+    """systemd keeps inline comments in EnvironmentFile values (see CLAUDE.md)."""
+    monkeypatch.setenv("CTB_STT_DAILY_SECONDS", "1800  # 30분")
+    assert _srv._stt_daily_seconds() == 1800.0
+    monkeypatch.setenv("CTB_STT_DAILY_SECONDS", "not a number")
+    assert _srv._stt_daily_seconds() == 1800.0
+    monkeypatch.setenv("CTB_STT_DAILY_SECONDS", "600")
+    assert _srv._stt_daily_seconds() == 600.0

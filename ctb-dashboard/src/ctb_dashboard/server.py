@@ -15,6 +15,7 @@ import re
 import secrets
 import shutil
 import subprocess
+import threading
 import time
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -1600,10 +1601,116 @@ async def push_unsubscribe(body: dict):
 
 # --- speech to text ----------------------------------------------------------
 
-# Twenty seconds of Opus is well under a megabyte; ten is a clip that was
-# never meant for this.
-_STT_MAX_BYTES = 10 * 1024 * 1024
+# The console stops recording at STT_MAX_MS; two minutes of the highest
+# bitrate a phone browser produces is under four megabytes, so anything past
+# this did not come from the console at its own limits.
+_STT_MAX_BYTES = 4 * 1024 * 1024
 _STT_SCREEN_LINES = 40
+
+# The spend cap, in seconds of audio per day. The size limit bounds one clip
+# and the rate limiter bounds requests per minute; neither bounds the bill,
+# which is charged by the minute of audio. A mic left on, a page left open,
+# or a client that is not this console all end at the same wall.
+def _stt_daily_seconds() -> float:
+    """systemd does not strip inline comments from EnvironmentFile values, so
+    `CTB_STT_DAILY_SECONDS=1800  # 30분` arrives with the comment attached. A
+    ValueError here would run at import and, under Restart=always, loop the
+    service instead of starting it."""
+    raw = os.environ.get("CTB_STT_DAILY_SECONDS", "1800")
+    try:
+        return float(str(raw).split("#")[0].strip())
+    except ValueError:
+        logger.warning("CTB_STT_DAILY_SECONDS is not a number (%r); using 1800", raw)
+        return 1800.0
+
+
+# The longest clip the console can produce is STT_MAX_MS; anything past this
+# was not recorded by it, and is refused before a byte reaches the biller.
+_STT_MAX_SECONDS = 150.0
+
+
+def _clip_seconds(audio: bytes, mime: str) -> float | None:
+    """How long this clip actually is, or None if it cannot be told.
+
+    Size is not a proxy: four megabytes is two minutes of AAC or half an hour
+    of low-bitrate Opus, and a spend guard has to tell those apart. ffprobe
+    reads the container header, so it costs milliseconds and no decoding.
+    Absent ffprobe the caller falls back to the size limit alone.
+    """
+    ext = _stt.extension_for(mime)
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as fh:
+            fh.write(audio)
+            tmp_path = fh.name
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", tmp_path],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode != 0:
+            return None
+        return float(r.stdout.strip())
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+
+_STT_DAILY_SECONDS = _stt_daily_seconds()
+_STT_USAGE_PATH = os.path.join(_STATE_DIR, "stt-usage.json")
+_stt_usage_lock = threading.Lock()
+# The file is the record across restarts; this is the guard for when the file
+# cannot be written. Without it an unwritable state directory turns the budget
+# into a no-op that announces itself only in a log line (see _stt_usage_add).
+_stt_spent = {"day": "", "seconds": 0.0}
+
+
+def _stt_usage_today() -> tuple:
+    """(day, seconds) spent today, the higher of the file and what this
+    process has counted since it started.
+
+    A missing or junk file reads as zero -- losing the count across a restart
+    is a smaller failure than refusing to transcribe. An *unwritable* file is
+    a different matter: taking it as zero every time would silently retire the
+    budget, so the in-process total is consulted alongside it.
+    """
+    day = time.strftime("%Y-%m-%d", time.gmtime())
+    spent = _stt_spent["seconds"] if _stt_spent["day"] == day else 0.0
+    try:
+        with open(_STT_USAGE_PATH, encoding="utf-8") as fh:
+            saved = json.load(fh)
+        if saved.get("day") == day:
+            spent = max(spent, float(saved.get("seconds") or 0.0))
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return day, spent
+
+
+def _stt_usage_add(seconds: float) -> float:
+    """Add to today's total and return it. Never raises."""
+    with _stt_usage_lock:
+        day, spent = _stt_usage_today()
+        spent += max(0.0, seconds)
+        # In memory first: this is what keeps the cap standing when the write
+        # below is the thing that is broken.
+        _stt_spent["day"] = day
+        _stt_spent["seconds"] = spent
+        try:
+            os.makedirs(os.path.dirname(_STT_USAGE_PATH), exist_ok=True)
+            # Whole-file replace: a reader is not holding the lock, and a
+            # truncated file would read as zero and let a clip past the cap.
+            tmp = _STT_USAGE_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump({"day": day, "seconds": round(spent, 1)}, fh)
+            os.replace(tmp, _STT_USAGE_PATH)
+        except OSError as e:
+            logger.warning("stt usage write failed: %s", e)
+        return spent
 
 
 def _screen_lines_for_stt(name: str) -> list[str]:
@@ -1653,15 +1760,36 @@ async def stt_transcribe(request: Request, session: str = "", hints: int = 1):
     if not _rate_limiter.allow():
         _audit("stt", session, client, False, "rate_limited")
         raise HTTPException(status_code=429, detail="Too many control requests")
+    _, spent = _stt_usage_today()
+    left = _STT_DAILY_SECONDS - spent
+    if left <= 0:
+        _audit("stt", session, client, False, f"daily_cap_{int(spent)}s")
+        raise HTTPException(
+            status_code=429,
+            detail=(f"Daily speech budget spent ({int(spent)}s of "
+                    f"{int(_STT_DAILY_SECONDS)}s). Resets at 00:00 UTC."),
+        )
     audio = await request.body()
+    if not audio:
+        raise HTTPException(status_code=400, detail="Empty clip")
     if len(audio) > _STT_MAX_BYTES:
         _audit("stt", session, client, False, "too_large")
         raise HTTPException(status_code=413, detail="Clip too large")
-    if not audio:
-        raise HTTPException(status_code=400, detail="Empty clip")
     mime = request.headers.get("content-type", "") or "audio/webm"
 
     loop = asyncio.get_running_loop()
+    # A gate on what is already spent bounds the NEXT clip at zero; it does not
+    # bound this one. Four megabytes is two minutes of AAC or half an hour of
+    # low-bitrate Opus, so the length is measured rather than inferred from it.
+    allowed = min(_STT_MAX_SECONDS, left)
+    duration = await loop.run_in_executor(None, _clip_seconds, audio, mime)
+    if duration is not None and duration > allowed:
+        _audit("stt", session, client, False, f"too_long_{int(duration)}s")
+        raise HTTPException(
+            status_code=413 if duration > _STT_MAX_SECONDS else 429,
+            detail=(f"Clip is {int(duration)}s; the limit right now is "
+                    f"{int(allowed)}s ({int(left)}s of budget left today)."),
+        )
     if hints:
         await loop.run_in_executor(None, _refresh_glossary_if_stale)
         lines = await loop.run_in_executor(None, _screen_lines_for_stt, session) if session else []
@@ -1674,7 +1802,13 @@ async def stt_transcribe(request: Request, session: str = "", hints: int = 1):
     except _stt.TranscribeError as e:
         _audit("stt", session, client, False, f"upstream_{e.status}")
         raise HTTPException(status_code=502, detail=f"transcription failed ({e.status}): {e}")
-    _audit("stt", session, client, True, f"{result.get('seconds')}s")
+    # The transcriber bills by the minute of audio and reports what it
+    # counted, so the meter is its number, not ours.
+    spent = _stt_usage_add(float(result.get("seconds") or 0.0))
+    _audit("stt", session, client, True, f"{result.get('seconds')}s/{int(spent)}s")
+    result = dict(result)
+    result["spent_today"] = round(spent, 1)
+    result["daily_limit"] = _STT_DAILY_SECONDS
     return result
 
 

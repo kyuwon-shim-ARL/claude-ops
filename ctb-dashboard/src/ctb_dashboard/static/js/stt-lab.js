@@ -12,7 +12,8 @@
     items: [],
     idx: 0,
     hints: true,
-    stt: { rec: null, stream: null, chunks: [], startedAt: 0, holding: false, busy: false },
+    stt: { rec: null, stream: null, chunks: [], startedAt: 0, holding: false,
+           busy: false, cap: null, wake: null, wakePending: false },
     enabled: false,
   };
 
@@ -140,6 +141,24 @@
       rec.addEventListener('stop', sttFinish);
       rec.start();
       if (el.mic) el.mic.setAttribute('data-listening', '');
+      /* Same two-minute wall and the same wake lock as the console: a mic
+       * left on here is billed exactly the same. */
+      if (navigator.wakeLock && !stt.wake && !stt.wakePending) {
+        stt.wakePending = true;
+        try {
+          navigator.wakeLock.request('screen').then(function (lock) {
+            stt.wakePending = false;
+            /* Ended, or another lock won, while the request was in flight --
+             * dropping it here is what stops it leaking for good. */
+            if (!stt.rec || stt.wake) { lock.release().catch(function () {}); return; }
+            stt.wake = lock;
+          }).catch(function () { stt.wakePending = false; });
+        } catch (e) { stt.wakePending = false; }
+      }
+      stt.cap = setTimeout(function () {
+        stt.cap = null;
+        if (stt.rec) { stt.holding = false; sttStop(); }
+      }, 120000);
       setStatus('듣는 중… 손을 떼면 전사', 'var(--err)');
     }).catch(function (err) {
       stt.busy = false;
@@ -157,6 +176,14 @@
 
   function sttRelease() {
     var stt = state.stt;
+    if (stt.cap) { clearTimeout(stt.cap); stt.cap = null; }
+    stt.wakePending = false;
+    if (stt.wake) {
+      /* release() rejects when the browser already took the lock back, which
+       * it does whenever the page is hidden. That is a promise, not a throw. */
+      try { stt.wake.release().catch(function () {}); } catch (e) { /* gone */ }
+      stt.wake = null;
+    }
     if (stt.stream) stt.stream.getTracks().forEach(function (t) { t.stop(); });
     stt.stream = null; stt.rec = null; stt.chunks = [];
   }
@@ -180,6 +207,12 @@
       method: 'POST', body: blob, headers: { 'Content-Type': mime },
     }).then(function (res) {
       if (res.status === 403) { setStatus('토큰 거부됨 (403)', 'var(--err)'); return null; }
+      if (res.status === 429 || res.status === 413) {
+        return res.json().catch(function () { return {}; }).then(function (b) {
+          setStatus(String(b.detail || '거부됨 (' + res.status + ')').slice(0, 90), 'var(--err)');
+          return null;
+        });
+      }
       if (res.status === 503) { setStatus('STT 비활성 (503)', 'var(--err)'); return null; }
       return res.json().catch(function () { return {}; }).then(function (body) {
         return { status: res.status, body: body };

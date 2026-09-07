@@ -462,13 +462,16 @@
        * are doing with them rather than by how the pane reads them, and the
        * destructive end of the row is the far end: ⌫ ⇥ ↵ esc sit past the
        * arrows, and 입력 지우기 past those. */
-      ['y', 'y', '예'], ['n', 'n', '아니오'],
-      ['1', '1', '1번'], ['2', '2', '2번'], ['3', '3', '3번'],
-      ['4', '4', '4번'], ['5', '5', '5번'],
-      [icon('up'), 'Up', '위'], [icon('down'), 'Down', '아래'],
-      [icon('left'), 'Left', '왼쪽'], [icon('right'), 'Right', '오른쪽'],
-      [icon('backspace'), 'BSpace', '한 글자 지우기'], [icon('tab'), 'Tab', 'Tab'],
-      [icon('enter'), 'Enter', 'Enter'], ['esc', 'Escape', 'Escape — 진행 중인 작업 중단 · 메뉴 닫기'],
+      /* The fourth field is what survives a narrow screen: answering a prompt
+       * and stopping the work outrank moving a cursor, which outranks the
+       * editing keys the on-screen keyboard can do anyway. */
+      ['y', 'y', '예', 9], ['n', 'n', '아니오', 9],
+      ['1', '1', '1번', 8], ['2', '2', '2번', 8], ['3', '3', '3번', 7],
+      ['4', '4', '4번', 3], ['5', '5', '5번', 2],
+      [icon('up'), 'Up', '위', 6], [icon('down'), 'Down', '아래', 6],
+      [icon('left'), 'Left', '왼쪽', 4], [icon('right'), 'Right', '오른쪽', 4],
+      [icon('backspace'), 'BSpace', '한 글자 지우기', 3], [icon('tab'), 'Tab', 'Tab', 5],
+      [icon('enter'), 'Enter', 'Enter', 8], ['esc', 'Escape', 'Escape — 진행 중인 작업 중단 · 메뉴 닫기', 9],
     ].forEach(function (spec) {
       var b = document.createElement('button');
       b.type = 'button';
@@ -478,6 +481,7 @@
       b.setAttribute('aria-label', spec[2] + ' 키 전송');
       styleBtn(b, 'key');
       b.addEventListener('click', function () { sendKey(spec[1]); });
+      b.setAttribute('data-prio', String(spec[3]));
       keys.appendChild(b);
     });
 
@@ -503,6 +507,7 @@
     clearLine.setAttribute('aria-label', '세션 입력 지우기 키 전송');
     styleBtn(clearLine, '');
     clearLine.addEventListener('click', function () { sendKey('C-u'); });
+    clearLine.setAttribute('data-prio', '4');
     keys.appendChild(clearLine);
 
     /* Escape stops the work but leaves the prompt behind in the transcript,
@@ -521,7 +526,25 @@
     recall.setAttribute('aria-label', '\ub9c8\uc9c0\ub9c9 \uc694\uccad \uac00\uc838\uc624\uae30');
     styleBtn(recall, '');
     recall.addEventListener('click', recallLast);
+    recall.setAttribute('data-prio', '5');
     keys.appendChild(recall);
+
+    /* Unfolds whatever did not fit. Never folded itself, and only shown when
+     * something is behind it. */
+    var more = document.createElement('button');
+    more.type = 'button';
+    more.textContent = '\u22ef';
+    more.title = '\uac00\ub824\uc9c4 \ud0a4 \ubcf4\uae30';
+    more.setAttribute('aria-label', '\uac00\ub824\uc9c4 \ud0a4 \ubcf4\uae30');
+    more.setAttribute('aria-expanded', 'false');
+    styleBtn(more, 'key');
+    more.style.display = 'none';
+    more.addEventListener('click', function () {
+      keys.setAttribute('data-expanded', keys.hasAttribute('data-expanded') ? '' : '1');
+      if (!keys.getAttribute('data-expanded')) keys.removeAttribute('data-expanded');
+      fitKeys();
+    });
+    keys.appendChild(more);
 
     var row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:8px;align-items:flex-end;flex-shrink:0;';
@@ -694,7 +717,8 @@
     keepCaret(root, input);
     document.body.appendChild(root);
 
-    el = { root: root, strip: strip, title: title, status: status, tail: tail, mic: mic,
+    el = { keys: keys, keysMore: more,
+           root: root, strip: strip, title: title, status: status, tail: tail, mic: mic,
            frozen: frozen, bar: bar, barLabel: barLabel, input: input,
            send: send, silent: silent };
 
@@ -710,6 +734,17 @@
       window.visualViewport.addEventListener('resize', fitViewport);
       window.visualViewport.addEventListener('scroll', fitViewport);
     }
+    /* Rotation and a split view change the pad's width, and with it how many
+     * keys a row holds. The visual viewport moves for the keyboard too, which
+     * does not, so this listens to the layout viewport only. */
+    var fitPending = 0;
+    window.addEventListener('resize', function () {
+      if (!state.session || fitPending) return;
+      fitPending = requestAnimationFrame(function () { fitPending = 0; fitKeys(); });
+    });
+    window.addEventListener('orientationchange', function () {
+      if (state.session) setTimeout(fitKeys, 200);
+    });
     /* Scrolling up is the request for more history -- no button to find, and it
      * matches how every chat scrollback behaves.
      *
@@ -2213,6 +2248,106 @@
     box.focus();
   }
 
+  /* --- key pad fit ------------------------------------------------------
+   *
+   * The pad wraps, so its height is decided by the phone rather than by us:
+   * on an iPhone 12 the seventeenth key tipped it from two rows to three,
+   * and the third row comes straight out of the pane the console exists to
+   * show. Rather than tuning key sizes until it happens to fit one device,
+   * the rows are counted from measured widths and the lowest-priority keys
+   * are folded away until it fits, with one ⋯ key left to unfold them.
+   *
+   * How many rows this many keys of these widths need in this much space,
+   * laid out the way flex-wrap lays them out. Pure; tested. */
+  function rowsNeeded(widths, gap, trayWidth) {
+    if (!(trayWidth > 0)) return 1;
+    var rows = 1;
+    var x = 0;
+    for (var i = 0; i < widths.length; i++) {
+      var w = widths[i];
+      if (x === 0) { x = w; continue; }
+      if (x + gap + w > trayWidth + 0.5) { rows++; x = w; }
+      else x += gap + w;
+    }
+    return rows;
+  }
+
+  /* Which keys to fold away so the pad fits maxRows. Keys are dropped from
+   * the lowest priority up, and once anything is dropped the ⋯ key needs a
+   * slot of its own, so its width joins the calculation. Returns the indices
+   * to hide, lowest priority first. Pure; tested. */
+  function planKeys(widths, prios, gap, trayWidth, maxRows, moreWidth) {
+    if (rowsNeeded(widths, gap, trayWidth) <= maxRows) return [];
+    /* Least important first, and among equals the later key goes first: the
+     * pad reads left to right in the order things are usually needed. */
+    var order = [];
+    for (var i = 0; i < widths.length; i++) order.push(i);
+    order.sort(function (a, b) { return prios[a] - prios[b] || b - a; });
+    var hidden = [];
+    for (var k = 0; k < order.length; k++) {
+      hidden.push(order[k]);
+      var kept = [];
+      for (var j = 0; j < widths.length; j++) {
+        if (hidden.indexOf(j) === -1) kept.push(widths[j]);
+      }
+      kept.push(moreWidth);
+      if (rowsNeeded(kept, gap, trayWidth) <= maxRows) break;
+    }
+    return hidden;
+  }
+
+  /* Measure the pad as it actually renders on this device, then fold. Every
+   * key is shown first so its own width is read rather than guessed -- an
+   * icon key and 예 are not the same size -- and the plan is applied in one
+   * pass. Expanded, nothing is folded and the pad may take a third row,
+   * which is then the user's choice rather than ours. */
+  var KEY_MAX_ROWS = 2;
+
+  function fitKeys() {
+    var tray = el.keys, more = el.keysMore;
+    if (!tray || !more) return;
+    var buttons = [];
+    var kids = tray.children;
+    for (var i = 0; i < kids.length; i++) {
+      if (kids[i] !== more) buttons.push(kids[i]);
+    }
+    if (!buttons.length) return;
+
+    /* Unfold everything to measure; offsetWidth of a display:none key is 0. */
+    buttons.forEach(function (b) { b.style.display = ''; });
+    more.style.display = 'none';
+    if (tray.hasAttribute('data-expanded')) {
+      more.style.display = '';
+      more.setAttribute('aria-expanded', 'true');
+      more.textContent = '\u00d7';
+      more.title = '\uac00\ub824\uc9c4 \ud0a4 \uc811\uae30';
+      more.setAttribute('aria-label', '\uac00\ub824\uc9c4 \ud0a4 \uc811\uae30');
+      return;
+    }
+
+    var cs = window.getComputedStyle(tray);
+    var gap = parseFloat(cs.gap || cs.columnGap);
+    if (!(gap >= 0)) gap = 8;
+    var pad = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+    var trayWidth = tray.clientWidth - pad;
+    var widths = buttons.map(function (b) { return b.getBoundingClientRect().width; });
+    var prios = buttons.map(function (b) { return parseFloat(b.getAttribute('data-prio')) || 5; });
+
+    more.style.display = '';
+    var moreWidth = more.getBoundingClientRect().width;
+    more.style.display = 'none';
+
+    var hidden = planKeys(widths, prios, gap, trayWidth, KEY_MAX_ROWS, moreWidth);
+    hidden.forEach(function (idx) { buttons[idx].style.display = 'none'; });
+    if (hidden.length) {
+      more.style.display = '';
+      more.setAttribute('aria-expanded', 'false');
+      more.textContent = '\u22ef';
+      more.title = hidden.length + '\uac1c \ud0a4 \ub354 \ubcf4\uae30';
+      more.setAttribute('aria-label', hidden.length + '\uac1c \ud0a4 \ub354 \ubcf4\uae30');
+    }
+  }
+
   function renderTail(text) {
     var lines = text.split('\n');
     state.lines = lines;
@@ -2657,7 +2792,8 @@
   var stt = { rec: null, stream: null, chunks: [], startedAt: 0, holding: false,
               enabled: false, busy: false, tick: null,
               audio: null, raf: 0, level: 0, quiet: false,
-              peak: 0, metered: false };
+              peak: 0, metered: false,
+              cap: null, wake: null, wakePending: false };
 
   /* The key shows the phase: red and pulsing while listening, amber with a
    * turning icon while the clip is being transcribed, plain otherwise. */
@@ -2769,6 +2905,48 @@
     return '';
   }
 
+  /* Two minutes is longer than any prompt anyone dictates, and short enough
+   * that a mic left on by accident costs a rounding error rather than an
+   * hour of billed audio. The recording is stopped, not thrown away: what
+   * was said up to the wall still gets transcribed. */
+  var STT_MAX_MS = 120000;
+
+  /* A screen that sleeps mid-sentence backgrounds the page, and a backgrounded
+   * page stops feeding MediaRecorder -- the recording appears to hang with
+   * the key still red. Holding the screen awake for the length of a clip is
+   * the fix; where the API is missing (older iOS, a non-secure origin) the
+   * hard stop below is still the floor. */
+  function wakeDrop(lock) {
+    /* release() returns a promise and REJECTS when the lock is already gone,
+     * which the browser does on its own every time the page is hidden -- the
+     * common path here. A try/catch cannot see an async rejection. */
+    if (lock && lock.release) { try { lock.release().catch(function () {}); } catch (e) { /* gone */ } }
+  }
+
+  function wakeAcquire() {
+    /* wakePending, not just stt.wake: the request takes a moment to resolve,
+     * and without this a stop-and-start inside that window issued a second
+     * request whose lock overwrote the first -- which was then never
+     * released, and the screen never slept again. */
+    if (!navigator.wakeLock || stt.wake || stt.wakePending) return;
+    stt.wakePending = true;
+    try {
+      navigator.wakeLock.request('screen').then(function (lock) {
+        stt.wakePending = false;
+        /* The clip ended, or another lock won, while this was in flight. */
+        if (!stt.rec || stt.wake) { wakeDrop(lock); return; }
+        stt.wake = lock;
+      }).catch(function () { stt.wakePending = false; });
+    } catch (e) { stt.wakePending = false; }
+  }
+
+  function wakeRelease() {
+    var lock = stt.wake;
+    stt.wake = null;
+    stt.wakePending = false;
+    wakeDrop(lock);
+  }
+
   function sttStart() {
     if (stt.rec || stt.busy || !state.session) return;
     stt.busy = true;
@@ -2784,6 +2962,14 @@
       rec.start();
       micPhase('recording');
       micLevelStart(stream);
+      wakeAcquire();
+      stt.cap = setTimeout(function () {
+        stt.cap = null;
+        if (!stt.rec) return;
+        setStatus('2\ubd84 \uc81c\ud55c \u00b7 \uc5ec\uae30\uae4c\uc9c0 \uc804\uc0ac\ud569\ub2c8\ub2e4', 'var(--con-warn)');
+        stt.holding = false;
+        sttStop();
+      }, STT_MAX_MS);
       if (navigator.vibrate) { try { navigator.vibrate(15); } catch (e) { /* no haptics */ } }
       micTick('듣는 중', 'var(--con-err)', stt.startedAt);
     }).catch(function (err) {
@@ -2812,6 +2998,8 @@
   }
 
   function sttRelease() {
+    if (stt.cap) { clearTimeout(stt.cap); stt.cap = null; }
+    wakeRelease();
     if (stt.stream) stt.stream.getTracks().forEach(function (t) { t.stop(); });
     stt.stream = null; stt.rec = null; stt.chunks = [];
   }
@@ -2854,7 +3042,14 @@
       var text = (r.body.text || '').trim();
       if (!text) { setStatus('들리는 말이 없음', 'var(--con-warn)'); return; }
       sttDraft(text);
-      setStatus('초안 삽입됨 · 확인 후 Enter', 'var(--con-ok)');
+      /* The budget only matters as it runs out, so it is shown from the last
+       * quarter on rather than kept as a number nobody reads. */
+      var left = (typeof r.body.daily_limit === 'number' && typeof r.body.spent_today === 'number')
+        ? r.body.daily_limit - r.body.spent_today : null;
+      setStatus('초안 삽입됨 · 확인 후 Enter'
+        + (left !== null && left < r.body.daily_limit * 0.25
+           ? ' · 오늘 남은 음성 ' + Math.max(0, Math.round(left)) + '초' : ''),
+        'var(--con-ok)');
     }).catch(function () {
       micPhase('');
       if (state.session === forSession) setStatus('전사 실패 · 네트워크', 'var(--con-err)');
@@ -3249,6 +3444,7 @@
     renderStrip();
     fetchOrder();
     fitViewport();
+    fitKeys();
     startPolling();
     if (kept) pollTail(true);
     // Do not autofocus on open: on iOS that pops the keyboard before the pane
@@ -3286,6 +3482,15 @@
   /* Stop polling when the tab is hidden -- a backgrounded phone should not keep
    * spawning capture-pane on the server. */
   document.addEventListener('visibilitychange', function () {
+    /* A recording outlives the page going away, but nothing feeds it there:
+     * the key stayed red and the clip never finished. Close it off instead --
+     * what was said is transcribed rather than lost, and the mic is handed
+     * back. Checked before the session guard: a clip is running or it is not. */
+    if (document.hidden && stt.rec) {
+      setStatus('\ud654\uba74\uc774 \uaebc\uc838 \ub179\uc74c\uc744 \ub9c8\uac10\ud569\ub2c8\ub2e4', 'var(--con-warn)');
+      stt.holding = false;
+      sttStop();
+    }
     if (!state.session) return;
     if (document.hidden) stopPolling();
     else startPolling();
@@ -3357,6 +3562,8 @@
     _findPendingInput: findPendingInput,
     _findLastSubmitted: findLastSubmitted,
     _pageTail: pageTail,
+    _rowsNeeded: rowsNeeded,
+    _planKeys: planKeys,
     /* build() reassigns el, so hand back the live object, not the one that
      * happened to be current when this table was built. */
     _els: function () { return el; },
