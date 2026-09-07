@@ -21,7 +21,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import AsyncGenerator, Dict, Any
+from typing import AsyncGenerator, Dict, Any, Optional
 from pathlib import Path
 import markdown as _markdown
 import bleach as _bleach
@@ -74,7 +74,7 @@ from scanner import find_rpt_artifact as _find_rpt_artifact  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-POLL_INTERVAL = 3  # seconds between state refreshes
+POLL_INTERVAL = 2  # seconds between state refreshes
 # Default stays 0.0.0.0 (reachable over Tailscale). Narrowing the listener is
 # opt-in via CTB_BIND_HOST because this runs under systemd Restart=always:
 # hard-binding to an interface that is not up yet at boot would loop forever.
@@ -213,6 +213,35 @@ class PinnedRequest(BaseModel):
 # --- Session Poller (reuses SessionStateAnalyzer for accurate detection) ---
 
 _cached_state: Dict[str, Any] = {"version": 1, "updated_at": 0, "sessions": [], "_hash": ""}
+
+# The poller *publishes*: it installs the snapshot, bumps the revision and
+# wakes every waiting stream at once. Each publish swaps in a fresh Event so
+# waiters on the old one are released and later arrivals wait on the new one;
+# a stream that was busy sending when polls landed compares the revision it
+# last saw and does not wait at all. Created lazily so it binds to the loop
+# that actually serves (module import happens before uvicorn's loop exists).
+_state_rev: int = 0
+_state_changed: Optional[asyncio.Event] = None
+SSE_HEARTBEAT_SECONDS = 30  # resend even when unchanged: bounds staleness of unhashed fields
+SLOW_POLL_WARN_MS = 1500
+
+
+async def _publish_state(snapshot: Dict[str, Any], poll_ms: int) -> None:
+    global _cached_state, _state_rev, _state_changed
+    snapshot["published_at"] = time.time()
+    snapshot["poll_ms"] = poll_ms
+    _cached_state = snapshot
+    _state_rev += 1
+    waiters, _state_changed = _state_changed, asyncio.Event()
+    if waiters is not None:
+        waiters.set()
+
+
+def _state_event() -> asyncio.Event:
+    global _state_changed
+    if _state_changed is None:
+        _state_changed = asyncio.Event()
+    return _state_changed
 # Not /tmp. This host sweeps it (`q /tmp ... 10d`), and pins are configuration,
 # not scratch: they gate every completion alert, so losing them turns alerts off
 # silently and permanently. That is exactly how "notifications used to come and
@@ -547,6 +576,25 @@ def _push_completions(session_list: list) -> None:
         logger.warning("Completion push failed: %s", e)
 
 
+def _content_hash(session_list: list) -> str:
+    """What the stream compares to decide a push is worth sending.
+
+    Every field a card paints is in here, in list order (order is the
+    mtime sort, so a reorder is a visible change). last_activity is left
+    out on purpose: it is tmux's activity epoch and ticks on every poll for
+    any live session, which would turn every poll into a full push to every
+    client. The heartbeat bounds how stale it can get instead.
+    """
+    content_key = json.dumps([
+        (s["name"], s["state"], bool(s.get("completed_at")),
+         s.get("context_percent"), s.get("last_prompt", ""), s.get("work_context", ""),
+         s.get("recap", ""), s.get("progress"), s.get("last_reply", ""),
+         s.get("pending_count"), s.get("working_since"))
+        for s in session_list
+    ], sort_keys=True)
+    return hashlib.md5(content_key.encode()).hexdigest()[:8]
+
+
 def _poll_sessions() -> Dict[str, Any]:
     """Poll all tmux sessions and return state dict using SessionStateAnalyzer."""
     global _prev_session_timestamps
@@ -619,14 +667,7 @@ def _poll_sessions() -> Dict[str, Any]:
     _push_completions(session_list)
     _push_unsent_drafts(session_list)
 
-    # Content hash for SSE change detection (includes dynamic fields for real-time updates)
-    content_key = json.dumps([
-        (s["name"], s["state"], bool(s.get("completed_at")),
-         s.get("context_percent"), s.get("last_prompt", ""), s.get("work_context", ""),
-         s.get("recap", ""))
-        for s in session_list
-    ], sort_keys=True)
-    content_hash = hashlib.md5(content_key.encode()).hexdigest()[:8]
+    content_hash = _content_hash(session_list)
 
     # Clean up timestamps and prompt cache for removed sessions
     active_names = {s["name"] for s in session_list}
@@ -771,13 +812,18 @@ async def _purge_consumed_loop() -> None:
 
 async def _background_poller():
     """Background task that polls sessions every POLL_INTERVAL seconds."""
-    global _cached_state
     logger.info("Background poller started")
     while True:
         try:
             loop = asyncio.get_running_loop()
-            _cached_state = await loop.run_in_executor(None, _poll_sessions)
-            logger.debug(f"Polled {len(_cached_state.get('sessions', []))} sessions")
+            t0 = time.monotonic()
+            snapshot = await loop.run_in_executor(None, _poll_sessions)
+            poll_ms = int((time.monotonic() - t0) * 1000)
+            await _publish_state(snapshot, poll_ms)
+            if poll_ms > SLOW_POLL_WARN_MS:
+                logger.warning("Slow poll: %dms for %d sessions (pushes and persistence included)",
+                               poll_ms, len(snapshot.get("sessions", [])))
+            logger.debug(f"Polled {len(snapshot.get('sessions', []))} sessions in {poll_ms}ms")
         except Exception as e:
             logger.warning(f"Poller error: {e}", exc_info=True)
         await asyncio.sleep(POLL_INTERVAL)
@@ -935,15 +981,34 @@ async def get_sessions():
     return _cached_state
 
 
-async def _session_event_generator() -> AsyncGenerator[dict, None]:
-    """Yield session state as SSE events only when session data actually changes."""
+async def _session_event_generator(
+    clock=time.monotonic, heartbeat: float = SSE_HEARTBEAT_SECONDS,
+) -> AsyncGenerator[dict, None]:
+    """Yield the snapshot when its content changes, or every `heartbeat`s regardless.
+
+    Waits on the publish event rather than sleeping a fixed interval, so a
+    change reaches the browser as soon as the poll that saw it lands. The
+    heartbeat is a deadline, not a counter: it is the latest *published*
+    snapshot within `heartbeat` seconds for a client that is keeping up. It
+    says nothing about a stalled poller or a backed-up connection.
+    """
     last_hash = ""
+    seen = -1
+    next_beat = clock() + heartbeat
     while True:
-        current_hash = _cached_state.get("_hash", "")
-        if current_hash and current_hash != last_hash:
+        if _state_rev == seen:
+            try:
+                await asyncio.wait_for(_state_event().wait(), max(0.0, next_beat - clock()))
+            except asyncio.TimeoutError:
+                pass
+        seen = _state_rev
+        snapshot = _cached_state
+        now = clock()
+        current_hash = snapshot.get("_hash", "")
+        if (current_hash and current_hash != last_hash) or now >= next_beat:
             last_hash = current_hash
-            yield {"event": "sessions", "data": json.dumps(_cached_state, ensure_ascii=False)}
-        await asyncio.sleep(POLL_INTERVAL)
+            next_beat = now + heartbeat
+            yield {"event": "sessions", "data": json.dumps(snapshot, ensure_ascii=False)}
 
 
 @app.get("/api/sessions/stream")
