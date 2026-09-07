@@ -257,6 +257,7 @@ def test_launch_argv_matches_cs_convention(root, monkeypatch):
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     monkeypatch.setattr(session_create, "_run", fake_run)
+    monkeypatch.setattr(session_create, "_agents_json", lambda: [])
     monkeypatch.setattr(session_create, "_claude_history_exists", lambda p: False)
     REAL_LAUNCH("claude_alpha_wt_feat", Path("/tmp/x"))
 
@@ -279,6 +280,7 @@ def test_launch_resumes_when_history_exists(root, monkeypatch):
     monkeypatch.setattr(session_create, "_run",
                         lambda argv, timeout=None: (calls.append(argv),
                                                     subprocess.CompletedProcess(argv, 0, "", ""))[1])
+    monkeypatch.setattr(session_create, "_agents_json", lambda: [])
     monkeypatch.setattr(session_create, "_claude_history_exists", lambda p: True)
     REAL_LAUNCH("claude_alpha", Path("/tmp/x"))
     assert "--continue" in calls[0][-1]

@@ -7,7 +7,7 @@ Type=simple
 WorkingDirectory=/home/kyuwon/projects/claude-ops/ctb-dashboard
 # /home/kyuwon/bin 을 맨 앞에 — tmux 3.6a(유저가 세션 만든 버전)를 잡아야 함.
 # 시스템 기본 /usr/bin/tmux(2.7)는 3.6a 서버에 "lost server" → 세션 인식 실패.
-Environment=PATH=/home/kyuwon/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+Environment=PATH=/home/kyuwon/bin:/home/kyuwon/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 # .env 는 봇과 공유하는 단일 SoT. '-' 접두 = 파일 부재 시에도 기동.
 # 주의: systemd 는 인라인 주석을 제거하지 않으므로 .env 에 'KEY=값  # 주석' 형태를 쓰지 말 것.
 EnvironmentFile=-/home/kyuwon/projects/claude-ops/.env

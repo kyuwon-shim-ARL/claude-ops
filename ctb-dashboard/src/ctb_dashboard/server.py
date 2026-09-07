@@ -42,6 +42,7 @@ from .session_delete import check_delete_safety, delete_session
 from . import session_restore as _restore
 from .session_create import (
     CreateError,
+    claude_command,
     create_session,
     list_projects,
     list_worktrees,
@@ -2097,26 +2098,29 @@ async def focus_session(req: FocusRequest, request: Request):
     except Exception:
         pass  # No attached client or tmux not available
 
-    # 3. If Claude Code is not running in the session pane, start it
+    # 3. If Claude Code is not running in the session pane, start it. Which
+    #    command brings it up depends on the directory: attach when the
+    #    daemon holds its conversation in the background, else --continue.
     _SHELL_CMDS = {"bash", "zsh", "sh", "fish", "dash", "ksh", "tcsh"}
-    _CLAUDE_CMD = "claude --continue --dangerously-skip-permissions"
-    _WRAPPER = f"bash --login -c '{_CLAUDE_CMD}; exec bash --login'"
     claude_started = False
     try:
         pane_info_result = subprocess.run(
             ["tmux", "display-message", "-p", "-t", req.session,
-             "#{pane_dead} #{pane_current_command} #{pane_pid}"],
+             "#{pane_dead} #{pane_current_command} #{pane_pid} #{pane_current_path}"],
             capture_output=True, text=True, timeout=3,
         )
-        parts = pane_info_result.stdout.strip().split(None, 2)
+        parts = pane_info_result.stdout.strip().split(None, 3)
         pane_dead = parts[0] if parts else "0"
         pane_cmd = parts[1] if len(parts) > 1 else ""
         pane_pid = parts[2] if len(parts) > 2 else ""
+        pane_path = parts[3] if len(parts) > 3 else ""
 
         if pane_dead == "1":
             # remain-on-exit으로 pane이 죽어있는 경우 → respawn with claude wrapper
+            cmd = claude_command(Path(pane_path))
             subprocess.run(
-                ["tmux", "respawn-pane", "-k", "-t", req.session, _WRAPPER],
+                ["tmux", "respawn-pane", "-k", "-t", req.session,
+                 f"bash --login -c '{cmd}; exec bash --login'"],
                 capture_output=True, timeout=5,
             )
             claude_started = True
@@ -2136,7 +2140,7 @@ async def focus_session(req: FocusRequest, request: Request):
             if not claude_running:
                 subprocess.run(
                     ["tmux", "send-keys", "-t", req.session,
-                     "claude --continue --dangerously-skip-permissions", "Enter"],
+                     claude_command(Path(pane_path)), "Enter"],
                     capture_output=True, timeout=3,
                 )
                 claude_started = True

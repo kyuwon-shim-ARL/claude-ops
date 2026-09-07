@@ -15,6 +15,7 @@ a pane to read instead of vanishing, and ``--continue`` when this directory has
 prior Claude history.
 """
 
+import json
 import logging
 import os
 import re
@@ -311,13 +312,52 @@ def _claude_history_exists(path: Path) -> bool:
         return False
 
 
-def launch_session(session: str, path: Path) -> None:
-    """Start a detached tmux session running Claude, the way ``cs`` does."""
+def _agents_json() -> list[dict]:
+    """What Claude Code's daemon is holding: ``claude agents --json``."""
     claude_bin = os.environ.get("CTB_CLAUDE_BIN", "claude")
+    r = _run([claude_bin, "agents", "--json"], timeout=_TMUX_TIMEOUT)
+    if r.returncode != 0:
+        raise RuntimeError((r.stderr or r.stdout).strip()[:200])
+    return json.loads(r.stdout)
+
+
+def _background_holder(path: Path) -> Optional[str]:
+    """Id of the newest live background session started in ``path``, if any.
+
+    Claude Code 2.1.x can move a conversation into its daemon (a slash command
+    forked one that way). Once it has, ``claude --continue`` in that directory
+    refuses -- "Your most recent conversation is running in the background" --
+    and the only way back into it from a pane is ``claude attach <id>``. An
+    entry without a pid is a finished or stale record, not a holder.
+    """
+    try:
+        rows = _agents_json()
+    except Exception as e:  # noqa: BLE001 -- no daemon, no CLI: launch as before
+        logger.warning("claude agents --json unavailable, relaunching with --continue: %s", e)
+        return None
+    live = [r for r in rows
+            if r.get("kind") == "background" and r.get("pid") and r.get("id")
+            and r.get("cwd") == str(path)]
+    if not live:
+        return None
+    return max(live, key=lambda r: r.get("startedAt", 0))["id"]
+
+
+def claude_command(path: Path) -> str:
+    """The command that brings Claude up in ``path``: attach, continue, or fresh."""
+    claude_bin = os.environ.get("CTB_CLAUDE_BIN", "claude")
+    holder = _background_holder(path)
+    if holder:
+        return f"{claude_bin} attach {holder}"
     flags = "--continue --dangerously-skip-permissions" if _claude_history_exists(path) \
         else "--dangerously-skip-permissions"
+    return f"{claude_bin} {flags}"
+
+
+def launch_session(session: str, path: Path) -> None:
+    """Start a detached tmux session running Claude, the way ``cs`` does."""
     window = session[len("claude_"):] if session.startswith("claude_") else session
-    inner = f"{claude_bin} {flags}; exec bash --login"
+    inner = f"{claude_command(path)}; exec bash --login"
 
     r = _run(
         ["tmux", "new-session", "-d", "-s", session, "-n", window, "-c", str(path),
