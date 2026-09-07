@@ -455,6 +455,64 @@ def _save_pushed_completions() -> None:
 _pushed_completions: Dict[str, float] = _load_pushed_completions()
 
 
+# A draft left in a session's input box: the text, when it was first seen,
+# and what we have already pushed about it. A push is worth one nag, not one
+# per poll, so the text itself is the key -- edit it and the clock restarts.
+_UNSENT_AFTER_S = 90.0
+_unsent_seen: Dict[str, tuple] = {}
+_unsent_pushed: Dict[str, str] = {}
+
+
+def _push_unsent_drafts(session_list: list) -> None:
+    """Push about typed-but-unsent text sitting in a session's input box.
+
+    The failure this catches is silent by construction: a prompt is written,
+    Enter is never pressed, and the session simply sits there looking idle.
+    Only text the user typed counts -- Claude Code also draws *suggestions*
+    in that same box, and pushing about those would be nagging someone about
+    words they never wrote. box_is_ghost() tells the two apart by the dim
+    attribute the suggestion is drawn with.
+
+    Pinned sessions only, and never raising, for the same reasons as
+    _push_completions.
+    """
+    try:
+        pinned = pinned_session_names()
+        if not pinned:
+            return
+        now = time.time()
+        for entry in session_list:
+            name = entry.get("name")
+            if name not in pinned:
+                continue
+            box = _box_draft(name)
+            if not box or box[1]:      # empty box, or a suggestion nobody typed
+                _unsent_seen.pop(name, None)
+                _unsent_pushed.pop(name, None)
+                continue
+            text = box[0]
+            seen = _unsent_seen.get(name)
+            if not seen or seen[0] != text:
+                # Still being written. Start the clock over.
+                _unsent_seen[name] = (text, now)
+                _unsent_pushed.pop(name, None)
+                continue
+            waited = now - seen[1]
+            if waited < _UNSENT_AFTER_S or _unsent_pushed.get(name) == text:
+                continue
+            _unsent_pushed[name] = text
+            short = name.replace("claude_", "", 1)
+            preview = " ".join(text.split())[:90]
+            delivered = push.notify(
+                name, f"{int(waited // 60)}분째 전송되지 않았습니다 — {preview}",
+                title=f"✏️ {short} · 미전송 입력",
+            )
+            logger.info("Unsent-draft push for %s: delivered to %d subscriber(s)",
+                        name, delivered)
+    except Exception as e:  # noqa: BLE001 -- a nag must never take polling down
+        logger.warning("Unsent-draft push failed: %s", e)
+
+
 def _push_completions(session_list: list) -> None:
     """Push a finished session to every subscribed phone.
 
@@ -558,6 +616,7 @@ def _poll_sessions() -> Dict[str, Any]:
         session_list.append(entry)
 
     _push_completions(session_list)
+    _push_unsent_drafts(session_list)
 
     # Content hash for SSE change detection (includes dynamic fields for real-time updates)
     content_key = json.dumps([
@@ -573,6 +632,10 @@ def _poll_sessions() -> Dict[str, Any]:
     _prev_session_timestamps = {k: v for k, v in _prev_session_timestamps.items() if k in active_names}
     for gone in set(_pushed_completions) - active_names:
         del _pushed_completions[gone]
+    for gone in set(_unsent_seen) - active_names:
+        del _unsent_seen[gone]
+    for gone in set(_unsent_pushed) - active_names:
+        del _unsent_pushed[gone]
     for gone in set(_last_known_prompt) - active_names:
         del _last_known_prompt[gone]
 
@@ -984,6 +1047,38 @@ def box_is_ghost(raw_lines: list[str]) -> bool | None:
         after_prompt = head[head.index("\u276f"):]
         return bool(_DIM_RE.search(after_prompt))
     return None
+
+
+def box_draft(raw_lines: list[str]) -> tuple | None:
+    """The text in Claude Code's input box and whether it is a suggestion.
+
+    -> (text, ghost) for a box with something in it, else None. The escape
+    codes carry the answer, so both come off the one capture; see
+    box_is_ghost() for how a suggestion is told from typed text.
+    """
+    for raw in reversed(raw_lines):
+        plain = _SGR_RE.sub("", raw)
+        m = _BOX_RE.match(plain)
+        if not m:
+            continue
+        text = m.group(1).rstrip()
+        if not text:
+            return None
+        return text, bool(box_is_ghost([raw]))
+    return None
+
+
+def _box_draft(name: str) -> tuple | None:
+    try:
+        r = subprocess.run(
+            ["tmux", "capture-pane", "-t", name, "-p", "-e", "-S-15"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if r.returncode != 0:
+        return None
+    return box_draft(r.stdout.split("\n"))
 
 
 def _box_ghost(name: str) -> bool | None:

@@ -499,6 +499,24 @@
     clearLine.addEventListener('click', function () { sendKey('C-u'); });
     keys.appendChild(clearLine);
 
+    /* Escape stops the work but leaves the prompt behind in the transcript,
+     * where it cannot be edited. This brings it back down into the box --
+     * from the session's own input line when something is sitting there
+     * unsent (and clears that line, so the text lives in one place), else
+     * from the last request that was actually submitted. */
+    var recall = document.createElement('button');
+    recall.type = 'button';
+    recall.appendChild(icon('copy', 16));
+    var recallLabel = document.createElement('span');
+    recallLabel.className = 'con-key-label';
+    recallLabel.textContent = '\uac00\uc838\uc624\uae30';
+    recall.appendChild(recallLabel);
+    recall.title = '\ub9c8\uc9c0\ub9c9 \uc694\uccad\uc744 \uc544\ub798 \uc785\ub825\ucc3d\uc73c\ub85c \ubcf5\uc0ac \u2014 \uc138\uc158 \uc785\ub825\ucc3d\uc5d0 \uc548 \ubcf4\ub0b8 \uae00\uc774 \uc788\uc73c\uba74 \uadf8\uac83\uc744 \uc637\uae30\uace0 \ube44\uc6c1\ub2c8\ub2e4';
+    recall.setAttribute('aria-label', '\ub9c8\uc9c0\ub9c9 \uc694\uccad \uac00\uc838\uc624\uae30');
+    styleBtn(recall, '');
+    recall.addEventListener('click', recallLast);
+    keys.appendChild(recall);
+
     var row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:8px;align-items:flex-end;flex-shrink:0;';
 
@@ -2089,6 +2107,59 @@
     return null;
   }
 
+  /* The last prompt the user actually submitted, for pulling back in after an
+   * Escape. Submitted prompts are drawn flush left; the input box and the
+   * menus ("\u276f No, exit") are drawn inside a frame, indented and under a
+   * rule -- so column zero plus no rule above is what separates them.
+   * Wrapped tails are the indented lines that follow, to the first blank.
+   * Pure; tested. */
+  function findLastSubmitted(lines) {
+    for (var i = lines.length - 1; i >= 0; i--) {
+      if (lines[i].charAt(0) !== '\u276f') continue;
+      var text = lines[i].slice(1).replace(/^[\s\u00a0]+|[\s\u00a0]+$/g, '');
+      if (!text) continue;
+      if (i > 0 && RULE_RE.test(lines[i - 1])) continue;   /* that is the box */
+      var parts = [text];
+      for (var j = i + 1; j < lines.length; j++) {
+        if (!/^[\s\u00a0]{2,}\S/.test(lines[j])) break;
+        parts.push(lines[j].replace(/^[\s\u00a0]+|[\s\u00a0]+$/g, ''));
+      }
+      return parts.join(' ');
+    }
+    return '';
+  }
+
+  /* Replaces the box rather than appending: this is "let me edit that one",
+   * not "add to what I am writing". A draft already in the box would be lost,
+   * so it is kept in front of the recalled text instead. */
+  function recallLast() {
+    if (!state.session || !el.input) return;
+    var pending = state.pending;
+    if (pending && pending.text && !state.ghost) {
+      putRecalled(pending.text);
+      sendKey('C-u', '\uc785\ub825 \uc625\uae30\uae30');
+      setStatus('\uc138\uc158 \uc785\ub825\ucc3d\uc5d0\uc11c \uc637\uaca8\uc654\uc2b5\ub2c8\ub2e4 \u00b7 \uc218\uc815 \ud6c4 Enter', 'var(--con-ok)');
+      return;
+    }
+    var last = findLastSubmitted(state.lines || []);
+    if (!last) { setStatus('\uac00\uc838\uc62c \uc694\uccad\uc774 \uc5c6\uc2b5\ub2c8\ub2e4', 'var(--con-warn)'); return; }
+    putRecalled(last);
+    setStatus('\ub9c8\uc9c0\ub9c9 \uc694\uccad\uc744 \uac00\uc838\uc654\uc2b5\ub2c8\ub2e4 \u00b7 \uc218\uc815 \ud6c4 Enter', 'var(--con-ok)');
+  }
+
+  function putRecalled(text) {
+    var box = el.input;
+    var kept = box.value.trim();
+    box.value = kept ? kept + '\n' + text : text;
+    var caret = box.value.length;
+    try { box.setSelectionRange(caret, caret); } catch (e) { /* not focusable yet */ }
+    if (state.session) { state.drafts[state.session] = box.value; saveDrafts(); }
+    box.classList.remove('con-flash');
+    void box.offsetWidth;
+    box.classList.add('con-flash');
+    box.focus();
+  }
+
   function renderTail(text) {
     var lines = text.split('\n');
     state.lines = lines;
@@ -2532,7 +2603,8 @@
    * transcript can be wrong, and Enter is the check. */
   var stt = { rec: null, stream: null, chunks: [], startedAt: 0, holding: false,
               enabled: false, busy: false, tick: null,
-              audio: null, raf: 0, level: 0, quiet: false };
+              audio: null, raf: 0, level: 0, quiet: false,
+              peak: 0, metered: false };
 
   /* The key shows the phase: red and pulsing while listening, amber with a
    * turning icon while the clip is being transcribed, plain otherwise. */
@@ -2543,6 +2615,7 @@
    * a flat ring, and after a second of that the status line says so. */
   function micLevelStart(stream) {
     micLevelStop();
+    stt.metered = false;
     var Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx || !el.mic) return;
     var ctx;
@@ -2556,6 +2629,8 @@
 
     stt.audio = ctx;
     stt.quiet = false;
+    stt.peak = 0;
+    stt.metered = true;
     el.mic.setAttribute('data-level', '');   /* stands down the canned pulse */
 
     var buf = new Uint8Array(analyser.fftSize);
@@ -2571,6 +2646,7 @@
        * eye needs the resolution. */
       var level = Math.min(1, Math.sqrt(Math.sqrt(sum / buf.length) * 3));
       stt.level = level;
+      if (level > stt.peak) stt.peak = level;
       if (level > 0.12) loudAt = Date.now();
       stt.quiet = Date.now() - loudAt > 1500;
       if (el.mic) {
@@ -2697,6 +2773,16 @@
     sttRelease();
     /* A brush of the key, or a clip too short to hold a word. */
     if (held < 400 || blob.size < 1200) { micPhase(''); setStatus('', ''); return; }
+    /* Silence still costs a full round trip to the transcriber -- ten seconds
+     * of waiting, and the money, to be told nothing was said. The meter
+     * already knows: if it ran and never saw a peak worth a syllable, answer
+     * here. The threshold sits below speech and above room noise, and the
+     * clip is only dropped when the meter actually ran. */
+    if (stt.metered && stt.peak < 0.10) {
+      micPhase('');
+      setStatus('소리가 안 들어왔습니다 · 전송 안 함', 'var(--con-warn)');
+      return;
+    }
     micPhase('transcribing');
     micTick('전사 중', 'var(--con-warn)', Date.now());
     window.ctbControl.send('/api/stt?session=' + encodeURIComponent(forSession), {
@@ -3176,6 +3262,7 @@
     _cleanLines: cleanLines,
     _splitLinks: splitLinks,
     _findPendingInput: findPendingInput,
+    _findLastSubmitted: findLastSubmitted,
     _stepSession: stepSession,
     _neighbourAfterClose: neighbourAfterClose,
     _linkifyLines: linkifyLines,
