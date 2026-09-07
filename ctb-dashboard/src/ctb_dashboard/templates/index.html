@@ -128,6 +128,16 @@
 
     /* Context indicator (dot + number) */
 
+    /* Session title: wrap up to three lines, then clip — never a one-line stub */
+    .session-title {
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      overflow-wrap: anywhere;
+      line-height: 1.25;
+    }
+
     /* Last prompt tooltip */
     .last-prompt {
       overflow: hidden;
@@ -180,7 +190,7 @@
       grid-template-columns: 1fr;
     }
     @media (min-width: 1024px) {
-      .quadrant-cards { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+      .quadrant-cards { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
     }
     /* Project group: same-repo main + worktrees inside a quadrant */
     .project-group { grid-column: 1 / -1; }
@@ -190,7 +200,7 @@
       grid-template-columns: 1fr;
     }
     @media (min-width: 1024px) {
-      .project-group-cards { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+      .project-group-cards { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
     }
 
     .drag-ghost {
@@ -1666,12 +1676,12 @@
           <button data-pin-session="${name}" style="position:absolute;top:8px;left:6px;width:26px;height:26px;border-radius:9px;background:${t.pinBtnBg};display:flex;align-items:center;justify-content:center;font-size:12px;opacity:${pinOpacity};border:1px solid ${t.pinBtnBorder};cursor:pointer;transition:opacity 0.2s;touch-action:manipulation;" title="${isPinned ? 'Unpin session' : 'Pin session'}" aria-label="${isPinned ? 'Unpin session' : 'Pin session'}">${pinIcon}</button>
           <button data-console-session="${name}" class="console-btn" style="position:absolute;bottom:6px;right:34px;width:24px;height:24px;border-radius:8px;background:${t.pinBtnBg};display:flex;align-items:center;justify-content:center;font-size:12px;border:1px solid ${t.pinBtnBorder};cursor:pointer;touch-action:manipulation;z-index:6;" title="세션 콘솔 (지시 전송)" aria-label="세션 콘솔 열기">💬</button>
           <button data-delete-session="${name}" class="del-btn" style="position:absolute;bottom:6px;right:6px;width:24px;height:24px;border-radius:8px;background:${t.pinBtnBg};display:flex;align-items:center;justify-content:center;font-size:12px;border:1px solid ${t.pinBtnBorder};cursor:pointer;touch-action:manipulation;z-index:6;" title="세션 삭제" aria-label="세션 삭제">🗑</button>
-          <div class="flex items-center justify-between">
-            <div style="flex:1;min-width:0;">
-              <span class="font-mono text-sm font-medium truncate" style="color:${t.textPrimary};letter-spacing:-0.01em;display:block;" title="${name}">${display}</span>
+          <div class="flex items-center justify-between" style="flex-wrap:wrap;row-gap:2px;">
+            <div style="flex:1;min-width:min(100%, 8rem);">
+              <span class="font-mono text-sm font-medium session-title" style="color:${t.textPrimary};letter-spacing:-0.01em;" title="${name}">${display}</span>
               ${wtBranchLabel}
             </div>
-            <span class="flex items-center gap-1.5 text-xs" style="color:${t.textSecondary};flex-shrink:0;margin-left:auto;min-width:9rem;justify-content:flex-end;">
+            <span class="flex items-center gap-1.5 text-xs" style="color:${t.textSecondary};flex-shrink:0;margin-left:auto;justify-content:flex-end;">
               <span class="inline-block w-2 h-2 rounded-full ${cfg.dot}" style="box-shadow:${t.dotGlowColor};flex-shrink:0;"></span>
               ${cfg.label}${renderContextGauge(session, t)}${freshBadge}
             </span>
