@@ -2053,6 +2053,8 @@
     el.status.appendChild(document.createTextNode(text));
     el.status.style.visibility = 'visible';
     el.status.style.color = color || 'var(--con-muted)';
+  }
+
   /* Ctrl+U — the kill-line every terminal has, and the same key the ⌧ 입력
    * 지우기 button sends. The browser spends it on view-source, which is never
    * what terminal fingers meant over an open console, so it is taken here.
@@ -2067,6 +2069,9 @@
     if (e.key !== 'u' && e.key !== 'U') return;
     if (!e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
     if (e.isComposing || e.keyCode === 229) return;
+    /* Held down, the OS repeats this at 30 a second, and every one of them
+     * is a request to tmux. One press, one kill-line. */
+    if (e.repeat) return;
     e.preventDefault();
     if (el.input && e.target === el.input && el.input.value) {
       el.input.value = '';
@@ -2077,8 +2082,6 @@
     }
     sendKey('C-u', 'Ctrl+U');
   });
-
-  }
 
   /* --- tail ------------------------------------------------------------- */
 
@@ -3848,6 +3851,7 @@
     _whenSettled: whenSettled,
     _renderStrip: renderStrip,
     _sttDraft: sttDraft,
+    _setStatus: setStatus,
     /* Two pieces of in-flight state busy() reads, reachable so a test can put
      * the console in that state without a microphone or a live tmux. */
     _stt: function () { return stt; },
