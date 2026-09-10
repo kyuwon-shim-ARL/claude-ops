@@ -51,6 +51,11 @@ def _no_real_tmux(monkeypatch, tmp_path):
     # quadrants, and that was written straight over the real pin file. Every
     # suite run wiped the user's pins.
     monkeypatch.setattr(_srv, "_PINNED_PERSIST_PATH", str(tmp_path / "pinned.json"))
+    # Restore reaches just as far: it reads the real closed-session history and
+    # relaunches whatever sits on top of it. Whether this test passed depended
+    # on whether the machine running it had closed a session recently -- green
+    # on a clean checkout, and on a working machine a gate test starting tmux.
+    monkeypatch.setattr(_srv, "_CLOSED_HISTORY_PATH", str(tmp_path / "closed.json"))
     monkeypatch.setattr(_srv, "_pinned_state", {"Q1": [], "Q2": [], "Q3": [], "Q4": []})
 
 

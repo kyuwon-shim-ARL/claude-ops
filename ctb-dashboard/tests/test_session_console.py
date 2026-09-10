@@ -74,10 +74,14 @@ def test_single_poll_timer(console_js):
     same question once the accelerator's badge repaint added a second timer
     that touches nothing but the DOM, so the check now names the callbacks: one
     poll, and nothing else allowed to appear without being read here first.
+
+    paintMicTick joined them for the same reason: it counts the seconds of a
+    recording into the status line while the mic is held, touches no network,
+    and micTickStop() clears it.
     """
     callbacks = re.findall(r"setInterval\(\s*([A-Za-z_$][\w$]*)", console_js)
     assert callbacks.count("pollTail") == 1
-    assert set(callbacks) <= {"pollTail", "paintHints"}, callbacks
+    assert set(callbacks) <= {"pollTail", "paintHints", "paintMicTick"}, callbacks
 
 
 def test_polling_targets_only_the_open_session(console_js):

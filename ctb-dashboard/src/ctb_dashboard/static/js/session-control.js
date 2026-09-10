@@ -2859,13 +2859,13 @@
    * status line for both. */
   function micTick(label, color, since) {
     micTickStop();
-    var paint = function () {
+    var paintMicTick = function () {
       var secs = ((Date.now() - since) / 1000).toFixed(1);
       if (stt.quiet) { setStatus('소리가 안 들어옵니다 · 마이크 확인 · ' + secs + '초', 'var(--con-warn)'); return; }
       setStatus(label + ' · ' + secs + '초', color);
     };
-    paint();
-    stt.tick = setInterval(paint, 100);
+    paintMicTick();
+    stt.tick = setInterval(paintMicTick, 100);
   }
 
   function micTickStop() {
