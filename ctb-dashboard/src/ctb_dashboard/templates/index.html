@@ -757,6 +757,17 @@
       return new Set([...q.Q1, ...q.Q2, ...q.Q3, ...q.Q4]);
     }
 
+    // Which quadrant each pinned session sits in. The grid tints a card by its
+    // importance and the console rail paints its chips the same hue.
+    function _quadOfMap() {
+      const out = {};
+      const quads = getQuadrants();
+      for (const qid of ['Q1', 'Q2', 'Q3', 'Q4']) {
+        for (const n of quads[qid] || []) out[n] = qid;
+      }
+      return out;
+    }
+
     function getSessionQuadrant(name) {
       for (const [qid, names] of Object.entries(_quadsCache)) {
         if (names.includes(name)) return qid;
@@ -1248,6 +1259,101 @@
       });
     }
 
+    /* Apply the filter to the board that is already on screen.
+     *
+     * Nothing is created or destroyed here -- cards, project groups, quadrant
+     * placeholders and the two section headers are toggled with `display`, so
+     * a keystroke costs a pass over the existing nodes instead of a full
+     * rebuild. The published lists (grid order, copy-names, the console's
+     * strip) follow the visible set, exactly as they did when the filter ran
+     * inside render().
+     *
+     * Known difference from the old behaviour: a repo group's position inside
+     * its quadrant is fixed when the board is built, from the whole set. With
+     * a query typed, a group whose leading session is hidden keeps the place
+     * that session won it. Re-deriving the order would mean rebuilding the
+     * grid, which is the cost this exists to avoid. */
+    function applyFilterVisibility() {
+      if (!lastSSEData) return;
+      const sessions = lastSSEData.sessions || [];
+      const pinned = getPinned();
+      const visible = applyFilters(sessions, pinned).sort(_bySessionOrder(pinned));
+      const shown = new Set(visible.map(s => s.name));
+
+      const filterActive = _filterSearch.trim() !== '' || _filterAge !== 'all';
+      const filterCountEl = document.getElementById('filter-count');
+      if (filterCountEl) {
+        filterCountEl.textContent = filterActive ? `${visible.length} / ${sessions.length} 표시` : '';
+      }
+
+      grid.querySelectorAll('[data-session-name]').forEach(card => {
+        card.style.display = shown.has(card.dataset.sessionName) ? '' : 'none';
+      });
+      const anyCardShown = (root) => {
+        const cards = root.querySelectorAll('[data-session-name]');
+        for (const c of cards) if (c.style.display !== 'none') return true;
+        return false;
+      };
+      grid.querySelectorAll('.project-group').forEach(g => {
+        /* The header counts what the group is showing, not what it holds: the
+         * filter used to run before grouping, so "3 sessions" over one card
+         * would be new and wrong. */
+        const showing = Array.from(g.querySelectorAll('[data-session-name]'))
+          .filter(c => c.style.display !== 'none').length;
+        const label = g.querySelector('[data-group-count]');
+        if (label) label.textContent = `${showing} sessions`;
+        g.style.display = showing > 0 ? '' : 'none';
+      });
+      grid.querySelectorAll('.quadrant').forEach(q => {
+        const filled = anyCardShown(q);
+        const cards = q.querySelector('.quadrant-cards');
+        const placeholder = q.querySelector('[data-quad-empty]');
+        if (cards) cards.style.display = filled ? '' : 'none';
+        if (placeholder) placeholder.style.display = filled ? 'none' : '';
+      });
+      const pinnedBlock = grid.querySelector('[data-section="pinned"]');
+      if (pinnedBlock) pinnedBlock.style.display = anyCardShown(pinnedBlock) ? '' : 'none';
+      const othersHeader = grid.querySelector('[data-section="others"]');
+      if (othersHeader) {
+        const pinnedShown = pinnedBlock && pinnedBlock.style.display !== 'none';
+        const othersShown = visible.some(s => !pinned.has(s.name));
+        // 'flex', not '': this header carries its layout in an inline style,
+        // and '' would erase it along with the hiding.
+        othersHeader.style.display = (pinnedShown && othersShown) ? 'flex' : 'none';
+      }
+
+      if (visible.length === 0) {
+        emptyState.classList.remove('hidden');
+        emptyState.textContent = sessions.length === 0
+          ? 'No sessions detected. Start a Claude session to see it here.'
+          : '필터와 일치하는 세션이 없습니다.';
+        btnCopyNames.classList.add('hidden');
+      } else {
+        emptyState.classList.add('hidden');
+        emptyState.textContent = 'No sessions detected. Start a Claude session to see it here.';
+        btnCopyNames.classList.remove('hidden');
+      }
+
+      sortedSessionNames = visible.map(s => s.name);
+      /* The console's switcher strip reads this: the same order the grid shows,
+       * but flat — worktree grouping is a layout device, not an ordering. */
+      window.ctbSessionOrder = visible.map(_toOrderItem);
+    }
+
+    /* Hidden cards stay in the DOM now, so anything that walks the grid has to
+     * skip them: focus() on a display:none card silently does nothing, and an
+     * arrow key that lands there strands the keyboard. */
+    function _isCardVisible(card) {
+      for (let el = card; el && el !== grid; el = el.parentElement) {
+        if (el.style && el.style.display === 'none') return false;
+      }
+      return true;
+    }
+
+    function visibleCards() {
+      return Array.from(grid.querySelectorAll('[data-session-name]')).filter(_isCardVisible);
+    }
+
     function _visibleAgeOptions() {
       // '전체' first, then the enabled windows in catalog order.
       return AGE_OPTIONS.filter(o => o.id === 'all' || _enabledAges.includes(o.id));
@@ -1276,7 +1382,7 @@
         _filterDir = older ? 'within' : 'older';
         localStorage.setItem(FILTER_DIR_KEY, _filterDir);
         buildAgeButtons();
-        if (lastSSEData) render(lastSSEData);
+        applyFilterVisibility();
       });
       wrap.appendChild(dir);
 
@@ -1290,7 +1396,7 @@
           _filterAge = o.id;
           localStorage.setItem(FILTER_AGE_KEY, o.id);
           buildAgeButtons();
-          if (lastSSEData) render(lastSSEData);
+          applyFilterVisibility();
         });
         wrap.appendChild(b);
       }
@@ -1350,21 +1456,21 @@
     const _searchInput = document.getElementById('filter-search');
     _searchInput.addEventListener('input', (e) => {
       _filterSearch = e.target.value;
-      if (lastSSEData) render(lastSSEData);
+      applyFilterVisibility();
     });
     _searchInput.addEventListener('keydown', (e) => {
       // Esc clears + blurs the search
       if (e.key === 'Escape') {
         _searchInput.value = '';
         _filterSearch = '';
+        applyFilterVisibility();
         _searchInput.blur();
-        if (lastSSEData) render(lastSSEData);
         return;
       }
       // Enter jumps to the first matching card so arrow-key nav can take over
       if (e.key === 'Enter') {
         e.preventDefault();
-        const first = grid.querySelector('[data-session-name]');
+        const first = visibleCards()[0];
         if (first) first.focus();
       }
     });
@@ -1747,7 +1853,7 @@
             <span style="font-size:11px;opacity:0.85;">📁</span>
             <span style="font-family:'JetBrains Mono',monospace;font-weight:700;">${repoLabel}</span>
             <span style="opacity:0.55;">·</span>
-            <span style="opacity:0.75;">${count} sessions</span>
+            <span style="opacity:0.75;" data-group-count>${count} sessions</span>
           </div>
           <div class="project-group-cards">${cardsHtml}</div>
         </div>
@@ -1775,11 +1881,18 @@
       if (isDragging || _pressTimer) return; // T3: block during drag AND long-press hold
 
       const sessions = data.sessions || [];
+      const pinned = getPinned();
       if (sessions.length > 0 && data.sessions) checkFreshPinned(sessions);
 
       badgeCount.textContent = `${sessions.length} session${sessions.length !== 1 ? 's' : ''}`;
 
       if (sessions.length === 0) {
+        /* Published before the early return: an open console reads these to
+         * paint its pin control, and a board with nothing on it still has to
+         * tell the truth about what is pinned. */
+        window.ctbSessionAll = [];
+        window.ctbPinned = [...pinned];
+        window.ctbQuadOf = _quadOfMap();
         emptyState.classList.remove('hidden');
         btnCopyNames.classList.add('hidden');
         sortedSessionNames = [];
@@ -1800,7 +1913,6 @@
         _prevStates[s.name] = s.state;
       }
 
-      const pinned = getPinned();
       // Note: we do NOT auto-prune pinned sessions that are missing from the
       // current poll. With server-backed shared state, a single transient
       // missed-detection would wipe pins for every client and persist to disk.
@@ -1808,10 +1920,12 @@
       // sessions just don't show up — their pin state survives until the
       // user explicitly unpins or moves them.
 
-      const visible = applyFilters(sessions, pinned);
-      const filterActive = _filterSearch.trim() !== '' || _filterAge !== 'all';
-      const filterCountEl = document.getElementById('filter-count');
-      filterCountEl.textContent = filterActive ? `${visible.length} / ${sessions.length} 표시` : '';
+      /* The board is built once per data update, for every session, and the
+       * filter is applied to the DOM afterwards by toggling display. It used
+       * to be applied here, which meant every keystroke in the search box
+       * tore down every card and re-parsed the whole grid -- on a phone with
+       * dozens of sessions the box stopped taking characters. */
+      const all = [...sessions].sort(_bySessionOrder(pinned));
 
       /* Everything, filtered or not, in the grid's own order — the console's
        * search reads this. The palette must be able to reach a session the
@@ -1820,7 +1934,7 @@
        * search that silently inherited it answered "일치하는 세션 없음" for a
        * session that plainly exists. Published before the empty-filter early
        * return below, so a filter matching nothing cannot leave a stale list. */
-      window.ctbSessionAll = [...sessions].sort(_bySessionOrder(pinned)).map(_toOrderItem);
+      window.ctbSessionAll = all.map(_toOrderItem);
       // The console says whether the session it is showing can notify at all,
       // and pinning is the gate: _push_completions sends for pinned sessions
       // only, so an unpinned one finishing is silent by design and used to be
@@ -1829,33 +1943,10 @@
       // And which quadrant each pin sits in: the grid tints a card by its
       // importance, and the console rail paints its chips the same hue, so
       // the urgent session can be told apart above the terminal too.
-      const _quadOf = {};
-      const _quads = getQuadrants();
-      for (const qid of ['Q1', 'Q2', 'Q3', 'Q4']) {
-        for (const n of _quads[qid] || []) _quadOf[n] = qid;
-      }
-      window.ctbQuadOf = _quadOf;
+      window.ctbQuadOf = _quadOfMap();
 
-      if (visible.length === 0) {
-        Array.from(grid.children).forEach(el => { if (el !== emptyState) el.remove(); });
-        emptyState.classList.remove('hidden');
-        emptyState.textContent = '필터와 일치하는 세션이 없습니다.';
-        sortedSessionNames = [];
-        btnCopyNames.classList.add('hidden');
-        return;
-      }
-      emptyState.textContent = 'No sessions detected. Start a Claude session to see it here.';
-
-      visible.sort(_bySessionOrder(pinned));
-
-      sortedSessionNames = visible.map(s => s.name);
-      /* The console's switcher strip reads this: the same order the grid shows,
-       * but flat — worktree grouping is a layout device, not an ordering. */
-      window.ctbSessionOrder = visible.map(_toOrderItem);
-      btnCopyNames.classList.remove('hidden');
-
-      const pinnedSessions = visible.filter(s => pinned.has(s.name));
-      const normalSessions = visible.filter(s => !pinned.has(s.name));
+      const pinnedSessions = all.filter(s => pinned.has(s.name));
+      const normalSessions = all.filter(s => !pinned.has(s.name));
       const hasPinned = pinnedSessions.length > 0;
       const hasBothGroups = hasPinned && normalSessions.length > 0;
 
@@ -1866,9 +1957,9 @@
       if (hasPinned) {
         const freshQuads = getQuadrants();
         const sessionMap = {};
-        for (const s of visible) sessionMap[s.name] = s;
+        for (const s of all) sessionMap[s.name] = s;
 
-        html += `<div class="col-span-full">`;
+        html += `<div class="col-span-full" data-section="pinned">`;
         html += `<div style="display:flex;align-items:center;gap:10px;color:${t.sectionLabelPinned};font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:12px;">
           <span style="width:6px;height:6px;border-radius:50%;background:${t.sectionLabelPinned};opacity:0.6;flex-shrink:0;"></span>
           Pinned
@@ -1895,25 +1986,25 @@
             ${QUAD_LABELS[qid]}
           </div>`;
 
-          if (qSessions.length > 0) {
-            html += `<div class="quadrant-cards">`;
-            const items = groupQuadrantSessions(qSessions.map(({ s }) => s));
-            for (const item of items) {
-              html += item.type === 'group'
-                ? renderProjectGroup(item, t)
-                : renderCard(item.session, true);
-            }
-            html += `</div>`;
-          } else {
-            html += `<div style="text-align:center;padding:12px;color:${t.emptyText};font-size:11px;border:1px dashed ${t.emptyBorder};border-radius:12px;">드래그하여 추가</div>`;
+          /* Both the cards and the "empty" placeholder are always in the DOM;
+           * the filter pass shows one or the other, so hiding the last card in
+           * a quadrant does not leave an empty box behind. */
+          html += `<div class="quadrant-cards">`;
+          const items = groupQuadrantSessions(qSessions.map(({ s }) => s));
+          for (const item of items) {
+            html += item.type === 'group'
+              ? renderProjectGroup(item, t)
+              : renderCard(item.session, true);
           }
+          html += `</div>`;
+          html += `<div data-quad-empty style="display:none;text-align:center;padding:12px;color:${t.emptyText};font-size:11px;border:1px dashed ${t.emptyBorder};border-radius:12px;">드래그하여 추가</div>`;
           html += `</div>`;
         }
         html += `</div></div>`;
       }
 
       if (hasBothGroups) {
-        html += `<div class="col-span-full" style="display:flex;align-items:center;gap:10px;color:${t.sectionLabelOthers};font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;margin-top:8px;">
+        html += `<div class="col-span-full" data-section="others" style="display:flex;align-items:center;gap:10px;color:${t.sectionLabelOthers};font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;margin-top:8px;">
           <span style="width:6px;height:6px;border-radius:50%;background:${t.sectionLabelOthers};opacity:0.4;flex-shrink:0;"></span>
           Others
           <div style="flex:1;height:1px;background:linear-gradient(90deg,${t.sectionLabelOthers}33,transparent);"></div>
@@ -1927,6 +2018,7 @@
         if (el !== emptyState) el.remove();
       });
       grid.insertAdjacentHTML('afterbegin', html);
+      applyFilterVisibility();
 
       if (data.updated_at) {
         lastUpdateEl.classList.remove('hidden');
@@ -2666,7 +2758,7 @@
       }
       if (['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'].includes(e.key)) {
         e.preventDefault();
-        const cards = Array.from(grid.querySelectorAll('[data-session-name]'));
+        const cards = visibleCards();
         const idx = cards.indexOf(card);
         const next = (e.key === 'ArrowRight' || e.key === 'ArrowDown') ? cards[idx + 1] : cards[idx - 1];
         if (next) next.focus();

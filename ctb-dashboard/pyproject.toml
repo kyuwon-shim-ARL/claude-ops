@@ -53,7 +53,10 @@ ctb_dashboard = ["static/*"]
 # PATH -- the pyenv one -- and the suite silently runs against globally
 # installed packages instead of this project's. A new dependency then imports
 # fine at runtime but not under test.
-dev = ["pytest>=8.0"]
+# playwright drives the shipped dashboard page in a real browser: the filter
+# and console behaviour under test is DOM behaviour, and a fake DOM would only
+# prove the test's own stub. Tests skip themselves if no browser is installed.
+dev = ["pytest>=8.0", "playwright>=1.40,<1.58"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

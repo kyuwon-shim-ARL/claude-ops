@@ -1,0 +1,135 @@
+"""The shipped dashboard page, driven in a real browser.
+
+The board's filtering and the console's controls are DOM behaviour: what is
+worth asserting is what a browser does with the shipped HTML and JS, and a
+fake DOM would only prove the stub. Everything the page asks for is answered
+from here -- canned sessions and pins, the real static JS off disk, nothing
+off the machine.
+"""
+
+import json
+from pathlib import Path
+
+import pytest
+from jinja2 import Environment, FileSystemLoader
+
+sync_api = pytest.importorskip("playwright.sync_api")
+
+SRC = Path(__file__).resolve().parents[1] / "src" / "ctb_dashboard"
+NOW = 1_800_000_000
+
+
+def _page_html():
+    env = Environment(loader=FileSystemLoader(str(SRC / "templates")))
+    return env.get_template("index.html").render(
+        csp_nonce="test", dashboard_url="", asset_v="test"
+    )
+
+
+def _session(name, *, state="idle", age=60, context=""):
+    return {
+        "name": name,
+        "state": state,
+        "updated_at": NOW - age,
+        "last_activity": NOW - age,
+        "work_context": context,
+    }
+
+
+SESSIONS = [
+    _session("claude_alpha", state="working"),
+    # A repo with a worktree beside it: the grid groups these two under one
+    # header, and the header carries a count the filter has to keep honest.
+    _session("claude_alpha_wt_topic", state="idle"),
+    _session("claude_beta", state="waiting"),
+    _session("claude_gamma", state="idle"),
+    _session("claude_delta", state="idle", context="alpha mentioned here"),
+]
+QUADS = {"Q1": ["claude_alpha", "claude_alpha_wt_topic"],
+         "Q2": ["claude_beta"], "Q3": [], "Q4": []}
+
+
+@pytest.fixture
+def board():
+    """The real dashboard page, fed canned sessions, in a real browser."""
+    with sync_api.sync_playwright() as p:
+        try:
+            browser = p.chromium.launch()
+        except Exception as exc:  # no browser installed on this host
+            pytest.skip(f"chromium unavailable: {exc}")
+        page = browser.new_page()
+        # Every write the page makes, in order -- the pin endpoint is the only
+        # one under test here, and asserting on what it was sent is the only
+        # way to know a control actually did something.
+        posted = []
+        accepted = []
+        page.ctb_posted = posted
+        page.ctb_accepted = accepted
+        # A control token the page already has: without one the first write
+        # opens a window.prompt(), which a headless browser dismisses.
+        page.add_init_script("localStorage.setItem('ctb.controlToken', 'test-token')")
+        # Tailwind is blocked with the rest of the network, and the page hides
+        # its empty state with Tailwind's `.hidden`. Without the rule, every
+        # visibility assertion below would pass on a visible element.
+        page.add_init_script(
+            "document.addEventListener('DOMContentLoaded', () => {"
+            "  const s = document.createElement('style');"
+            "  s.textContent = '.hidden{display:none!important}';"
+            "  document.head.appendChild(s); })"
+        )
+
+        # Every path the page fetched, in order. Used to assert that something
+        # did NOT refetch.
+        requests = []
+        page.ctb_requests = requests
+
+        def route(r):
+            url = r.request.url
+            requests.append(url.split("http://ctb.test", 1)[-1].split("?")[0])
+            path = url.split("http://ctb.test", 1)[-1].split("?")[0]
+            if path.startswith("/api/pinned"):
+                if r.request.method == "POST":
+                    body = json.loads(r.request.post_data or "{}")
+                    posted.append(body)
+                    if getattr(page, "ctb_refuse_writes", False):
+                        # What the server sends when the control token is
+                        # missing or wrong. A refused write changes nothing:
+                        # `posted` records the attempt, `accepted` is state.
+                        return r.fulfill(status=403, content_type="application/json",
+                                         body='{"detail":"forbidden"}')
+                    accepted.append(body)
+                    # The real server answers with the set it now holds.
+                    return r.fulfill(status=200, content_type="application/json",
+                                     body=json.dumps(body))
+                return r.fulfill(status=200, content_type="application/json",
+                                 body=json.dumps(accepted[-1] if accepted else QUADS))
+            if path.startswith("/api/sessions/stream"):
+                return r.abort()
+            if path.startswith("/api/sessions"):
+                return r.fulfill(status=200, content_type="application/json",
+                                 body=json.dumps({"sessions": SESSIONS,
+                                                  "updated_at": NOW}))
+            if path.startswith("/static/"):
+                f = SRC / path.lstrip("/")
+                if not f.exists():
+                    return r.fulfill(status=404, body="")
+                ctype = "application/javascript" if f.suffix == ".js" else "text/plain"
+                return r.fulfill(status=200, content_type=ctype, body=f.read_text())
+            if path in ("/", ""):
+                return r.fulfill(status=200, content_type="text/html",
+                                 body=_page_html())
+            if path == "/__deny_writes":
+                return r.fulfill(status=200, body="")
+            return r.fulfill(status=200, content_type="application/json", body="{}")
+
+        # Nothing leaves the machine: the CDN fonts and Tailwind are not what
+        # is under test, and a suite that needs the network is a flaky suite.
+        # Registered first so the page's own routes, added below, win.
+        page.route("**", lambda r: r.abort())
+        page.route("http://ctb.test/**", route)
+        page.goto("http://ctb.test/")
+        page.wait_for_selector('[data-session-name="claude_alpha"]')
+        yield page
+        browser.close()
+
+
