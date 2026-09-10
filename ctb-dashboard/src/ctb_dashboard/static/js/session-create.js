@@ -588,9 +588,50 @@
     if (el.root) el.root.style.display = 'none';
   }
 
+  /* Same shape the board's search box uses: the chord, plus the bare letter
+   * when nothing is being typed into. The bare "n" carries the weight on the
+   * desktop -- Chrome and Firefox keep Ctrl+N for "new window" and a page
+   * never sees it, so the chord only lands in an installed (standalone) PWA
+   * window and in the VSCode webview. */
+  function isTypingTarget(node) {
+    if (!node) return false;
+    var tag = node.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || node.isContentEditable;
+  }
+
+  function shortcutBlocked(e) {
+    /* Already open: show() rebuilds the form and refetches, so a stray press
+     * would throw away a half-filled one. */
+    if (el.root && el.root.style.display !== 'none') return true;
+    /* The console is a full-bleed sheet over the board, and the delete dialog
+     * is a decision waiting on an answer. Neither is a place to open another
+     * modal from. */
+    if (window.ctbConsole && window.ctbConsole.isOpen && window.ctbConsole.isOpen()) return true;
+    var del = document.getElementById('delete-modal');
+    if (del && del.style.display !== 'none' && del.style.display !== '') return true;
+    /* Composing Hangul: the IME owns the keystroke until it commits. */
+    if (e.isComposing || e.keyCode === 229) return true;
+    /* A card is being dragged, or held for the drag. The modal would cover the
+     * drop target while the drag stayed live, and the move would land on the
+     * sheet instead of the quadrant. */
+    if (window.ctbBoardBusy && window.ctbBoardBusy()) return true;
+    return false;
+  }
+
   function wire() {
     var btn = document.getElementById('btn-new-session');
     if (btn) btn.addEventListener('click', show);
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'n' && e.key !== 'N') return;
+      if (e.altKey) return;
+      var chord = e.ctrlKey || e.metaKey;
+      if (!chord && isTypingTarget(e.target)) return;
+      if (chord && e.shiftKey) return;   /* Ctrl+Shift+N is the browser's */
+      if (shortcutBlocked(e)) return;
+      e.preventDefault();
+      show();
+    });
   }
 
   if (document.readyState === 'loading') {
@@ -607,6 +648,7 @@
     sessionNameFor: sessionNameFor,
     previewPath: previewPath,
     filterProjects: filterProjects,
+    _shortcutBlocked: shortcutBlocked,
     _state: state,
   };
 })();

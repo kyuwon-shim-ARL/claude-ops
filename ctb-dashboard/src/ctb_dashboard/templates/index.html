@@ -289,7 +289,7 @@
   </header>
 
   <div id="filter-bar" class="px-5 pt-3 flex flex-wrap items-center gap-2">
-    <button id="btn-new-session" class="hover:bg-white/10 text-xs px-2.5 py-0.5 rounded-full transition-colors cursor-pointer flex-shrink-0" style="background: rgba(129,140,248,0.18); border: 1px solid rgba(129,140,248,0.45);" title="새 세션 시작 (프로젝트 / 워크트리 선택)">+ 새 세션</button>
+    <button id="btn-new-session" class="hover:bg-white/10 text-xs px-2.5 py-0.5 rounded-full transition-colors cursor-pointer flex-shrink-0" style="background: rgba(129,140,248,0.18); border: 1px solid rgba(129,140,248,0.45);" title="새 세션 시작 (N / Ctrl+N) — 프로젝트 / 워크트리 선택">+ 새 세션</button>
     <input id="filter-search" type="text" placeholder="🔎 세션 검색  (F / Ctrl+F)" autocomplete="off"
            class="font-mono"
            style="flex:1;min-width:180px;max-width:340px;font-size:16px;padding:6px 12px;border-radius:10px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:inherit;outline:none;">
@@ -2575,6 +2575,14 @@
       return moveToQuadrant(name, qid);
     };
     window.ctbQuadLabels = QUAD_LABELS;
+
+    /* A drag in progress, or a long-press that is about to become one. The
+     * board's own render() already refuses to repaint mid-drag; anything that
+     * would throw a sheet over the drop target has to ask the same question,
+     * and the drag state lives in this closure. */
+    window.ctbBoardBusy = function () {
+      return isDragging || !!_pressTimer;
+    };
 
     // --- Card tap handler: mobile=console, desktop=focus ---
     // The card action is whatever that device can actually do with a session.
