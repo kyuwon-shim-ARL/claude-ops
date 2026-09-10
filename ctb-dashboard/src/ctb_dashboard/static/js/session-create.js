@@ -318,7 +318,38 @@
       if (e.target === root) hide();
     });
     document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && root.style.display === 'flex') hide();
+      if (e.key !== 'Escape' || root.style.display !== 'flex') return;
+      /* The console has an Escape listener on the document too, and it stands
+       * down while this sheet is open -- but only if it runs second. Which
+       * one runs first is decided by which was built first, and this one is
+       * built first whenever the sheet was opened from the board before a
+       * console was. So it also stops the rest of the chain: otherwise one
+       * press closed the sheet and the console underneath it. */
+      e.stopImmediatePropagation();
+      hide();
+    });
+
+    /* Tab must not walk out of a modal. Under it sits either the board or an
+     * open console, and focus landing there is worse than useless: the
+     * console's prompt box takes Enter as "send to the session". */
+    root.addEventListener('keydown', function (e) {
+      if (e.key !== 'Tab') return;
+      var items = root.querySelectorAll(
+        'button:not([disabled]),input:not([disabled]),select,textarea,[tabindex]:not([tabindex="-1"])');
+      var live = [];
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].offsetParent !== null) live.push(items[i]);
+      }
+      if (!live.length) return;
+      var first = live[0], last = live[live.length - 1];
+      var at = document.activeElement;
+      if (e.shiftKey && (at === first || !root.contains(at))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (at === last || !root.contains(at))) {
+        e.preventDefault();
+        first.focus();
+      }
     });
 
     document.body.appendChild(root);
@@ -577,11 +608,22 @@
     if (state.project && state.mode === 'existing' && state.projectIsGit) {
       loadWorktrees(state.project);
     }
-    /* Not on touch: focusing a text field there pops the keyboard over the
-     * list the user came here to read. */
-    if (!window.matchMedia || !window.matchMedia('(pointer: coarse)').matches) {
-      el.search.focus();
-    }
+    /* Focus has to land inside the sheet, every time. Under it is either the
+     * board or an open console, and a caret left in the console's prompt box
+     * means Tab sends a key to that session and Enter sends the draft -- the
+     * sheet is on screen, the typing is going somewhere else. The Tab trap
+     * cannot help: it only sees keys that start inside.
+     *
+     * Which control depends on what is showing. The project search on a
+     * pointer device, the name field when the new-project pane is up, and on
+     * touch the mode button instead of either -- focusing a text field there
+     * pops the keyboard over the list the user came here to read. */
+    var coarse = !!(window.matchMedia
+      && window.matchMedia('(pointer: coarse)').matches);
+    var target = coarse
+      ? el.modeBtns[state.mode] || el.modeBtns.existing
+      : (state.mode === 'new' ? el.newName : el.search);
+    if (target && target.focus) target.focus();
   }
 
   function hide() {
@@ -599,14 +641,28 @@
     return tag === 'INPUT' || tag === 'TEXTAREA' || node.isContentEditable;
   }
 
-  function shortcutBlocked(e) {
+  function shortcutBlocked(e, chord) {
     /* Already open: show() rebuilds the form and refetches, so a stray press
      * would throw away a half-filled one. */
     if (el.root && el.root.style.display !== 'none') return true;
-    /* The console is a full-bleed sheet over the board, and the delete dialog
-     * is a decision waiting on an answer. Neither is a place to open another
-     * modal from. */
-    if (window.ctbConsole && window.ctbConsole.isOpen && window.ctbConsole.isOpen()) return true;
+    /* Over an open console the chord still works, and deliberately so: the
+     * point of the console is to keep working without going back to the
+     * board, and "start another session" is part of that. The sheet draws
+     * above it (z-index 1000 over 60) and hands the console the new session
+     * when it is created.
+     *
+     * The bare letter does not, though. The console is a terminal surface
+     * with the caret parked in its prompt box; a letter there is a letter.
+     *
+     * An overlay of the console's own -- the session palette, the importance
+     * menu -- already owns the keyboard, and stacking a third thing on top
+     * of that is not a shortcut, it is a mess. */
+    var con = window.ctbConsole;
+    if (con && con.isOpen && con.isOpen()) {
+      if (!chord) return true;
+      if (con.busy && con.busy()) return true;
+    }
+    /* The delete dialog is a decision waiting on an answer. */
     var del = document.getElementById('delete-modal');
     if (del && del.style.display !== 'none' && del.style.display !== '') return true;
     /* Composing Hangul: the IME owns the keystroke until it commits. */
@@ -628,7 +684,7 @@
       var chord = e.ctrlKey || e.metaKey;
       if (!chord && isTypingTarget(e.target)) return;
       if (chord && e.shiftKey) return;   /* Ctrl+Shift+N is the browser's */
-      if (shortcutBlocked(e)) return;
+      if (shortcutBlocked(e, chord)) return;
       e.preventDefault();
       show();
     });
@@ -643,6 +699,9 @@
   window.ctbNewSession = {
     open: show,
     close: hide,
+    /* The console asks: while this sheet is up, its own shortcuts stand down
+     * so one Escape does not close both. */
+    isOpen: function () { return !!(el.root && el.root.style.display !== 'none'); },
     /* exposed for tests */
     buildRequest: buildRequest,
     sessionNameFor: sessionNameFor,

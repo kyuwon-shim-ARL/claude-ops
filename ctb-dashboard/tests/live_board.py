@@ -125,6 +125,21 @@ def open_board(theme=None):
                                  body=json.dumps(accepted[-1] if accepted else QUADS))
             if path.startswith("/api/sessions/stream"):
                 return r.abort()
+            if path.startswith("/api/sessions/create"):
+                # What the server answers when tmux really did start one.
+                return r.fulfill(status=200, content_type="application/json",
+                                 body=json.dumps({"session": "claude_fresh",
+                                                  "status": "created"}))
+            if path.startswith("/api/projects"):
+                return r.fulfill(status=200, content_type="application/json",
+                                 body=json.dumps({
+                                     "root": "/home/someone/projects",
+                                     "projects": [
+                                         {"name": "atlas", "is_git": True,
+                                          "session_exists": False},
+                                         {"name": "borealis", "is_git": False,
+                                          "session_exists": False},
+                                     ]}))
             if path.startswith("/api/sessions"):
                 return r.fulfill(status=200, content_type="application/json",
                                  body=json.dumps({"sessions": SESSIONS,

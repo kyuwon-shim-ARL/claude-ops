@@ -896,6 +896,8 @@
 
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && state.session) {
+        var ns = window.ctbNewSession;
+        if (ns && ns.isOpen && ns.isOpen()) return;   /* the sheet's Escape */
         if (searchOpen()) closeSearch();
         else if (state.selStart !== null) clearSelection();
         else hide();
@@ -1271,6 +1273,20 @@
     }, 0);
   }
 
+  /* Something else is holding the keyboard. The palette is ours; the
+   * new-session sheet is the board's, opened with Ctrl+N from in here, and
+   * while it is up every shortcut below stands down -- otherwise Escape
+   * closed the sheet and the console under it in one press, and Ctrl+Tab
+   * walked to another session behind a dialog naming this one. */
+  function sheetOpen() {
+    var ns = window.ctbNewSession;
+    return !!(ns && ns.isOpen && ns.isOpen());
+  }
+
+  function keysTaken() {
+    return searchOpen() || sheetOpen();
+  }
+
   function renderStrip() {
     paintSilentBadge();
     paintQuadBtn();
@@ -1499,11 +1515,12 @@
       return;
     }
     if (!accelHeld(e) || e.shiftKey) return;
-    /* The palette owns the keyboard while it is up. Without this the digit
-     * switched the console UNDERNEATH the overlay and put the caret in a
-     * textarea nobody could see -- so the next Enter, typed at what looked
-     * like a search box, would send a prompt to a live session. */
-    if (searchOpen()) return;
+    /* The palette owns the keyboard while it is up, and so does the
+     * new-session sheet. Without this the digit switched the console
+     * UNDERNEATH the overlay and put the caret in a textarea nobody could
+     * see -- so the next Enter, typed at what looked like a search box,
+     * would send a prompt to a live session. */
+    if (keysTaken()) return;
     var slot = slotOf(e.key);
     if (slot === -1) return;
     var item = (hintOrder || sessionOrder())[slot];
@@ -1595,7 +1612,7 @@
   /* Cmd/Ctrl+Shift+Up / Down. Not the bracket keys: those already walk the
    * session rail, and Shift there means "urgent and important only". */
   document.addEventListener('keydown', function (e) {
-    if (!state.session || searchOpen()) return;
+    if (!state.session || keysTaken()) return;
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
     if (e.isComposing || e.keyCode === 229) return;
     if (!accelHeld(e) || !e.shiftKey) return;
@@ -1611,7 +1628,7 @@
   });
 
   document.addEventListener('keydown', function (e) {
-    if (searchOpen()) return;
+    if (keysTaken()) return;
     /* `code` names the physical key: a shifted US layout reports { and },
      * and another layout may put something else on the cap entirely. */
     var dir = e.code === 'BracketLeft' || e.key === '[' || e.key === '{' ? -1
@@ -1721,7 +1738,7 @@
   }
 
   document.addEventListener('keydown', function (e) {
-    if (searchOpen()) return;
+    if (keysTaken()) return;
     if (e.code !== 'KeyQ' && String(e.key).toLowerCase() !== 'q') return;
     if (!accelHeld(e)) return;
     /* Restore works with the console closed as well; closing needs one open. */
@@ -1740,7 +1757,7 @@
    * strip, so there it arrives. In a plain browser tab the Ctrl+[ ] walk is the
    * one that always gets through. */
   document.addEventListener('keydown', function (e) {
-    if (!state.session || searchOpen() || e.key !== 'Tab') return;
+    if (!state.session || keysTaken() || e.key !== 'Tab') return;
     if (e.shiftKey || e.altKey) return;
     if (!(e.ctrlKey || e.metaKey)) return;
     if (e.isComposing || e.keyCode === 229) return;   /* the IME's key, not ours */
@@ -1756,7 +1773,7 @@
    * buttons send are all on the pad or on a chord already, and the number
    * shortcuts and the search land in the box, which is where typing goes. */
   document.addEventListener('keydown', function (e) {
-    if (!state.session || searchOpen() || e.key !== 'Tab' || !e.shiftKey) return;
+    if (!state.session || keysTaken() || e.key !== 'Tab' || !e.shiftKey) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.isComposing || e.keyCode === 229) return;   /* the IME's key, not ours */
     e.preventDefault();
@@ -2003,7 +2020,11 @@
   document.addEventListener('keydown', function (e) {
     /* Only over an open console: on the grid, Ctrl+F stays the browser's find,
      * which is what searches the card labels there. */
-    if (!state.session) return;
+    /* Not keysTaken(): this handler deliberately claims the chord while its
+     * own palette is up (see below), and standing down for searchOpen() here
+     * handed the second press to the browser's find bar. Only the sheet in
+     * front of everything makes it let go. */
+    if (!state.session || sheetOpen()) return;
     if (e.key !== 'f' && e.key !== 'F') return;
     if (!(IS_MAC ? e.metaKey : e.ctrlKey) || e.shiftKey || e.altKey) return;
     /* Claimed before the already-open check: letting the second press through
@@ -2042,7 +2063,7 @@
    * over the console the line is in the pane, so C-u goes to tmux. Ctrl on a
    * Mac too, not Cmd: the kill-line there is Ctrl+U as well. */
   document.addEventListener('keydown', function (e) {
-    if (!state.session || searchOpen()) return;
+    if (!state.session || keysTaken()) return;
     if (e.key !== 'u' && e.key !== 'U') return;
     if (!e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
     if (e.isComposing || e.keyCode === 229) return;
@@ -3318,7 +3339,11 @@
     box.classList.remove('con-flash');
     void box.offsetWidth;
     box.classList.add('con-flash');
-    box.focus();
+    /* A clip recorded before the new-session sheet went up can land after it:
+     * focusing here would take the caret out of the sheet and put it in a
+     * prompt box nobody can see, where the next Enter sends to a session. The
+     * text still lands; the caret stays where the eyes are. */
+    if (!sheetOpen()) box.focus();
   }
 
   function bindMic(btn) {
@@ -3822,6 +3847,20 @@
     _linkifyLines: linkifyLines,
     _whenSettled: whenSettled,
     _renderStrip: renderStrip,
+    _sttDraft: sttDraft,
+    /* Two pieces of in-flight state busy() reads, reachable so a test can put
+     * the console in that state without a microphone or a live tmux. */
+    _stt: function () { return stt; },
+    _setClosing: function (v) { closing = !!v; },
+    /* Whether something here is already holding the keyboard, the mic, or a
+     * request that is going to move the console when it lands: the session
+     * palette, the importance menu, a clip being recorded or a mic still
+     * being acquired, a close or restore in flight (both call show() on
+     * success, which switches session and takes the caret). Ctrl+N asks
+     * before drawing the new-session sheet over the top of any of them. */
+    busy: function () {
+      return searchOpen() || quadMenuOpen() || !!stt.rec || stt.busy || closing;
+    },
     _toggleQuadMenu: toggleQuadMenu,
     _closeQuadMenu: closeQuadMenu,
     _paintQuadBtn: paintQuadBtn,
