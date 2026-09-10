@@ -63,6 +63,12 @@
       'scroll-track': 'rgba(255,255,255,0.05)',
       'scroll-thumb': 'rgba(148,163,184,0.32)',
       'scroll-thumb-hover': 'rgba(148,163,184,0.5)',
+      /* The four importance hues, as foregrounds. The wash and the ring are
+       * mixed from these, so a theme states each hue once. On black they can
+       * be the light tints the grid uses; on paper the same tints fall to
+       * about 2:1 against a white key, which is why every theme names its
+       * own. */
+      q1: '#fb7185', q2: '#f0a500', q3: '#60a5fa', q4: '#a8a2bd',
     },
     light: {
       scheme: 'light',
@@ -84,6 +90,8 @@
       'scroll-track': 'rgba(0,0,0,0.04)',
       'scroll-thumb': 'rgba(17,24,39,0.22)',
       'scroll-thumb-hover': 'rgba(17,24,39,0.38)',
+      /* Ink weights, in the same family as this theme's status colours. */
+      q1: '#be123c', q2: '#92400e', q3: '#1d4ed8', q4: '#57534e',
     },
     /* 양피지: the board's vellum tile is the sheet itself; the well is a
      * lighter sheet laid on it, ink for text, keys are small vellum cards
@@ -103,6 +111,9 @@
       'scroll-track': 'rgba(90,60,30,0.06)',
       'scroll-thumb': 'rgba(90,60,30,0.28)',
       'scroll-thumb-hover': 'rgba(90,60,30,0.45)',
+      /* Map pigments, like the status colours above: seal red, ochre, ink
+       * green, and the sheet's own brown for the quiet one. */
+      q1: '#a2332b', q2: '#7c4408', q3: '#2f5648', q4: '#6b5a45',
     },
   };
 
@@ -230,12 +241,29 @@
        * does: this one has to answer "which quadrant is this session in"
        * before it is pressed, so the glyph itself takes the colour and the
        * ring closes around it. No quadrant -- which is also "no completion
-       * alert" -- stays grey and quiet. */
-      '#ctb-console .con-quad[data-quad="Q1"]{color:#fb7185;background:rgba(220,100,90,0.12);box-shadow:inset 0 0 0 1.5px rgba(251,113,133,0.55)}',
-      '#ctb-console .con-quad[data-quad="Q2"]{color:#f0a500;background:rgba(217,119,6,0.12);box-shadow:inset 0 0 0 1.5px rgba(240,165,0,0.55)}',
-      '#ctb-console .con-quad[data-quad="Q3"]{color:#60a5fa;background:rgba(37,99,235,0.12);box-shadow:inset 0 0 0 1.5px rgba(96,165,250,0.55)}',
-      '#ctb-console .con-quad[data-quad="Q4"]{color:#a8a2bd;background:rgba(107,114,128,0.12);box-shadow:inset 0 0 0 1.5px rgba(139,133,160,0.5)}',
+       * alert" -- stays grey and quiet.
+       *
+       * Foreground, wash and ring are all mixed from one per-theme variable:
+       * the tints that carry on black are pale enough on paper to leave 13px
+       * text at about 2:1. The hover wash has to be restated here, because
+       * these rules tie .con-btn:hover on specificity and come later -- a
+       * pinned key that did not answer the pointer read as disabled. */
+      "#ctb-console .con-quad[data-quad='Q1'],#ctb-console .con-quad[data-quad='Q2'],"
+        + "#ctb-console .con-quad[data-quad='Q3'],#ctb-console .con-quad[data-quad='Q4']"
+        + '{color:var(--q);background:color-mix(in srgb,var(--q) 12%,var(--con-btn));'
+        + 'box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--q) 55%,transparent)}',
+      "#ctb-console .con-quad[data-quad='Q1']{--q:var(--con-q1)}",
+      "#ctb-console .con-quad[data-quad='Q2']{--q:var(--con-q2)}",
+      "#ctb-console .con-quad[data-quad='Q3']{--q:var(--con-q3)}",
+      "#ctb-console .con-quad[data-quad='Q4']{--q:var(--con-q4)}",
+      '@media(hover:hover){#ctb-console .con-quad[data-quad]:not([data-quad=""]):hover'
+        + '{background:color-mix(in srgb,var(--q) 24%,var(--con-btn))}}',
       '#ctb-console .con-quad[data-quad=""]{color:var(--con-muted);opacity:0.6}',
+      /* The number is the second channel: which quadrant must not be a
+       * question only colour can answer. Blank when there is no quadrant --
+       * the bell-off badge beside it says why. */
+      '#ctb-console .con-quad-num{font:700 10px/1 ui-sans-serif,system-ui,sans-serif;'
+        + 'margin-left:1px;align-self:flex-start;margin-top:11px}',
       '#ctb-console .con-rail{background:var(--con-tray);border-radius:14px;padding:4px}',
       /* The mic while it listens: a red key, pulsing, so a held finger can
        * see the recording is on without reading the status line. */
@@ -400,6 +428,10 @@
     quad.setAttribute('aria-expanded', 'false');
     styleBtn(quad, 'icon');
     quad.className += ' con-quad';
+    var quadNum = document.createElement('span');
+    quadNum.className = 'con-quad-num';
+    quadNum.setAttribute('aria-hidden', 'true');
+    quad.appendChild(quadNum);
     /* Grey until the first paint says otherwise: an attribute-less button
      * would take the plain key colour, which is Q4's. */
     quad.setAttribute('data-quad', '');
@@ -754,7 +786,7 @@
     el = { keys: keys, keysMore: more,
            root: root, strip: strip, title: title, status: status, tail: tail, mic: mic,
            frozen: frozen, bar: bar, barLabel: barLabel, input: input,
-           send: send, silent: silent, quad: quad };
+           send: send, silent: silent, quad: quad, quadNum: quadNum };
 
     /* The keyboard shrinks the visual viewport, and iOS does not always fire a
      * resize that brings it back when the keyboard closes without an edit --
@@ -1076,6 +1108,7 @@
     var qid = (window.ctbQuadOf || {})[state.session] || null;
     var label = qid ? QUAD_LABELS[qid] || qid : '알림 없음';
     el.quad.setAttribute('data-quad', qid || '');
+    if (el.quadNum) el.quadNum.textContent = qid ? qid.slice(1) : '';
     el.quad.title = '중요도 / 알림 — 현재: ' + label;
     el.quad.setAttribute('aria-label', '중요도 및 알림 설정, 현재 ' + label);
   }

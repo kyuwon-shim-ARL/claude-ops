@@ -56,6 +56,10 @@ def _no_real_tmux(monkeypatch, tmp_path):
     # on whether the machine running it had closed a session recently -- green
     # on a clean checkout, and on a working machine a gate test starting tmux.
     monkeypatch.setattr(_srv, "_CLOSED_HISTORY_PATH", str(tmp_path / "closed.json"))
+    # The open-endpoint cases read this one, and it is a real file in the
+    # user's home. Nothing writes it here, but a test whose result depends on
+    # what that file happens to hold is not testing the gate.
+    monkeypatch.setattr(_srv, "_TICKET_LINKS_PATH", str(tmp_path / "tickets.json"))
     monkeypatch.setattr(_srv, "_pinned_state", {"Q1": [], "Q2": [], "Q3": [], "Q4": []})
 
 

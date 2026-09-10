@@ -7,6 +7,7 @@ from here -- canned sessions and pins, the real static JS off disk, nothing
 off the machine.
 """
 
+import contextlib
 import json
 from pathlib import Path
 
@@ -49,9 +50,13 @@ QUADS = {"Q1": ["claude_alpha", "claude_alpha_wt_topic"],
          "Q2": ["claude_beta"], "Q3": [], "Q4": []}
 
 
-@pytest.fixture
-def board():
-    """The real dashboard page, fed canned sessions, in a real browser."""
+@contextlib.contextmanager
+def open_board(theme=None):
+    """The real dashboard page, fed canned sessions, in a real browser.
+
+    `theme` picks one of the console's three palettes ('dark', 'light',
+    'parchment'); the default follows the headless browser, which is light.
+    """
     with sync_api.sync_playwright() as p:
         try:
             browser = p.chromium.launch()
@@ -68,13 +73,28 @@ def board():
         # A control token the page already has: without one the first write
         # opens a window.prompt(), which a headless browser dismisses.
         page.add_init_script("localStorage.setItem('ctb.controlToken', 'test-token')")
+        if theme:
+            page.add_init_script(
+                "localStorage.setItem('ctb_theme', %s)" % json.dumps(theme))
         # Tailwind is blocked with the rest of the network, and the page hides
         # its empty state with Tailwind's `.hidden`. Without the rule, every
         # visibility assertion below would pass on a visible element.
+        # Two stylesheet edits, both so a colour read is the colour that ends
+        # up on screen:
+        #   .hidden -- Tailwind is blocked with the rest of the network, and
+        #     the page hides its empty state with it, so without the rule
+        #     every visibility assertion would pass on a visible element;
+        #   transitions off -- the controls fade between backgrounds, and
+        #     getComputedStyle during a fade reports the interpolated value.
+        #     Read immediately after opening the console, that is still the
+        #     colour it started from, which quietly made a colour assertion
+        #     pass no matter what the rule said.
         page.add_init_script(
             "document.addEventListener('DOMContentLoaded', () => {"
             "  const s = document.createElement('style');"
-            "  s.textContent = '.hidden{display:none!important}';"
+            "  s.textContent = '.hidden{display:none!important}'"
+            "    + '*,*::before,*::after{transition:none!important;"
+            "       animation:none!important}';"
             "  document.head.appendChild(s); })"
         )
 
@@ -113,8 +133,16 @@ def board():
                 f = SRC / path.lstrip("/")
                 if not f.exists():
                     return r.fulfill(status=404, body="")
-                ctype = "application/javascript" if f.suffix == ".js" else "text/plain"
-                return r.fulfill(status=200, content_type=ctype, body=f.read_text())
+                # Bytes, not text: the parchment theme pulls a jpg, and
+                # decoding it as UTF-8 threw inside the route handler, which
+                # playwright reports as a pile of unrelated fulfill errors.
+                ctype = {
+                    ".js": "application/javascript",
+                    ".css": "text/css",
+                    ".jpg": "image/jpeg",
+                    ".png": "image/png",
+                }.get(f.suffix, "text/plain")
+                return r.fulfill(status=200, content_type=ctype, body=f.read_bytes())
             if path in ("/", ""):
                 return r.fulfill(status=200, content_type="text/html",
                                  body=_page_html())
@@ -129,7 +157,15 @@ def board():
         page.route("http://ctb.test/**", route)
         page.goto("http://ctb.test/")
         page.wait_for_selector('[data-session-name="claude_alpha"]')
+        try:
+            yield page
+        finally:
+            browser.close()
+
+
+@pytest.fixture
+def board():
+    with open_board() as page:
         yield page
-        browser.close()
 
 

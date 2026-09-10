@@ -13,7 +13,7 @@ import time
 
 import pytest  # noqa: F401
 
-from live_board import board  # noqa: F401  (fixture)
+from live_board import board, open_board  # noqa: F401  (fixture)
 
 
 def last_write(page, timeout=5.0):
@@ -188,49 +188,152 @@ def test_a_refused_write_leaves_the_server_set_alone(board):
     assert board.ctb_accepted == []
 
 
-QUAD_HUE = {
-    "Q1": "rgb(251, 113, 133)",
-    "Q2": "rgb(240, 165, 0)",
-    "Q3": "rgb(96, 165, 250)",
-    "Q4": "rgb(168, 162, 189)",
-}
+THEMES = ("light", "dark", "parchment")
 
 
-def button_colour(page):
+# Colours come back in whatever space the engine settled on -- rgb() for a
+# plain value, color(srgb ...) or oklab(...) for anything mixed. The browser
+# is the only thing that can flatten all of them the same way, so every read
+# goes through a 1x1 canvas and comes out as plain rgb.
+_NORMALISE = """
+  (value) => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 1;
+    const x = c.getContext('2d');
+    x.fillStyle = '#000'; x.fillRect(0, 0, 1, 1);
+    x.fillStyle = value;  x.fillRect(0, 0, 1, 1);
+    const d = x.getImageData(0, 0, 1, 1).data;
+    return `rgb(${d[0]}, ${d[1]}, ${d[2]})`;
+  }
+"""
+
+
+def css_var(page, name):
+    """A theme variable, as a plain rgb triple."""
+    return page.evaluate(
+        "n => (" + _NORMALISE + ")(getComputedStyle(document.documentElement)"
+        ".getPropertyValue(n).trim())", name)
+
+
+def rgb(page, selector, prop="color"):
     return page.eval_on_selector(
-        "#ctb-console button[aria-haspopup='menu']",
-        "el => getComputedStyle(el).color")
+        selector,
+        "el => (" + _NORMALISE + f")(getComputedStyle(el).{prop})")
+
+
+def _channel(v):
+    v = v / 255
+    return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+
+
+def luminance(css_colour):
+    """Relative luminance of a normalised `rgb(r, g, b)`."""
+    r, g, b = (float(n) for n in css_colour.strip("rgb() ").split(",")[:3])
+    return 0.2126 * _channel(r) + 0.7152 * _channel(g) + 0.0722 * _channel(b)
+
+
+def contrast(fg, bg):
+    a, b = luminance(fg), luminance(bg)
+    hi, lo = max(a, b), min(a, b)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+QUAD_BTN = "#ctb-console button[aria-haspopup='menu']"
 
 
 def test_the_button_wears_its_quadrant_before_it_is_pressed(board):
-    """The whole point: which quadrant, without opening the menu."""
+    """The whole point: which quadrant, without opening the menu.
+
+    Asserted against the theme's own variable rather than a literal, so
+    retuning a palette does not have to be re-typed here -- what must not
+    break is the wiring from quadrant to colour.
+    """
     open_console(board)                      # alpha is Q1
-    assert button_colour(board) == QUAD_HUE["Q1"]
+    assert rgb(board, QUAD_BTN) == css_var(board, "--con-q1")
     open_console(board, "claude_beta")       # Q2
-    assert button_colour(board) == QUAD_HUE["Q2"]
+    assert rgb(board, QUAD_BTN) == css_var(board, "--con-q2")
 
 
 def test_an_unpinned_session_gets_no_hue(board):
     open_console(board, "claude_gamma")
-    assert button_colour(board) not in QUAD_HUE.values()
+    assert rgb(board, QUAD_BTN) not in [
+        css_var(board, f"--con-q{i}") for i in (1, 2, 3, 4)]
+
+
+def test_the_button_also_says_which_one_in_text(board):
+    """Colour cannot be the only channel; the number is the other one."""
+    open_console(board)
+    assert board.inner_text(f"{QUAD_BTN} .con-quad-num") == "1"
+    open_console(board, "claude_beta")
+    assert board.inner_text(f"{QUAD_BTN} .con-quad-num") == "2"
+    open_console(board, "claude_gamma")
+    assert board.inner_text(f"{QUAD_BTN} .con-quad-num") == ""
 
 
 def test_the_colour_follows_a_change(board):
     open_console(board)
-    assert button_colour(board) == QUAD_HUE["Q1"]
-    board.click("#ctb-console button[aria-haspopup='menu']")
+    assert rgb(board, QUAD_BTN) == css_var(board, "--con-q1")
+    board.click(QUAD_BTN)
     board.click("[data-quad-menu] [data-quad-set='Q3']")
     last_write(board)
-    board.wait_for_function(
-        "() => getComputedStyle(document.querySelector("
-        "  \'#ctb-console button[aria-haspopup=\\\'menu\\\']\')).color"
-        " === 'rgb(96, 165, 250)'")
+    deadline = time.time() + 3
+    while time.time() < deadline and rgb(board, QUAD_BTN) != css_var(board, "--con-q3"):
+        board.wait_for_timeout(50)
+    assert rgb(board, QUAD_BTN) == css_var(board, "--con-q3")
+    assert board.inner_text(f"{QUAD_BTN} .con-quad-num") == "3"
 
 
 def test_each_menu_row_wears_the_quadrant_it_sets(board):
     open_console(board)
-    board.click("#ctb-console button[aria-haspopup='menu']")
-    for qid, hue in QUAD_HUE.items():
-        assert board.eval_on_selector(
-            f"[data-quad-menu] [data-quad-set='{qid}']",
-            "el => getComputedStyle(el).color") == hue
+    board.click(QUAD_BTN)
+    for i in (1, 2, 3, 4):
+        assert rgb(board, f"[data-quad-menu] [data-quad-set='Q{i}']") == \
+            css_var(board, f"--con-q{i}")
+
+
+@pytest.mark.parametrize("theme", THEMES)
+def test_the_hues_are_legible_in_every_theme(theme):
+    """A tint that carries on black is about 2:1 on paper.
+
+    The menu rows are 13px text, which WCAG puts at 4.5:1; the header glyph
+    is a graphic, which is 3:1. Both are measured against the background the
+    element actually paints, since the wash is mixed from the same hue.
+    """
+    with open_board(theme) as page:
+        page.evaluate("name => window.ctbConsole.open(name)", "claude_alpha")
+        page.wait_for_selector("#ctb-console", state="visible")
+        page.click(QUAD_BTN)
+        for i in (1, 2, 3, 4):
+            row = f"[data-quad-menu] [data-quad-set='Q{i}']"
+            ratio = contrast(rgb(page, row), rgb(page, row, "backgroundColor"))
+            assert ratio >= 4.5, f"{theme} Q{i} menu row: {ratio:.2f}:1"
+        glyph = contrast(rgb(page, QUAD_BTN),
+                         rgb(page, QUAD_BTN, "backgroundColor"))
+        assert glyph >= 3.0, f"{theme} header glyph: {glyph:.2f}:1"
+
+
+@pytest.mark.parametrize("theme", THEMES)
+def test_the_four_hues_are_told_apart_in_every_theme(theme):
+    """Four quadrants that render as one colour would say nothing."""
+    with open_board(theme) as page:
+        hues = [css_var(page, f"--con-q{i}") for i in (1, 2, 3, 4)]
+        assert len(set(hues)) == 4, hues
+        for a in range(4):
+            for b in range(a + 1, 4):
+                d = abs(luminance(hues[a]) - luminance(hues[b]))
+                hue_pair = (hues[a], hues[b])
+                assert d > 0.01 or hue_pair[0] != hue_pair[1], hue_pair
+
+
+@pytest.mark.parametrize("theme", THEMES)
+def test_a_pinned_key_still_answers_the_pointer(theme):
+    """These rules outrank .con-btn:hover, so they have to restate it.
+
+    A key that does not change under the pointer reads as disabled.
+    """
+    with open_board(theme) as page:
+        page.evaluate("name => window.ctbConsole.open(name)", "claude_alpha")
+        page.wait_for_selector("#ctb-console", state="visible")
+        resting = rgb(page, QUAD_BTN, "backgroundColor")
+        page.hover(QUAD_BTN)
+        assert rgb(page, QUAD_BTN, "backgroundColor") != resting
