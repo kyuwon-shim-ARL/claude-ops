@@ -153,6 +153,7 @@
     check: 'M5 12.5l4.5 4.5L19 7',
     alert: 'M12 4l9 16H3zM12 10v4M12 17.5v.5',
     dot: 'M12 12m-2.5 0a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0',
+    pin: 'M9 3h6M12 3v7M12 10l-4 5h8l-4-5zM12 15v6',
     mic: 'M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM6 11a6 6 0 0 0 12 0M12 17v4M9 21h6',
   };
   function icon(name, size) {
@@ -225,6 +226,16 @@
       '#ctb-console .con-chip[aria-current="true"][data-quad="Q2"]{background:var(--con-btn);box-shadow:inset 0 0 0 1.5px rgba(240,165,0,0.5),0 1px 2px rgba(16,24,40,0.10)}',
       '#ctb-console .con-chip[aria-current="true"][data-quad="Q3"]{background:var(--con-btn);box-shadow:inset 0 0 0 1.5px rgba(96,165,250,0.5),0 1px 2px rgba(16,24,40,0.10)}',
       '#ctb-console .con-chip[aria-current="true"][data-quad="Q4"]{background:var(--con-btn);box-shadow:inset 0 0 0 1.5px rgba(139,133,160,0.45),0 1px 2px rgba(16,24,40,0.10)}',
+      /* The importance key wears the same four hues, but louder than a chip
+       * does: this one has to answer "which quadrant is this session in"
+       * before it is pressed, so the glyph itself takes the colour and the
+       * ring closes around it. No quadrant -- which is also "no completion
+       * alert" -- stays grey and quiet. */
+      '#ctb-console .con-quad[data-quad="Q1"]{color:#fb7185;background:rgba(220,100,90,0.12);box-shadow:inset 0 0 0 1.5px rgba(251,113,133,0.55)}',
+      '#ctb-console .con-quad[data-quad="Q2"]{color:#f0a500;background:rgba(217,119,6,0.12);box-shadow:inset 0 0 0 1.5px rgba(240,165,0,0.55)}',
+      '#ctb-console .con-quad[data-quad="Q3"]{color:#60a5fa;background:rgba(37,99,235,0.12);box-shadow:inset 0 0 0 1.5px rgba(96,165,250,0.55)}',
+      '#ctb-console .con-quad[data-quad="Q4"]{color:#a8a2bd;background:rgba(107,114,128,0.12);box-shadow:inset 0 0 0 1.5px rgba(139,133,160,0.5)}',
+      '#ctb-console .con-quad[data-quad=""]{color:var(--con-muted);opacity:0.6}',
       '#ctb-console .con-rail{background:var(--con-tray);border-radius:14px;padding:4px}',
       /* The mic while it listens: a red key, pulsing, so a held finger can
        * see the recording is on without reading the status line. */
@@ -375,6 +386,28 @@
       openSearch();
     });
 
+    /* Importance and notifications, where the session is being watched.
+     *
+     * The quadrant a session sits in is set by dragging its card, and a
+     * completion push only goes out for a pinned session -- both live on the
+     * board, which the sheet covers. Deciding "this one matters, tell me when
+     * it stops" from in here is the same decision, made at the moment it
+     * actually comes up. */
+    var quad = document.createElement('button');
+    quad.type = 'button';
+    quad.appendChild(icon('pin'));
+    quad.setAttribute('aria-haspopup', 'menu');
+    quad.setAttribute('aria-expanded', 'false');
+    styleBtn(quad, 'icon');
+    quad.className += ' con-quad';
+    /* Grey until the first paint says otherwise: an attribute-less button
+     * would take the plain key colour, which is Q4's. */
+    quad.setAttribute('data-quad', '');
+    quad.addEventListener('click', function (e) {
+      e.stopPropagation();
+      toggleQuadMenu();
+    });
+
     var copy = document.createElement('button');
     copy.type = 'button';
     copy.appendChild(icon('copy'));
@@ -392,6 +425,7 @@
 
     header.appendChild(title);
     header.appendChild(silent);
+    header.appendChild(quad);
     header.appendChild(find);
     header.appendChild(copy);
     header.appendChild(close);
@@ -720,7 +754,7 @@
     el = { keys: keys, keysMore: more,
            root: root, strip: strip, title: title, status: status, tail: tail, mic: mic,
            frozen: frozen, bar: bar, barLabel: barLabel, input: input,
-           send: send, silent: silent };
+           send: send, silent: silent, quad: quad };
 
     /* The keyboard shrinks the visual viewport, and iOS does not always fire a
      * resize that brings it back when the keyboard closes without an edit --
@@ -1033,8 +1067,180 @@
     el.silent.style.display = pinned.indexOf(state.session) === -1 ? 'inline' : 'none';
   }
 
+  /* The pin button says which quadrant the open session is in -- or that it is
+   * in none, which is the same thing as "no completion alert for this one". */
+  function paintQuadBtn() {
+    if (!el.quad) return;
+    if (!state.session) { el.quad.style.display = 'none'; return; }
+    el.quad.style.display = '';
+    var qid = (window.ctbQuadOf || {})[state.session] || null;
+    var label = qid ? QUAD_LABELS[qid] || qid : '알림 없음';
+    el.quad.setAttribute('data-quad', qid || '');
+    el.quad.title = '중요도 / 알림 — 현재: ' + label;
+    el.quad.setAttribute('aria-label', '중요도 및 알림 설정, 현재 ' + label);
+  }
+
+  function quadMenuOpen() {
+    return !!(el.root && el.root.querySelector('[data-quad-menu]'));
+  }
+
+  function closeQuadMenu() {
+    if (!el.root) return;
+    var menu = el.root.querySelector('[data-quad-menu]');
+    if (menu) {
+      var hadFocus = menu.contains(document.activeElement);
+      menu.parentNode.removeChild(menu);
+      /* Removing the focused node drops focus on <body>, and the console's
+       * key handling has nothing to work with from there. */
+      if (hadFocus && el.quad && el.root && el.root.style.display !== 'none') el.quad.focus();
+    }
+    if (el.quad) el.quad.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('click', quadMenuAway, true);
+  }
+
+  function quadMenuAway(e) {
+    if (!el.root) return;
+    var menu = el.root.querySelector('[data-quad-menu]');
+    if (menu && (menu.contains(e.target) || (el.quad && el.quad.contains(e.target)))) return;
+    closeQuadMenu();
+  }
+
+  function setQuadrant(qid) {
+    var name = state.session;
+    closeQuadMenu();
+    if (!name) return;
+    var setter = window.ctbSetQuadrant;
+    if (typeof setter !== 'function') {
+      /* The board's pin machinery lives in the page, not here. In a context
+       * that never loaded it (a bare console page) say so rather than
+       * pretending the tap landed. */
+      setStatus('이 화면에서는 중요도를 바꿀 수 없습니다', 'var(--con-err)');
+      return;
+    }
+    var label = qid ? (QUAD_LABELS[qid] || qid) : '알림 없음';
+    /* The write is a queued read-modify-write behind an optimistic paint, so
+     * the answer can arrive seconds later -- by which time the console may be
+     * showing a different session. A result belongs to the session it was
+     * asked for, and to nothing else. */
+    return Promise.resolve(setter(name, qid)).then(function (ok) {
+      /* Repaint regardless of which session is open now: a rejected write is
+       * rolled back on the board, and the rail showing the console's *other*
+       * session was painted from the optimistic set. Only the spoken result
+       * belongs to the session that asked for it. */
+      renderStrip();
+      if (state.session !== name) return ok;
+      if (ok === false) {
+        setStatus('중요도를 바꾸지 못했습니다', 'var(--con-err)');
+      } else {
+        setStatus('중요도: ' + label, 'var(--con-ok)');
+      }
+      return ok;
+    }, function () {
+      if (state.session === name) setStatus('중요도를 바꾸지 못했습니다', 'var(--con-err)');
+      return false;
+    });
+  }
+
+  function toggleQuadMenu() {
+    if (quadMenuOpen()) { closeQuadMenu(); return; }
+    if (!state.session || !el.root) return;
+    hideHints();
+    var current = (window.ctbQuadOf || {})[state.session] || null;
+
+    var menu = document.createElement('div');
+    menu.setAttribute('data-quad-menu', '');
+    menu.setAttribute('role', 'menu');
+    /* Under the button it belongs to, measured rather than guessed: a fixed
+     * offset sat on top of the button on some layouts, and a menu covering
+     * its own toggle cannot be dismissed by tapping that toggle. */
+    var anchor = el.quad.getBoundingClientRect();
+    var rootBox = el.root.getBoundingClientRect();
+    var top = Math.round(anchor.bottom - rootBox.top + 6);
+    menu.style.cssText = [
+      'position:absolute', 'top:' + top + 'px', 'right:10px', 'z-index:5',
+      'display:flex', 'flex-direction:column', 'gap:4px', 'padding:6px',
+      'border-radius:12px', 'background:var(--con-well)',
+      'border:1px solid var(--con-edge)',
+      'box-shadow:0 8px 24px rgba(16,24,40,0.28)', 'min-width:168px',
+    ].join(';');
+
+    /* No colour dot on the quadrant rows: the row itself is that colour now,
+     * and the same hue twice reads as decoration. The off switch keeps its
+     * glyph, because "no quadrant" has no hue to speak with. */
+    var rows = [
+      { qid: 'Q1', text: QUAD_LABELS.Q1 },
+      { qid: 'Q2', text: QUAD_LABELS.Q2 },
+      { qid: 'Q3', text: QUAD_LABELS.Q3 },
+      { qid: 'Q4', text: QUAD_LABELS.Q4 },
+      { qid: null, text: '🔕 알림 끄기 (핀 해제)' },
+    ];
+    rows.forEach(function (r) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('role', 'menuitemradio');
+      b.setAttribute('data-quad-set', r.qid === null ? 'none' : r.qid);
+      var on = r.qid === current;
+      b.setAttribute('aria-checked', on ? 'true' : 'false');
+      b.textContent = (on ? '✓ ' : '') + r.text;
+      styleBtn(b);
+      b.className += ' con-quad';
+      b.setAttribute('data-quad', r.qid || '');
+      /* .con-btn centres its content; a menu is a list, so it reads left. */
+      b.style.cssText = 'justify-content:flex-start;text-align:left;padding:8px 10px;font-size:13px;white-space:nowrap;'
+        + (on ? 'font-weight:700;' : '');
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        setQuadrant(r.qid);
+      });
+      menu.appendChild(b);
+    });
+
+    /* Focus moves into the menu, and the menu answers its own keys.
+     * Without this the caret stayed in the prompt box (keepCaret keeps it
+     * there through a header tap): Enter would send the draft to the session
+     * and Tab would send a tab keystroke to tmux, both while a menu was open
+     * on top. Escape here closes the menu only -- the document handler that
+     * closes the whole console never sees it. */
+    menu.addEventListener('keydown', function (e) {
+      var items = Array.prototype.slice.call(menu.querySelectorAll('[data-quad-set]'));
+      var at = items.indexOf(document.activeElement);
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        closeQuadMenu();
+        if (el.quad) el.quad.focus();
+        return;
+      }
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        e.stopPropagation();
+        var step = e.key === 'ArrowDown' ? 1 : -1;
+        var next = items[(at + step + items.length) % items.length];
+        if (next) next.focus();
+        return;
+      }
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        e.stopPropagation();
+        closeQuadMenu();
+        if (el.quad) el.quad.focus();
+      }
+    });
+
+    el.root.appendChild(menu);
+    var first = menu.querySelector('[aria-checked="true"]') || menu.querySelector('[data-quad-set]');
+    if (first) first.focus();
+    el.quad.setAttribute('aria-expanded', 'true');
+    /* Capture phase: the sheet stops clicks of its own, and without this a tap
+     * on the tail would leave the menu hanging over the terminal. */
+    setTimeout(function () {
+      document.addEventListener('click', quadMenuAway, true);
+    }, 0);
+  }
+
   function renderStrip() {
     paintSilentBadge();
+    paintQuadBtn();
     if (!el.strip) return;
     var list = sessionOrder();
     el.strip.textContent = '';
@@ -1651,6 +1857,10 @@
   }
 
   function openSearch() {
+    /* The palette owns the keyboard while it is up, and closing it hands
+     * focus to the prompt box. A menu left open underneath would then take
+     * Enter as "send the draft" rather than "choose this quadrant". */
+    closeQuadMenu();
     buildSearch();
     search.root.style.display = 'flex';
     search.input.value = '';
@@ -3405,6 +3615,8 @@
      * are actually working in is almost always two sessions, not nine. */
     if (state.session && state.session !== name) { state.prev = state.session; sttAbort(); }
     state.boxTouched = null;   /* the mark belongs to the box it was made in */
+    /* The menu names one session; it must not survive a switch to another. */
+    if (state.session !== name) closeQuadMenu();
     state.session = name;
     state.selStart = null;
     state.selEnd = null;
@@ -3476,6 +3688,9 @@
     setFrozen(false);
     hideHints();
     if (el.root) el.root.style.display = 'none';
+    /* After the sheet is hidden, so it does not hand focus to a button that
+     * is no longer on screen. */
+    closeQuadMenu();
     unlockPage();
   }
 
@@ -3574,6 +3789,9 @@
     _linkifyLines: linkifyLines,
     _whenSettled: whenSettled,
     _renderStrip: renderStrip,
+    _toggleQuadMenu: toggleQuadMenu,
+    _closeQuadMenu: closeQuadMenu,
+    _paintQuadBtn: paintQuadBtn,
     _el: function () { return el; },
     _describeBox: describeBox,
     _THEMES: THEMES,

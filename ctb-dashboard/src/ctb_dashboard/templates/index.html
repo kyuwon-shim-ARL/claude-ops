@@ -818,6 +818,10 @@
             _quadsCache = res.data;
           }
           if (last && lastSSEData) render(lastSSEData);
+          // Hand the outcome back: a caller that reports success on its own
+          // (the console's importance menu) has no other way to know the
+          // write was rolled back.
+          return res.ok;
         } finally {
           _pinOpsPending--;
         }
@@ -2555,6 +2559,22 @@
       focusSession(card, name);
       return true;
     };
+
+    /* Importance and notifications from inside the console.
+     *
+     * The quadrant is set by dragging a card, and completion pushes go out for
+     * pinned sessions only -- both of which live on the board, behind a
+     * full-bleed sheet. Reaching them meant closing the console, finding the
+     * card, dragging it, and opening the console again. `qid` is 'Q1'..'Q4',
+     * or null to unpin (which is also what turns notifications off). */
+    window.ctbSetQuadrant = function (name, qid) {
+      if (qid === null || qid === undefined) {
+        return _pinChange((q) => { _removeFromQuads(q, name); return q; });
+      }
+      if (!QUAD_LABELS[qid]) return Promise.resolve();
+      return moveToQuadrant(name, qid);
+    };
+    window.ctbQuadLabels = QUAD_LABELS;
 
     // --- Card tap handler: mobile=console, desktop=focus ---
     // The card action is whatever that device can actually do with a session.
