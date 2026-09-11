@@ -244,10 +244,19 @@ def test_selection_uses_click_not_touchstart(console_js):
 
 def test_tail_refresh_is_frozen_while_selecting(console_js):
     """Lines must not shift under a finger mid-selection, and the poll must
-    resume once the selection is cleared."""
-    assert "if (state.selStart !== null) return;" in console_js
-    assert "stopPolling();" in console_js
-    assert "if (state.session && !state.timer) startPolling();" in console_js
+    resume once the selection is cleared.
+
+    The freeze is asked about by reason now, not by testing one variable: a
+    find holds the pane too, and either ending must not thaw the other. The
+    behaviour is driven in a browser by
+    test_console_recover_find_live.py; what is checked here is that the
+    guards go through the one predicate.
+    """
+    assert "function frozen()" in console_js
+    assert "if (frozen()) { state.hash = ''; return; }" in console_js
+    assert "if (selecting()) return;" in console_js
+    assert "if (findOpen() && !deliberate) return;" in console_js
+    assert "if (state.session && !state.timer && !frozen()) startPolling();" in console_js
 
 
 def test_selection_resets_on_session_switch_and_close(console_js):

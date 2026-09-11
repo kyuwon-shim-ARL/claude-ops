@@ -46,6 +46,13 @@ SESSIONS = [
     _session("claude_gamma", state="idle"),
     _session("claude_delta", state="idle", context="alpha mentioned here"),
 ]
+# A pane worth scrolling and searching: 120 lines, with "needle" on three of
+# them so a find has more than one place to go.
+LOG = "\n".join(
+    ("line %03d needle here" % i) if i in (7, 61, 118) else ("line %03d ordinary output" % i)
+    for i in range(120)
+)
+
 QUADS = {"Q1": ["claude_alpha", "claude_alpha_wt_topic"],
          "Q2": ["claude_beta"], "Q3": [], "Q4": []}
 
@@ -70,6 +77,9 @@ def open_board(theme=None):
         accepted = []
         page.ctb_posted = posted
         page.ctb_accepted = accepted
+        page.ctb_keys = []
+        page.ctb_log = LOG
+        page.ctb_log_hash = "h1"
         # A control token the page already has: without one the first write
         # opens a window.prompt(), which a headless browser dismisses.
         page.add_init_script("localStorage.setItem('ctb.controlToken', 'test-token')")
@@ -125,6 +135,21 @@ def open_board(theme=None):
                                  body=json.dumps(accepted[-1] if accepted else QUADS))
             if path.startswith("/api/sessions/stream"):
                 return r.abort()
+            if path.startswith("/api/sessions/") and path.endswith("/key"):
+                # What key the console actually asked tmux for. "a request was
+                # made" is not the assertion worth making about a key.
+                page.ctb_keys.append(json.loads(r.request.post_data or "{}"))
+                return r.fulfill(status=200, content_type="application/json",
+                                 body='{"ok":true}')
+            if path.startswith("/api/sessions/") and path.endswith("/log"):
+                # A real pane: long enough to scroll, with a word that appears
+                # more than once so a find has somewhere to step to.
+                body = {"log": page.ctb_log, "hash": page.ctb_log_hash,
+                        "cols": 80, "ghost": False}
+                if "since=" + page.ctb_log_hash in url:
+                    body = {"unchanged": True}
+                return r.fulfill(status=200, content_type="application/json",
+                                 body=json.dumps(body))
             if path.startswith("/api/sessions/create"):
                 # What the server answers when tmux really did start one.
                 return r.fulfill(status=200, content_type="application/json",

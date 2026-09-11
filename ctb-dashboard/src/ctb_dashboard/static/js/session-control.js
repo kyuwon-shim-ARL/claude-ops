@@ -165,6 +165,7 @@
     alert: 'M12 4l9 16H3zM12 10v4M12 17.5v.5',
     dot: 'M12 12m-2.5 0a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0',
     pin: 'M9 3h6M12 3v7M12 10l-4 5h8l-4-5zM12 15v6',
+    textSearch: 'M4 6h10M4 10h6M4 14h4M14.5 12.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM21 22l-3.2-3.2',
     mic: 'M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM6 11a6 6 0 0 0 12 0M12 17v4M9 21h6',
   };
   function icon(name, size) {
@@ -440,6 +441,14 @@
       toggleQuadMenu();
     });
 
+    var findText = document.createElement('button');
+    findText.type = 'button';
+    findText.appendChild(icon('textSearch'));
+    findText.title = '\ucd9c\ub825 \ub0b4\uc6a9 \uac80\uc0c9 (Ctrl/Cmd+Shift+F)';
+    findText.setAttribute('aria-label', '\ucd9c\ub825 \ub0b4\uc6a9 \uac80\uc0c9');
+    styleBtn(findText, 'icon');
+    findText.addEventListener('click', function () { openFind(); });
+
     var copy = document.createElement('button');
     copy.type = 'button';
     copy.appendChild(icon('copy'));
@@ -459,6 +468,7 @@
     header.appendChild(silent);
     header.appendChild(quad);
     header.appendChild(find);
+    header.appendChild(findText);
     header.appendChild(copy);
     header.appendChild(close);
 
@@ -680,11 +690,18 @@
       if (e.key === 'Enter') shiftHeld = e.shiftKey;
       if (e.key === 'Enter' && !e.shiftKey && !imeIsHandlingIt) {
         e.preventDefault();
+        /* The press that recovered the console put the caret in this box.
+         * Held down, the OS repeats it here -- and the second repeat would
+         * send whatever draft was sitting in the box, on a key the reader
+         * pressed to get their bearings. The physical press ends at keyup;
+         * until then this box has not been typed into. */
+        if (recoveredEnter) return;
         submit();
       }
     });
     input.addEventListener('keyup', function (e) {
       if (e.key === 'Enter' || e.key === 'Shift') shiftHeld = e.shiftKey;
+      if (e.key === 'Enter') recoveredEnter = false;
     });
     input.addEventListener('beforeinput', function (e) {
       var breaksLine = e.inputType === 'insertLineBreak'
@@ -769,7 +786,32 @@
       'backdrop-filter:blur(4px)', '-webkit-backdrop-filter:blur(4px)',
     ].join(';');
 
+    /* Both overlay the pane rather than sitting above it: a row that appears
+     * and disappears changes the pane's height, and the poll reads that height
+     * to decide whether the reader is at the bottom -- the console froze on
+     * its own status line once already for exactly that reason. */
+    var endPill = document.createElement('button');
+    endPill.type = 'button';
+    endPill.appendChild(icon('down', 14));
+    endPill.appendChild(document.createTextNode('\ub05d\uc73c\ub85c'));
+    endPill.setAttribute('aria-label', '\ub9e8 \uc544\ub798\ub85c \uac00\uae30');
+    endPill.style.cssText = [
+      'display:none', 'position:absolute', 'left:50%', 'bottom:14px',
+      'transform:translateX(-50%)', 'z-index:3',
+      'align-items:center', 'gap:5px', 'min-height:34px', 'padding:0 14px',
+      'border:0', 'border-radius:99px', 'cursor:pointer',
+      'font:600 12px/1 ui-sans-serif,system-ui,sans-serif',
+      'background:var(--con-accent,rgba(129,140,248,0.92))', 'color:#fff',
+      'box-shadow:0 6px 18px rgba(16,24,40,0.35)',
+    ].join(';');
+    endPill.addEventListener('click', function (e) {
+      e.stopPropagation();
+      resumeLive();
+    });
+
     tailWrap.appendChild(tail);
+    tailWrap.appendChild(buildFindBar());
+    tailWrap.appendChild(endPill);
     tailWrap.appendChild(frozen);
 
     root.appendChild(strip);
@@ -783,7 +825,7 @@
     keepCaret(root, input);
     document.body.appendChild(root);
 
-    el = { keys: keys, keysMore: more,
+    el = { keys: keys, keysMore: more, endPill: endPill,
            root: root, strip: strip, title: title, status: status, tail: tail, mic: mic,
            frozen: frozen, bar: bar, barLabel: barLabel, input: input,
            send: send, silent: silent, quad: quad, quadNum: quadNum };
@@ -806,7 +848,11 @@
     var fitPending = 0;
     window.addEventListener('resize', function () {
       if (!state.session || fitPending) return;
-      fitPending = requestAnimationFrame(function () { fitPending = 0; fitKeys(); });
+      fitPending = requestAnimationFrame(function () {
+        fitPending = 0;
+        fitKeys();
+        updateEndPill();
+      });
     });
     window.addEventListener('orientationchange', function () {
       if (state.session) setTimeout(fitKeys, 200);
@@ -834,6 +880,7 @@
        * not a geometry the poll re-measures: the keyboard, a status line or
        * a rotation can move the numbers without the reader moving at all. */
       state.pinned = top + tail.clientHeight >= tail.scrollHeight - 48;
+      updateEndPill();
       if (!goingUp || top > tail.clientHeight) return;
       /* Opening a session empties the tail to show '불러오는 중…', which drops
        * scrollTop to 0 and fires this -- a scroll the user never made, which
@@ -895,10 +942,11 @@
     });
 
     document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && state.session) {
+      if (e.key === 'Escape' && state.session && !e.shiftKey) {
         var ns = window.ctbNewSession;
         if (ns && ns.isOpen && ns.isOpen()) return;   /* the sheet's Escape */
-        if (searchOpen()) closeSearch();
+        if (findOpen()) closeFind(true);
+        else if (searchOpen()) closeSearch();
         else if (state.selStart !== null) clearSelection();
         else hide();
       }
@@ -932,7 +980,8 @@
     /* Only the textarea can raise a keyboard. With it unfocused there is no
      * overlap by definition, so ignore a visual viewport that iOS left short
      * after dismissing the keyboard -- otherwise the sheet stays squeezed. */
-    var typing = document.activeElement === el.input;
+    var typing = document.activeElement === el.input
+      || (findOpen() && document.activeElement === fnd.input);
     var overlap = typing && vv
       ? Math.max(0, window.innerHeight - (vv.height + vv.offsetTop))
       : 0;
@@ -951,6 +1000,9 @@
      * the tail (flex:1) gives back the space. */
     el.root.style.top = offsetTop + 'px';
     el.root.style.bottom = overlap + 'px';
+    /* The pane just changed height without anyone scrolling, and the pill is
+     * a statement about the distance to the bottom. */
+    updateEndPill();
   }
 
   /* --- panning the switcher rail ----------------------------------------- */
@@ -1284,7 +1336,7 @@
   }
 
   function keysTaken() {
-    return searchOpen() || sheetOpen();
+    return searchOpen() || sheetOpen() || findOpen();
   }
 
   function renderStrip() {
@@ -1780,6 +1832,22 @@
     sendKey('Tab', 'Shift+Tab');
   });
 
+  /* Shift+Escape sends Escape to the session, for the same reason Shift+Tab
+   * sends Tab: plain Escape over the console is the sheet's own (close the
+   * find bar, drop a selection, close the console), and Escape is the key
+   * that interrupts Claude Code. The shifted one is unambiguous everywhere --
+   * the box included -- so it needs no rule about where the caret is. */
+  document.addEventListener('keydown', function (e) {
+    if (!state.session || keysTaken() || e.key !== 'Escape' || !e.shiftKey) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.isComposing || e.keyCode === 229) return;
+    /* Held down the OS repeats this, and every repeat is an interrupt sent to
+     * a live session. One press, one Escape. */
+    if (e.repeat) return;
+    e.preventDefault();
+    sendKey('Escape', 'Shift+Esc');
+  });
+
   document.addEventListener('keyup', function (e) {
     if (!hintsVisible()) return;
     if (e.key === 'Control' || e.key === 'Meta' || e.key === 'Alt') hideHints();
@@ -1922,7 +1990,9 @@
   function closeSearch() {
     if (!search.root) return;
     search.root.style.display = 'none';
-    /* Give the caret back to the box the user was typing in. */
+    /* Give the caret back to the box the user was typing in -- unless the
+     * find bar is up, where the caret belongs to the query. */
+    if (findOpen()) { fnd.input.focus(); return; }
     if (el.input && state.session) el.input.focus();
   }
 
@@ -2662,6 +2732,8 @@
     });
     el.tail.appendChild(frag);
     paintSelection();
+    if (findOpen()) runFind(fnd.q, fnd.at);
+    updateEndPill();
   }
 
   /* What the console can honestly say about text it finds in the box. It knows
@@ -2732,6 +2804,14 @@
     }
   }
 
+  /* The pane stops updating for more than one reason -- a selection being
+   * made, a find in progress -- and each has to be able to end without
+   * thawing the other. Everything that used to test `state.selStart !== null`
+   * asks here instead. */
+  function selecting() { return state.selStart !== null; }
+
+  function frozen() { return selecting() || findOpen(); }
+
   function onLineTap(index) {
     if (isNaN(index)) return;
 
@@ -2753,6 +2833,7 @@
    * switching session, closing the sheet -- so none of them can leave the
    * console looking frozen while it is in fact live. */
   function setFrozen(on) {
+    on = !!on && frozen();   /* one reason ending does not thaw the other */
     if (el.frozen) el.frozen.style.display = on ? 'inline-flex' : 'none';
     /* The well has no border; the freeze shows as an amber ring in the
      * shadow channel, on top of the well's own edge. */
@@ -2764,7 +2845,7 @@
     var range = selectionRange();
     if (!range) {
       el.bar.style.display = 'none';
-      setFrozen(false);
+      setFrozen(frozen());
       return;
     }
     el.bar.style.display = 'flex';
@@ -2787,9 +2868,10 @@
     state.selEnd = null;
     if (el.tail) paintSelection();
     if (el.bar) el.bar.style.display = 'none';
-    setFrozen(false);
-    /* Selection was what paused the tail; resume now. */
-    if (state.session && !state.timer) startPolling();
+    setFrozen(frozen());
+    /* Selection was what paused the tail; resume now -- unless a find is
+     * still holding it. */
+    if (state.session && !state.timer && !frozen()) startPolling();
   }
 
   /* How many columns of this font fit across the tail. The server uses it to
@@ -2871,6 +2953,9 @@
    * what happened and stop; the strip is still there to switch away with. */
   function sessionGone() {
     stopPolling();
+    closeFind();
+    /* The pane is replaced by a sentence; hits into it point at nothing. */
+    state.lines = null;
     state.exhausted = true;
     el.tail.textContent = '이 세션은 더 이상 없습니다 — 종료되었거나 이름이 바뀌었습니다.';
     setStatus('세션 없음', 'var(--con-err)');
@@ -2900,10 +2985,15 @@
         pollOk();
         /* Same pane as last time: nothing to paint. */
         if (data.unchanged) return;
+        /* A frozen pane wins over a refresh: repainting would move the lines
+         * out from under whoever is selecting or searching them.
+         *
+         * The hash is deliberately NOT banked here. It used to be, one line
+         * above this check, and the server then answered `unchanged` for a
+         * pane this console had never painted: a thaw showed the stale text
+         * until something else happened to change the screen. */
+        if (frozen()) { state.hash = ''; return; }
         state.hash = data.hash || '';
-        /* A live selection wins over a refresh: repainting would move the
-         * chosen lines out from under the user. */
-        if (state.selStart !== null) return;
         state.cols = data.cols || 0;
         state.ghost = data.ghost === true;
         /* Within two lines of the bottom counts as at the bottom: the
@@ -2933,6 +3023,7 @@
         renderTail(data.log || '');
         el.tail.scrollTop = atBottom ? el.tail.scrollHeight : el.tail.scrollHeight - fromBottom;
         if (atBottom) state.pinned = true;
+        updateEndPill();
         rememberTail(name, data);
       })
       .catch(function () {
@@ -2995,9 +3086,17 @@
   /* Deepen the window and redraw, keeping the line the user is looking at
    * where it was: the new lines arrive ABOVE, so anchoring to the distance
    * from the bottom is what holds the view still. */
-  function growTail() {
+  /* `deliberate` is a request the reader made in so many words -- the find
+   * bar's "더 불러오기" -- as opposed to the automatic deepening that scrolling
+   * up performs. Only the deliberate kind runs while the pane is frozen. */
+  function growTail(deliberate) {
     if (!state.session || state.growing || state.exhausted) return;
-    if (state.selStart !== null) return;   /* a frozen selection stays frozen */
+    /* A frozen pane stays frozen -- including the automatic deepening that
+     * scrolling up asks for. Find does its own deepening, on request. */
+    /* A selection freeze is never overridden -- the reader's finger is on the
+     * lines. A find freeze is, but only by the find bar's own button. */
+    if (selecting()) return;
+    if (findOpen() && !deliberate) return;
     if (state.depth >= MAX_TAIL_LINES) return;
 
     var name = state.session;
@@ -3016,15 +3115,34 @@
          * redraw that displaces this one. */
         whenSettled(function () {
           state.growing = false;
-          if (state.session !== name || state.selStart !== null) return;
+          /* The freeze may have arrived while this was in flight: a find
+           * opened after an automatic grow started must not have the pane
+           * rebuilt underneath its matches. */
+          if (state.session !== name || selecting()) return;
+          if (findOpen() && !deliberate) return;
           state.cols = data.cols || 0;
           state.hash = data.hash || '';
           var before = state.lines ? state.lines.length : 0;
           var fromBottom = el.tail.scrollHeight - el.tail.scrollTop;
+          var held = findOpen() && fnd.hits[fnd.at] ? fnd.hits[fnd.at] : null;
           renderTail(data.log || '');
           rememberTail(name, data);
           el.tail.scrollTop = el.tail.scrollHeight - fromBottom;
+          updateEndPill();
           var gained = (state.lines ? state.lines.length : 0) - before;
+          /* Older lines arrive above, so every match moved down by `gained`.
+           * Re-point at the same one rather than jumping back to the first. */
+          if (held && gained > 0) {
+            for (var h = 0; h < fnd.hits.length; h++) {
+              if (fnd.hits[h].line === held.line + gained
+                  && fnd.hits[h].start === held.start) {
+                fnd.at = h;
+                paintCurrent(false);
+                renderFindCount();
+                break;
+              }
+            }
+          }
           if (gained <= 0) {
             /* The pane has no more history: stop asking on every scroll. */
             state.exhausted = true;
@@ -3048,6 +3166,418 @@
     if (state.timer) clearInterval(state.timer);
     state.timer = null;
   }
+
+  /* --- back to live ------------------------------------------------------ */
+
+  /* Everything that can leave the console looking dead, undone in one call:
+   * a half-made selection freezing the pane, a find holding it, a fling whose
+   * lease never expired, a reader parked in history, a poll timer lost to a
+   * backgrounded tab. The pill presses it; so does Enter.
+   *
+   * Exactly one request goes out, whichever path got here: clearSelection()
+   * restarts the poll (which polls immediately) when it is the thing that
+   * stopped it, and the branches below cover the cases where it was not. */
+  var recoveredEnter = false;
+
+  function resumeLive() {
+    if (!state.session) return;
+    closeFind();
+    /* Whether anything was polling BEFORE the thaw: clearSelection() restarts
+     * the timer only when it was the selection that stopped it, and a timer
+     * that was already running has to be given its own poll below. Getting
+     * this wrong is silent -- the console comes back and then sits on the
+     * same stale pane until the next tick. */
+    var hadTimer = !!state.timer;
+    if (selecting()) clearSelection();
+    state.skipped = 0;
+    /* A lost touchend, or a queued repaint waiting on a fling that ended
+     * without a final scroll event: both hold repaints off on their own. */
+    touchUntil = 0;
+    if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+    /* Dropping the queued repaint drops the callback that would have cleared
+     * this, and a growTail() that never finishes blocks every later one. */
+    onSettled = null;
+    state.growing = false;
+    state.pinned = true;
+    if (el.tail) el.tail.scrollTop = el.tail.scrollHeight;
+    updateEndPill();
+    if (!state.timer) {
+      startPolling();              /* polls at once */
+    } else if (hadTimer) {
+      /* The timer never stopped, so nothing above has asked for anything.
+       * What is on screen may be a pane the poll skipped: ask for the whole
+       * thing rather than for the difference. */
+      state.hash = '';
+      pollTail(true);
+    }
+    /* else: clearSelection() restarted the timer, which polled on the way in. */
+    if (el.input) {
+      el.input.focus();
+      var end = el.input.value.length;
+      try { el.input.setSelectionRange(end, end); } catch (err) { /* not yet focusable */ }
+    }
+  }
+
+  /* Enter anywhere over the console that is not a control means "get me back
+   * to work". Deliberately NOT taken in the prompt box: an empty Enter there
+   * already sends a bare newline to tmux, which is how a Claude Code prompt
+   * gets confirmed, and stealing it because the screen happened to be frozen
+   * would swallow the one key the reader needed most. Buttons and links keep
+   * their Enter too -- there it is the press. */
+  function interactiveTarget(node) {
+    if (!node || !node.tagName) return false;
+    var t = node.tagName;
+    return t === 'INPUT' || t === 'TEXTAREA' || t === 'BUTTON' || t === 'A'
+        || t === 'SELECT' || node.isContentEditable;
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' || e.defaultPrevented || e.repeat) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    if (e.isComposing || e.keyCode === 229) return;
+    if (!state.session || keysTaken() || quadMenuOpen()) return;
+    if (interactiveTarget(e.target)) return;
+    e.preventDefault();
+    recoveredEnter = true;
+    resumeLive();
+    setStatus('\uc785\ub825\ucc3d\uc73c\ub85c \ub3cc\uc544\uc654\uc2b5\ub2c8\ub2e4 \u00b7 \uc790\ub3d9 \ub530\ub77c\uac00\uae30', 'var(--con-muted)');
+  });
+
+  /* --- jump to the end --------------------------------------------------- */
+
+  /* A phone reopens the console where it was left, which after a day is
+   * hundreds of lines up with no sign of how far. The pill appears once the
+   * bottom is more than a screenful away and says how to get back in one tap.
+   * Half a screen, floor 240px: anything closer is a scroll, not a journey. */
+  function endDistance() {
+    if (!el.tail) return 0;
+    return el.tail.scrollHeight - el.tail.scrollTop - el.tail.clientHeight;
+  }
+
+  function updateEndPill() {
+    if (!el.endPill) return;
+    var far = !!state.session
+      && endDistance() > Math.max(240, el.tail.clientHeight * 0.5);
+    el.endPill.style.display = far ? 'inline-flex' : 'none';
+  }
+
+  /* --- find in the output ------------------------------------------------ */
+
+  /* The session palette on Ctrl+F answers "which session"; this answers "where
+   * in this one". Ctrl/Cmd+Shift+F rather than plain Ctrl+F so the palette
+   * keeps the key every hand here already knows, and the header carries a
+   * button for the phone, which has no chord at all.
+   *
+   * The pane freezes while the bar is open -- the same freeze a selection
+   * uses, by a different reason -- because a match on line 12 is worth nothing
+   * if the next poll shifts line 12 somewhere else. */
+  var fnd = { root: null, input: null, count: null, more: null,
+              open: false, q: '', hits: [], at: 0 };
+
+  function findOpen() { return fnd.open; }
+
+  function buildFindBar() {
+    var bar = document.createElement('div');
+    bar.id = 'con-find';
+    bar.setAttribute('role', 'search');
+    bar.style.cssText = [
+      'display:none', 'position:absolute', 'left:8px', 'right:8px', 'top:8px',
+      'z-index:4', 'align-items:center', 'gap:6px',
+      'padding:6px', 'border-radius:12px',
+      'background:var(--con-sheet)', 'box-shadow:0 8px 24px rgba(16,24,40,0.28)',
+    ].join(';');
+
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.id = 'con-find-input';
+    input.placeholder = '출력 내용 검색';
+    input.setAttribute('aria-label', '출력 내용 검색');
+    input.autocomplete = 'off';
+    input.autocapitalize = 'off';
+    input.spellcheck = false;
+    input.style.cssText = [
+      /* 16px or iOS zooms the whole sheet in on focus and stays there. */
+      'flex:1', 'min-width:0', 'font-size:16px', 'padding:7px 10px',
+      'border-radius:9px', 'background:var(--con-well)', 'color:var(--con-text)',
+      'border:1px solid var(--con-edge,rgba(128,128,128,0.25))', 'outline:none',
+    ].join(';');
+    input.addEventListener('input', function () { runFind(input.value, 0); });
+    input.addEventListener('keydown', onFindKey);
+
+    var count = document.createElement('span');
+    /* aria-live, not role="status": the console already has one status line
+     * and the page selects it as `[role=status]`. A second one here shadowed
+     * it -- everything the console said went to an element that was not on
+     * screen, and the reader was told nothing. */
+    count.setAttribute('aria-live', 'polite');
+    count.style.cssText = 'flex-shrink:0;font-size:11px;color:var(--con-muted);'
+      + 'min-width:52px;text-align:center;';
+
+    var prev = document.createElement('button');
+    prev.type = 'button';
+    prev.appendChild(icon('up', 15));
+    prev.setAttribute('aria-label', '이전 결과');
+    styleBtn(prev, 'icon');
+    prev.addEventListener('click', function () { stepFind(-1); });
+
+    var next = document.createElement('button');
+    next.type = 'button';
+    next.appendChild(icon('down', 15));
+    next.setAttribute('aria-label', '다음 결과');
+    styleBtn(next, 'icon');
+    next.addEventListener('click', function () { stepFind(1); });
+
+    /* The pane holds a window off the end of the session, 40 lines to start
+     * with. A search that finds nothing there has usually found nothing YET,
+     * and saying "0" without offering the rest is a lie by omission. */
+    var more = document.createElement('button');
+    more.type = 'button';
+    more.textContent = '더 불러오기';
+    styleBtn(more, '');
+    more.style.cssText = 'display:none;min-height:34px;padding:0 10px;font-size:12px;';
+    more.addEventListener('click', function () { growTail(true); });
+
+    var close = document.createElement('button');
+    close.type = 'button';
+    close.appendChild(icon('close', 15));
+    close.setAttribute('aria-label', '검색 닫기');
+    styleBtn(close, 'icon');
+    close.addEventListener('click', function () { closeFind(true); });
+
+    bar.appendChild(input);
+    bar.appendChild(count);
+    bar.appendChild(prev);
+    bar.appendChild(next);
+    bar.appendChild(more);
+    bar.appendChild(close);
+
+    fnd.root = bar;
+    fnd.input = input;
+    fnd.count = count;
+    fnd.more = more;
+    return bar;
+  }
+
+  function openFind() {
+    build();
+    if (!state.session) return;
+    /* The palette owns the keyboard when it is up, and two overlays claiming
+     * Escape is how one press closed both. */
+    closeSearch();
+    closeQuadMenu();
+    /* Two freeze reasons at once is a state nobody can reason about: the
+     * copy bar and the find bar would each be waiting for the other to let
+     * go of the pane. A search replaces a half-made selection. */
+    if (selecting()) clearSelection();
+    fnd.open = true;
+    fnd.root.style.display = 'flex';
+    setFrozen(true);
+    stopPolling();
+    fnd.input.focus();
+    fnd.input.select();
+    runFind(fnd.input.value, 0);
+  }
+
+  /* `live` is a close the reader asked for: it hands the caret back to the
+   * prompt box and lets the pane run again. A close on the way out of the
+   * session (hide/show) must not touch either. */
+  function closeFind(live) {
+    if (!fnd.open) return;
+    fnd.open = false;
+    fnd.root.style.display = 'none';
+    fnd.hits = [];
+    fnd.at = 0;
+    fnd.q = '';
+    clearMatches();
+    setFrozen(selecting());
+    if (!live) return;
+    if (el.input && state.session) el.input.focus();
+    /* A selection made before the find still owns the freeze. */
+    if (state.session && !state.timer && !frozen()) startPolling();
+  }
+
+  function onFindKey(e) {
+    /* Chords keep going: Ctrl+F is still the session palette and Ctrl+Shift+F
+     * still re-selects the query, and swallowing them here made both dead
+     * keys whenever the caret sat in this box. What the bar stops is the
+     * plain keys the console spends on the session -- Shift+Tab, the digits
+     * -- which are letters while a search is being typed. keysTaken() stands
+     * the chorded ones down separately. */
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    e.stopPropagation();
+    if (e.isComposing || e.keyCode === 229) return;   /* the IME's key */
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      stepFind(e.shiftKey ? -1 : 1);
+      return;
+    }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      stepFind(e.key === 'ArrowDown' ? 1 : -1);
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeFind(true);
+    }
+  }
+
+  /* Plain case-insensitive substring, not a regex: what is being searched is
+   * a terminal's output, where brackets and dots are text. */
+  /* Case-folded one character at a time, keeping the string the same length.
+   * String.toLowerCase() does not: 'İ' lowercases to two code units, which
+   * slid every offset after it and produced hits that pointed at nothing --
+   * counted in the bar, impossible to paint. */
+  function fold(text) {
+    var out = '';
+    for (var i = 0; i < text.length; i++) {
+      var c = text.charAt(i).toLowerCase();
+      out += c.length === 1 ? c : c.charAt(0);
+    }
+    return out;
+  }
+
+  function findMatches(lines, query) {
+    var hits = [];
+    var q = fold(String(query || ''));
+    if (!q || !lines) return hits;
+    for (var i = 0; i < lines.length; i++) {
+      var hay = fold(lines[i]);
+      var from = 0;
+      for (;;) {
+        var at = hay.indexOf(q, from);
+        if (at === -1) break;
+        hits.push({ line: i, start: at, end: at + q.length });
+        from = at + q.length;   /* no overlapping matches */
+        if (hits.length > 2000) return hits;   /* a pane is not a corpus */
+      }
+    }
+    return hits;
+  }
+
+  function runFind(query, at) {
+    fnd.q = query;
+    fnd.hits = findMatches(state.lines, query);
+    fnd.at = Math.min(Math.max(0, at || 0), Math.max(0, fnd.hits.length - 1));
+    clearMatches();
+    paintMatches();
+    renderFindCount();
+  }
+
+  function stepFind(dir) {
+    if (!fnd.hits.length) return;
+    fnd.at = (fnd.at + dir + fnd.hits.length) % fnd.hits.length;
+    paintCurrent(true);
+    renderFindCount();
+  }
+
+  function renderFindCount() {
+    var n = fnd.hits.length;
+    var loaded = state.lines ? state.lines.length : 0;
+    fnd.count.textContent = !fnd.q ? String(loaded) + '줄'
+                          : n ? (fnd.at + 1) + '/' + n
+                          : '없음';
+    /* Offered whenever there is more to load, not only at zero results: the
+     * match you want may be older than the window as easily as absent. */
+    var canGrow = !state.exhausted && state.depth < MAX_TAIL_LINES;
+    fnd.more.style.display = (fnd.q && canGrow) ? 'inline-flex' : 'none';
+  }
+
+  function clearMatches() {
+    if (!el.tail) return;
+    var marks = el.tail.querySelectorAll('[data-find-hit]');
+    for (var i = 0; i < marks.length; i++) {
+      var m = marks[i];
+      var parent = m.parentNode;
+      if (!parent) continue;
+      while (m.firstChild) parent.insertBefore(m.firstChild, m);
+      parent.removeChild(m);
+      /* Splitting left the line as several text nodes; rejoin them so the
+       * next search walks the same offsets it computed against the string. */
+      parent.normalize();
+    }
+  }
+
+  /* Wrap one character range of a rendered line. The line's text nodes
+   * concatenate to exactly state.lines[i] -- linkifyLines splits the same
+   * string -- so a character offset into the string is a walk over them. */
+  function markRange(div, start, end) {
+    var walker = document.createTreeWalker(div, NodeFilter.SHOW_TEXT, null, false);
+    var pos = 0, node, startNode = null, startOff = 0, endNode = null, endOff = 0;
+    while ((node = walker.nextNode())) {
+      var len = node.nodeValue.length;
+      if (startNode === null && pos + len > start) {
+        startNode = node;
+        startOff = start - pos;
+      }
+      if (startNode !== null && pos + len >= end) {
+        endNode = node;
+        endOff = end - pos;
+        break;
+      }
+      pos += len;
+    }
+    if (startNode === null || endNode === null) return null;
+    var range = document.createRange();
+    range.setStart(startNode, startOff);
+    range.setEnd(endNode, endOff);
+    var mark = document.createElement('mark');
+    mark.setAttribute('data-find-hit', '');
+    mark.style.cssText = 'background:rgba(250,204,21,0.35);color:inherit;'
+      + 'border-radius:2px;';
+    try {
+      range.surroundContents(mark);
+    } catch (err) {
+      /* The match runs across a link boundary: surroundContents refuses a
+       * range that only half-contains an element, so move the contents in. */
+      try {
+        mark.appendChild(range.extractContents());
+        range.insertNode(mark);
+      } catch (err2) {
+        return null;
+      }
+    }
+    return mark;
+  }
+
+  function paintMatches() {
+    if (!el.tail || !fnd.hits.length) return;
+    var rows = el.tail.querySelectorAll('[data-line]');
+    for (var i = 0; i < fnd.hits.length; i++) {
+      var hit = fnd.hits[i];
+      var row = rows[hit.line];
+      if (!row) continue;
+      var mark = markRange(row, hit.start, hit.end);
+      if (mark) mark.setAttribute('data-find-index', String(i));
+    }
+    paintCurrent(true);
+  }
+
+  function paintCurrent(scroll) {
+    if (!el.tail) return;
+    var marks = el.tail.querySelectorAll('[data-find-hit]');
+    for (var i = 0; i < marks.length; i++) {
+      var on = marks[i].getAttribute('data-find-index') === String(fnd.at);
+      marks[i].style.background = on ? 'rgba(250,204,21,0.85)' : 'rgba(250,204,21,0.35)';
+      marks[i].style.color = on ? '#1f2937' : 'inherit';
+      if (on && scroll && marks[i].scrollIntoView) {
+        marks[i].scrollIntoView({ block: 'center' });
+      }
+    }
+    updateEndPill();
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (!state.session) return;
+    if (e.key !== 'f' && e.key !== 'F') return;
+    if (!(IS_MAC ? e.metaKey : e.ctrlKey) || !e.shiftKey || e.altKey) return;
+    if (sheetOpen() || e.defaultPrevented) return;
+    if (e.isComposing || e.keyCode === 229) return;
+    e.preventDefault();
+    if (findOpen()) { fnd.input.focus(); fnd.input.select(); return; }
+    hideHints();
+    openFind();
+  });
 
   /* --- speech to text ---------------------------------------------------- */
 
@@ -3679,6 +4209,7 @@
     /* The menu names one session; it must not survive a switch to another. */
     if (state.session !== name) closeQuadMenu();
     state.session = name;
+    closeFind();
     state.selStart = null;
     state.selEnd = null;
     state.lines = null;
@@ -3742,12 +4273,14 @@
      * whole grid at z-index 80 with no way out: Escape is gated on an open
      * console, and the ✕ is underneath it. */
     closeSearch();
+    closeFind();
     state.selStart = null;
     state.selEnd = null;
     state.lines = null;
     if (el.bar) el.bar.style.display = 'none';
     setFrozen(false);
     hideHints();
+    if (el.endPill) el.endPill.style.display = 'none';
     if (el.root) el.root.style.display = 'none';
     /* After the sheet is hidden, so it does not hand focus to a button that
      * is no longer on screen. */
@@ -3850,6 +4383,10 @@
     _linkifyLines: linkifyLines,
     _whenSettled: whenSettled,
     _renderStrip: renderStrip,
+    _renderTail: renderTail,
+    _sessionGone: sessionGone,
+    _findMatches: findMatches,
+    _openFind: openFind,
     _sttDraft: sttDraft,
     _setStatus: setStatus,
     /* Two pieces of in-flight state busy() reads, reachable so a test can put
@@ -3863,7 +4400,8 @@
      * success, which switches session and takes the caret). Ctrl+N asks
      * before drawing the new-session sheet over the top of any of them. */
     busy: function () {
-      return searchOpen() || quadMenuOpen() || !!stt.rec || stt.busy || closing;
+      return searchOpen() || quadMenuOpen() || findOpen()
+        || !!stt.rec || stt.busy || closing;
     },
     _toggleQuadMenu: toggleQuadMenu,
     _closeQuadMenu: closeQuadMenu,
