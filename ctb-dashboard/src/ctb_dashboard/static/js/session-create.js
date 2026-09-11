@@ -116,6 +116,10 @@
     projects: [],
     worktrees: [],
     busy: false,
+    /* Which row the arrow keys are on. Indexes the *filtered* list, which is
+     * what is on screen -- see renderProjectList. */
+    cursor: 0,
+    filtered: [],
   };
 
   var el = {};
@@ -174,7 +178,7 @@
       b.type = 'button';
       b.textContent = m[1];
       b.style.cssText = btnCss('rgba(255,255,255,0.06)') + 'flex:1;';
-      b.addEventListener('click', function () { setMode(m[0]); });
+      b.addEventListener('click', function () { setMode(m[0], true); });
       el.modeBtns[m[0]] = b;
       modes.appendChild(b);
     });
@@ -187,10 +191,21 @@
     el.search.setAttribute('aria-label', '프로젝트 검색');
     el.search.autocomplete = 'off';
     el.search.style.cssText = inputCss() + 'margin-top:12px;';
-    el.search.addEventListener('input', renderProjectList);
+    el.search.addEventListener('input', function () {
+      /* A new filter means a new list; the old row number would point at a
+       * different project. */
+      state.cursor = 0;
+      renderProjectList();
+    });
+    el.search.addEventListener('keydown', onSearchKey);
+    el.search.setAttribute('role', 'combobox');
+    el.search.setAttribute('aria-expanded', 'true');
+    el.search.setAttribute('aria-controls', 'new-session-projects');
+    el.search.setAttribute('aria-autocomplete', 'list');
 
     el.list = document.createElement('div');
     el.list.id = 'new-session-projects';
+    el.list.setAttribute('role', 'listbox');
     el.list.style.cssText = 'margin-top:8px;max-height:190px;overflow:auto;' +
       'border:1px solid rgba(255,255,255,0.08);border-radius:12px;';
     el.existingPane.appendChild(el.search);
@@ -211,6 +226,7 @@
       state.newProject = el.newName.value;
       renderPreview();
     });
+    el.newName.addEventListener('keydown', onFieldEnter);
     nameLabel.setAttribute('for', 'new-session-name');
     el.newName.id = 'new-session-name';
 
@@ -246,7 +262,7 @@
       b.type = 'button';
       b.textContent = m[1];
       b.style.cssText = btnCss('rgba(255,255,255,0.06)') + 'flex:1;font-size:12px;padding:6px 8px;';
-      b.addEventListener('click', function () { setWtMode(m[0]); });
+      b.addEventListener('click', function () { setWtMode(m[0], true); });
       el.wtBtns[m[0]] = b;
       wtModes.appendChild(b);
     });
@@ -260,6 +276,7 @@
       state.wtExisting = el.wtSelect.value;
       renderPreview();
     });
+    el.wtSelect.addEventListener('keydown', onFieldEnter);
 
     el.wtInput = document.createElement('input');
     el.wtInput.type = 'text';
@@ -271,6 +288,7 @@
       state.wtNew = el.wtInput.value;
       renderPreview();
     });
+    el.wtInput.addEventListener('keydown', onFieldEnter);
 
     /* preview + error */
     el.preview = document.createElement('div');
@@ -329,6 +347,15 @@
       hide();
     });
 
+    /* Ctrl/Cmd+Enter starts the session from wherever the caret is -- the
+     * worktree name box, the search box mid-pick, a button. */
+    root.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey)) return;
+      if (e.isComposing || e.keyCode === 229) return;
+      e.preventDefault();
+      submit();
+    });
+
     /* Tab must not walk out of a modal. Under it sits either the board or an
      * open console, and focus landing there is worse than useless: the
      * console's prompt box takes Enter as "send to the session". */
@@ -370,7 +397,11 @@
     }
   }
 
-  function setMode(mode) {
+  /* `chosen` marks a press of the mode button, as opposed to the reset that
+   * happens on every open. Only a press moves the caret: what the button
+   * reveals is the one thing left to fill in, and leaving focus on the button
+   * meant the next keystroke went nowhere. */
+  function setMode(mode, chosen) {
     state.mode = mode;
     el.existingPane.style.display = mode === 'existing' ? '' : 'none';
     el.newPane.style.display = mode === 'new' ? '' : 'none';
@@ -383,9 +414,13 @@
     if (mode === 'new' && state.wtMode === 'existing') setWtMode('none');
     renderWtSection();
     renderPreview();
+    if (chosen) {
+      var into = mode === 'new' ? el.newName : el.search;
+      if (into && into.focus) into.focus();
+    }
   }
 
-  function setWtMode(mode) {
+  function setWtMode(mode, chosen) {
     state.wtMode = mode;
     el.wtSelect.style.display = mode === 'existing' ? '' : 'none';
     el.wtInput.style.display = mode === 'new' ? '' : 'none';
@@ -395,26 +430,44 @@
       el.wtBtns[k].style.borderColor = on ? 'rgba(129,140,248,0.5)' : 'rgba(255,255,255,0.12)';
     });
     renderPreview();
+    if (chosen) {
+      var into = mode === 'new' ? el.wtInput : (mode === 'existing' ? el.wtSelect : null);
+      if (into && into.focus) into.focus();
+    }
   }
 
   function renderProjectList() {
     var items = filterProjects(state.projects, el.search.value);
+    state.filtered = items;
+    if (state.cursor >= items.length) state.cursor = 0;
     el.list.textContent = '';
     if (!items.length) {
       var empty = document.createElement('div');
       empty.textContent = state.projects.length ? '검색 결과 없음' : '프로젝트를 불러오는 중…';
       empty.style.cssText = 'padding:14px;font-size:12px;color:#8b85a0;text-align:center;';
       el.list.appendChild(empty);
+      el.search.removeAttribute('aria-activedescendant');
       return;
     }
-    items.forEach(function (p) {
+    items.forEach(function (p, i) {
+      /* Two different marks, because they mean different things: the cursor
+       * is where the arrow keys are, the selection is what will be created.
+       * Collapsing them into one highlight made Enter feel like a no-op. */
+      var chosen = p.name === state.project;
+      var at = i === state.cursor;
       var row = document.createElement('button');
       row.type = 'button';
+      row.id = 'new-session-project-' + i;
+      row.setAttribute('role', 'option');
+      row.setAttribute('data-project', p.name);
+      row.setAttribute('aria-selected', chosen ? 'true' : 'false');
       row.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;' +
-        'text-align:left;padding:8px 11px;background:transparent;border:0;' +
+        'text-align:left;padding:8px 11px;border:0;' +
         'border-bottom:1px solid rgba(255,255,255,0.05);color:inherit;cursor:pointer;' +
-        "font-family:'JetBrains Mono',monospace;font-size:12px;";
-      if (p.name === state.project) row.style.background = 'rgba(129,140,248,0.18)';
+        "font-family:'JetBrains Mono',monospace;font-size:12px;" +
+        'background:' + (chosen ? 'rgba(129,140,248,0.18)'
+                                : (at ? 'rgba(255,255,255,0.07)' : 'transparent')) + ';' +
+        (at ? 'box-shadow:inset 2px 0 0 #a5b4fc;' : '');
 
       var nm = document.createElement('span');
       nm.textContent = p.name;
@@ -424,9 +477,55 @@
       if (!p.is_git) row.appendChild(tag('no-git', '#8b85a0'));
       if (p.session_exists) row.appendChild(tag('세션 있음', '#34d399'));
 
-      row.addEventListener('click', function () { selectProject(p); });
+      row.addEventListener('click', function () {
+        state.cursor = i;
+        selectProject(p);
+      });
       el.list.appendChild(row);
+      if (at) {
+        el.search.setAttribute('aria-activedescendant', row.id);
+        if (row.scrollIntoView) row.scrollIntoView({ block: 'nearest' });
+      }
     });
+  }
+
+  /* --- keyboard ----------------------------------------------------------- */
+
+  /* The project list is driven from the search box, the way the console's
+   * session palette is: arrows move a cursor over the rows on screen, Enter
+   * takes the one under it. Nothing here moves focus -- the caret stays in
+   * the box so typing keeps filtering. */
+  function onSearchKey(e) {
+    if (e.isComposing || e.keyCode === 229) return;  /* IME owns the key */
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      var n = state.filtered.length;
+      if (!n) return;
+      var step = e.key === 'ArrowDown' ? 1 : -1;
+      state.cursor = (state.cursor + step + n) % n;
+      renderProjectList();
+      return;
+    }
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    var p = state.filtered[state.cursor];
+    /* Enter on a row that is already the selection means "and go" -- the
+     * second press of the pick-then-start pair, with no reach for the mouse
+     * in between. */
+    if (p && p.name !== state.project) {
+      selectProject(p);
+      return;
+    }
+    submit();
+  }
+
+  /* Enter in a plain field is "start it". Ctrl/Cmd+Enter does the same from
+   * anywhere in the sheet, including the search box mid-pick. */
+  function onFieldEnter(e) {
+    if (e.key !== 'Enter') return;
+    if (e.isComposing || e.keyCode === 229) return;
+    e.preventDefault();
+    submit();
   }
 
   function tag(text, color) {
@@ -500,6 +599,11 @@
         if (!d) throw new Error('projects');
         state.root = d.root || '';
         state.projects = d.projects || [];
+        if (state.project) {
+          var hit = filterProjects(state.projects, el.search.value)
+            .map(function (p) { return p.name; }).indexOf(state.project);
+          if (hit >= 0) state.cursor = hit;
+        }
         renderProjectList();
         renderPreview();
       })
@@ -603,6 +707,8 @@
     setMode(state.mode);
     setWtMode(state.wtMode);
     setBusy(false);
+    /* Arrows start from whatever is selected, not from the top of the list. */
+    state.cursor = 0;
     loadProjects();
     /* Re-fetch worktrees for the persisted project so stale data doesn't linger. */
     if (state.project && state.mode === 'existing' && state.projectIsGit) {
