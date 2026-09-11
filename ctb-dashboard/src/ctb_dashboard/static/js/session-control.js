@@ -1848,6 +1848,112 @@
     sendKey('Escape', 'Shift+Esc');
   });
 
+  /* --- one-shot key send ------------------------------------------------- */
+
+  /* The key pad answers a prompt with a tap. From a keyboard there was no way
+   * to do the same without reaching for it, and every obvious chord family is
+   * spoken for: Ctrl+Alt IS AltGr on most European layouts (it is how @ and €
+   * are typed), it is VoiceOver's modifier on a Mac, and the desktop takes
+   * Ctrl+Alt+Tab, Ctrl+Alt+arrows and Ctrl+Alt+Escape before a page sees them.
+   *
+   * So the modifier goes on the FIRST key only. Ctrl/Cmd+. arms, the next
+   * plain key is sent to the session, and the arming ends there. The second
+   * keystroke carries no modifier at all, which is why the whole set works --
+   * y n 1-9, the arrows, Tab, Enter, Escape, Backspace -- with nothing at the
+   * OS or browser layer wanting any of it.
+   *
+   * An armed console that says nothing would be a trap: the next key leaves
+   * for a live session. It is on the status line the whole time, it gives up
+   * after ten seconds, and it gives up if the window loses focus. */
+  var SEND_KEYS = {
+    y: 'y', Y: 'Y', n: 'n', N: 'N',
+    ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+    Backspace: 'BSpace', Tab: 'Tab', Enter: 'Enter', Escape: 'Escape',
+    ' ': 'Space', Spacebar: 'Space',
+  };
+
+  function sendKeyName(key) {
+    if (key >= '1' && key <= '9') return key;
+    return SEND_KEYS[key] || null;
+  }
+
+  var armed = false;
+  var armTimer = null;
+  var ARM_MS = 10000;
+
+  function armSend() {
+    disarmSend(true);
+    armed = true;
+    armTimer = setTimeout(function () { disarmSend(false, '\ud0a4 \uc804\uc1a1 \ucde8\uc18c\ub428'); }, ARM_MS);
+    setStatus('\ub2e4\uc74c \ud55c \ud0a4\ub97c \uc138\uc158\uc73c\ub85c \ubcf4\ub0c5\ub2c8\ub2e4 \u00b7 \ucde8\uc18c\ub294 \ub2e4\uc2dc '
+      + (IS_MAC ? 'Cmd' : 'Ctrl') + '+.', 'var(--con-warn)');
+  }
+
+  function disarmSend(quiet, why) {
+    if (armTimer) clearTimeout(armTimer);
+    armTimer = null;
+    if (!armed) return;
+    armed = false;
+    if (!quiet) setStatus(why || '', why ? 'var(--con-muted)' : '');
+  }
+
+  function sendArmed() { return armed; }
+
+  function isArmChord(e) {
+    if (e.key !== '.' && e.code !== 'Period') return false;
+    return (IS_MAC ? e.metaKey : e.ctrlKey) && !e.shiftKey && !e.altKey;
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (!state.session || keysTaken() || quadMenuOpen()) return;
+    if (e.key !== '.' && e.code !== 'Period') return;
+    if (!(IS_MAC ? e.metaKey : e.ctrlKey) || e.shiftKey || e.altKey) return;
+    if (e.isComposing || e.keyCode === 229 || e.repeat) return;
+    e.preventDefault();
+    /* A toggle: the same chord is how you change your mind, since Escape is
+     * one of the keys the mode exists to send. */
+    if (armed) { disarmSend(false, '\ud0a4 \uc804\uc1a1 \ucde8\uc18c\ub428'); return; }
+    armSend();
+  });
+
+  /* Capture phase, on the window, because this has to win against handlers
+   * that are already bound to these exact keys and do not check whether the
+   * event was cancelled -- the prompt box submits on Enter and sends a Tab of
+   * its own, the digits switch session, Escape closes the sheet. Stopping the
+   * event dead here is the only thing they all respect. */
+  window.addEventListener('keydown', function (e) {
+    if (!armed) return;
+    if (e.isComposing || e.keyCode === 229) return;   /* the IME's key */
+    /* The modifier of a chord arrives as its own keydown; holding Shift to
+     * reach a key is not a decision to cancel. */
+    if (e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt'
+        || e.key === 'Meta' || e.key === 'CapsLock') return;
+    /* A chord is not a key to send -- the reader has moved on to something
+     * else. Stand down and let it through untouched. The one exception is the
+     * arming chord itself: standing down here and letting it reach the
+     * handler below would re-arm on the same press, and the toggle would
+     * never turn anything off. */
+    if (e.ctrlKey || e.metaKey || e.altKey) {
+      if (!isArmChord(e)) disarmSend(true);
+      return;
+    }
+    if (e.repeat) { e.preventDefault(); return; }
+
+    var name = sendKeyName(e.key);
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    disarmSend(true);
+    if (!name) {
+      setStatus('\ubcf4\ub0bc \uc218 \uc5c6\ub294 \ud0a4\uc785\ub2c8\ub2e4 \u2014 \ucde8\uc18c\ub428', 'var(--con-warn)');
+      return;
+    }
+    sendKey(name, (IS_MAC ? 'Cmd' : 'Ctrl') + '+. \u2192 ' + name);
+  }, true);
+
+  /* Alt-tabbing away with the console armed would leave the next key typed on
+   * the way back going to a session nobody was looking at. */
+  window.addEventListener('blur', function () { disarmSend(false, ''); });
+
   document.addEventListener('keyup', function (e) {
     if (!hintsVisible()) return;
     if (e.key === 'Control' || e.key === 'Meta' || e.key === 'Alt') hideHints();
@@ -4210,6 +4316,9 @@
     if (state.session !== name) closeQuadMenu();
     state.session = name;
     closeFind();
+    /* The armed key was meant for the session that was open when it was
+     * armed, not for whatever is open by the time it is pressed. */
+    disarmSend(true);
     state.selStart = null;
     state.selEnd = null;
     state.lines = null;
@@ -4274,6 +4383,7 @@
      * console, and the ✕ is underneath it. */
     closeSearch();
     closeFind();
+    disarmSend(true);
     state.selStart = null;
     state.selEnd = null;
     state.lines = null;
@@ -4385,6 +4495,8 @@
     _renderStrip: renderStrip,
     _renderTail: renderTail,
     _sessionGone: sessionGone,
+    _sendKeyName: sendKeyName,
+    _sendArmed: sendArmed,
     _findMatches: findMatches,
     _openFind: openFind,
     _sttDraft: sttDraft,

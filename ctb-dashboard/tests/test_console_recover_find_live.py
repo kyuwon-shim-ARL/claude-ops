@@ -389,3 +389,131 @@ def test_a_dead_session_closes_the_find_bar(board):
     assert board.is_hidden(FIND)
     assert board.eval_on_selector_all("#ctb-console mark[data-find-hit]",
                                       "els => els.length") == 0
+
+
+# --- one-shot key send ------------------------------------------------------
+
+def arm(board):
+    board.keyboard.press("Control+Period")
+    board.wait_for_function(
+        "() => window.ctbConsole._sendArmed()")
+
+
+def status(board):
+    return board.eval_on_selector("#ctb-console [role=status]", "e => e.textContent")
+
+
+def test_arming_says_so_on_the_status_line(board):
+    """An armed console that looks idle is a trap: the next key leaves."""
+    open_console(board)
+    arm(board)
+    assert "다음 한 키를 세션으로" in status(board)
+
+
+def test_the_armed_key_goes_to_the_session_not_into_the_prompt_box(board):
+    """The caret is in the box; Enter there normally sends the draft."""
+    open_console(board)
+    board.fill("#ctb-console textarea", "draft that must not be sent")
+    arm(board)
+    board.keyboard.press("Enter")
+    board.wait_for_timeout(300)
+    assert [k["key"] for k in board.ctb_keys] == ["Enter"]
+    assert board.input_value("#ctb-console textarea") == "draft that must not be sent"
+    assert not any("prompt" in u for u in board.ctb_requests)
+
+
+def test_a_digit_is_sent_instead_of_switching_session(board):
+    open_console(board)
+    arm(board)
+    board.keyboard.press("3")
+    board.wait_for_timeout(300)
+    assert [k["key"] for k in board.ctb_keys] == ["3"]
+    assert board.evaluate("() => window.ctbConsole._state.session") == "claude_alpha"
+
+
+def test_dom_key_names_are_translated_for_the_server(board):
+    """The allowlist speaks tmux: Up, not ArrowUp; BSpace, not Backspace."""
+    open_console(board)
+    arm(board)
+    board.keyboard.press("ArrowUp")
+    board.wait_for_timeout(200)
+    arm(board)
+    board.keyboard.press("Backspace")
+    board.wait_for_timeout(300)
+    assert [k["key"] for k in board.ctb_keys] == ["Up", "BSpace"]
+
+
+def test_escape_is_sent_rather_than_closing_the_console(board):
+    open_console(board)
+    arm(board)
+    board.keyboard.press("Escape")
+    board.wait_for_timeout(300)
+    assert [k["key"] for k in board.ctb_keys] == ["Escape"]
+    assert board.is_visible(CONSOLE)
+
+
+def test_tab_is_sent_rather_than_moving_the_focus(board):
+    open_console(board)
+    board.click("#ctb-console textarea")
+    arm(board)
+    board.keyboard.press("Tab")
+    board.wait_for_timeout(300)
+    assert [k["key"] for k in board.ctb_keys] == ["Tab"]
+    assert board.evaluate("document.activeElement.tagName") == "TEXTAREA"
+
+
+def test_it_disarms_after_exactly_one_key(board):
+    open_console(board)
+    board.click("#ctb-console textarea")
+    arm(board)
+    board.keyboard.press("y")
+    board.wait_for_timeout(200)
+    board.keyboard.press("y")              # a letter again, this time typed
+    board.wait_for_timeout(300)
+    assert [k["key"] for k in board.ctb_keys] == ["y"]
+    assert board.input_value("#ctb-console textarea") == "y"
+
+
+def test_the_chord_again_changes_your_mind(board):
+    open_console(board)
+    arm(board)
+    board.keyboard.press("Control+Period")
+    assert board.evaluate("() => window.ctbConsole._sendArmed()") is False
+    board.keyboard.press("Escape")         # and Escape is the console's again
+    board.wait_for_selector(CONSOLE, state="hidden")
+    assert board.ctb_keys == []
+
+
+def test_a_key_that_cannot_be_sent_cancels_and_says_so(board):
+    open_console(board)
+    board.click("#ctb-console textarea")
+    arm(board)
+    board.keyboard.press("q")
+    board.wait_for_timeout(300)
+    assert board.ctb_keys == []
+    assert "보낼 수 없는 키" in status(board)
+    assert board.input_value("#ctb-console textarea") == ""
+
+
+def test_a_chord_stands_the_mode_down_and_passes_through(board):
+    """Changing your mind by reaching for another shortcut."""
+    open_console(board)
+    arm(board)
+    board.keyboard.press("Control+Shift+f")
+    board.wait_for_selector(FIND, state="visible")
+    assert board.ctb_keys == []
+    assert board.evaluate("() => window.ctbConsole._sendArmed()") is False
+
+
+def test_it_does_not_arm_while_the_find_bar_is_open(board):
+    open_console(board)
+    open_find(board)
+    board.keyboard.press("Control+Period")
+    assert board.evaluate("() => window.ctbConsole._sendArmed()") is False
+
+
+def test_switching_session_disarms(board):
+    open_console(board)
+    arm(board)
+    board.evaluate("() => window.ctbConsole.open('claude_beta')")
+    assert board.evaluate("() => window.ctbConsole._sendArmed()") is False
