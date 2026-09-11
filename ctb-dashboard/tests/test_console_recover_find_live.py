@@ -46,11 +46,33 @@ def at_bottom(page):
         "el => el.scrollHeight - el.scrollTop - el.clientHeight < 8")
 
 
+# --- tap to hold, tap to let go ---------------------------------------------
+
+def test_a_tap_holds_the_pane_and_a_second_tap_lets_go(board):
+    """The whole reason copying was hard: the lines moved. Standing still is
+    the feature; the drag that copies is the platform's own."""
+    open_console(board)
+    assert not frozen(board)
+    board.click("#ctb-console pre")
+    assert frozen(board)
+    board.click("#ctb-console pre")
+    assert not frozen(board)
+
+
+def test_a_held_pane_stops_asking_for_the_log(board):
+    open_console(board)
+    board.click("#ctb-console pre")
+    board.wait_for_timeout(300)
+    before = logs(board)
+    board.wait_for_timeout(2600)                     # POLL_MS is 2000
+    assert logs(board) == before
+
+
 # --- Enter gets you back to work -------------------------------------------
 
 def test_enter_thaws_a_frozen_pane_and_returns_the_caret(board):
     open_console(board)
-    board.click("#ctb-console [data-line='3']")      # starts a selection
+    board.click("#ctb-console [data-line='3']")      # holds the pane
     assert frozen(board)
     board.evaluate("document.activeElement.blur()")
     board.keyboard.press("Enter")
@@ -75,17 +97,19 @@ def test_enter_in_the_prompt_box_still_sends_a_bare_newline(board):
     """The one Enter that must not be stolen.
 
     An empty Enter sent to tmux is how a Claude Code prompt gets confirmed.
-    Freezing the pane says nothing about whether the session is waiting for
+    Holding the pane says nothing about whether the session is waiting for
     that key.
     """
     open_console(board)
-    board.click("#ctb-console [data-line='3']")      # freeze it, to be sure
+    board.click("#ctb-console pre")                  # hold it, to be sure
+    assert frozen(board)
     board.click("#ctb-console textarea")
     board.keyboard.press("Enter")
     board.wait_for_timeout(400)
     assert [k["key"] for k in board.ctb_keys] == ["Enter"]
-    # And it stayed a send: the pane is still frozen, not quietly thawed.
-    assert frozen(board)
+    # A hold is for reading; sending is the end of reading, so it lets go --
+    # otherwise the key's own effect on the pane would be hidden.
+    assert not frozen(board)
 
 
 def test_enter_on_a_button_is_the_press_not_a_recovery(board):

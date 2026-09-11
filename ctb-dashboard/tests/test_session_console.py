@@ -212,23 +212,39 @@ def test_tail_text_is_selectable(console_js):
     assert "user-select:text" in console_js
 
 
-def test_tap_range_selection_exists(console_js):
-    """Tap a line, tap another, copy that span -- no drag, no model cooperation.
+def test_tap_holds_the_pane_instead_of_selecting_lines(console_js):
+    """Copying was hard because the pane moved, not because selecting was hard.
 
-    Replaces the earlier [[COPY]] marker convention, which worked but rented
-    space in the global CLAUDE.md that every session paid for on every turn.
+    A tap stops the repaints and the platform's own drag does the copy, so the
+    tap-a-line/tap-another range bar -- and the [[COPY]] marker convention
+    before it -- are both gone.
     """
-    assert "onLineTap" in console_js
-    assert "selectionRange" in console_js
-    assert "copySelection" in console_js
-    assert "clearSelection" in console_js
-    # No trace of the retired convention.
-    for gone in ("[[COPY]]", "extractCopyBlock", "updateCopyChip"):
+    assert "function toggleHold()" in console_js
+    assert "function unhold()" in console_js
+    for gone in ("onLineTap", "selectionRange", "copySelection", "clearSelection",
+                 "state.selStart", "state.selEnd", "barLabel",
+                 "[[COPY]]", "extractCopyBlock", "updateCopyChip"):
         assert gone not in console_js
 
 
-def test_selection_uses_click_not_touchstart(console_js):
-    """touchstart would fire mid-scroll and select lines the user was passing."""
+def test_a_drag_that_selected_text_does_not_thaw_the_pane(console_js):
+    """The click ending a drag-select is the copy itself. Thawing there would
+    repaint the lines out from under the selection just made."""
+    handler = console_js[console_js.index("tail.addEventListener('click', function (e) {"):]
+    handler = handler[:handler.index("toggleHold();")]
+    assert "sel.isCollapsed" in handler
+    assert "data-tail-link" in handler
+
+
+def test_sending_thaws_the_hold(console_js):
+    """A hold is for reading; a key or a prompt is the end of reading."""
+    for fn in ("function sendKey(key, label) {", "function submit() {"):
+        body = console_js[console_js.index(fn):]
+        assert "unhold();" in body[:body.index("\n  }")]
+
+
+def test_hold_uses_click_not_touchstart(console_js):
+    """touchstart would fire mid-scroll and freeze the pane the user was passing."""
     assert "tail.addEventListener('click'" in console_js
     # The one touchstart listener on the tail only flags a scroll in flight
     # (passive, no selection): a touch must never pick a line.
@@ -239,12 +255,12 @@ def test_selection_uses_click_not_touchstart(console_js):
     assert len(regs) == 2, regs
     tail_reg = [r for r in regs if "touchLease()" in r]
     assert len(tail_reg) == 1 and "passive: true" in tail_reg[0]
-    assert all("onLineTap" not in r for r in regs)
+    assert all("toggleHold" not in r for r in regs)
 
 
-def test_tail_refresh_is_frozen_while_selecting(console_js):
-    """Lines must not shift under a finger mid-selection, and the poll must
-    resume once the selection is cleared.
+def test_tail_refresh_is_frozen_while_held(console_js):
+    """Lines must not shift under a finger mid-copy, and the poll must
+    resume once the hold is let go.
 
     The freeze is asked about by reason now, not by testing one variable: a
     find holds the pane too, and either ending must not thaw the other. The
@@ -254,18 +270,17 @@ def test_tail_refresh_is_frozen_while_selecting(console_js):
     """
     assert "function frozen()" in console_js
     assert "if (frozen()) { state.hash = ''; return; }" in console_js
-    assert "if (selecting()) return;" in console_js
+    assert "if (held()) return;" in console_js
     assert "if (findOpen() && !deliberate) return;" in console_js
     assert "if (state.session && !state.timer && !frozen()) startPolling();" in console_js
 
 
-def test_selection_resets_on_session_switch_and_close(console_js):
-    assert console_js.count("state.selStart = null;") >= 2
+def test_hold_resets_on_session_switch_and_close(console_js):
+    assert console_js.count("state.held = false;") >= 2
 
 
 def test_copied_text_is_cleaned(console_js):
-    """Both whole-screen and range copies go through the same dedent path."""
-    assert "cleanLines(state.lines.slice(range[0], range[1] + 1))" in console_js
+    """The whole-screen copy button goes through the dedent path."""
     assert "cleanLines(state.lines.slice())" in console_js
 
 
@@ -555,7 +570,7 @@ def test_the_last_pin_in_flight_decides_the_repaint(index_html):
 def test_pending_input_is_painted_on_its_text_not_the_whole_row(console_js):
     """The marking used to be a full-width bar on the ❯ line only. Now every
     line of the box carries a text span, and the wash goes on the span."""
-    paint = console_js[console_js.index("function paintSelection()"):console_js.index("function onLineTap")]
+    paint = console_js[console_js.index("function paintPending()"):console_js.index("function held()")]
     assert "i >= pending.index && i <= pending.end" in paint
     assert "span.style.background = wash" in paint
     # the row itself gets no wash on the pending path, only the thin edge

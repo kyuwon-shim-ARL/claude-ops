@@ -29,7 +29,7 @@
   var POLL_MS = 2000;
 
   var state = { session: null, prev: null, timer: null, busy: false,
-                lines: null, selStart: null, selEnd: null, order: null,
+                lines: null, held: false, order: null,
                 fitted: false, fails: 0, warned: false, cols: 0,
                 pending: null, sent: null,
                 depth: TAIL_LINES, growing: false, exhausted: false,
@@ -498,34 +498,9 @@
       '-webkit-overflow-scrolling:touch',
       '-webkit-user-select:text', 'user-select:text',
     ].join(';');
-
-    /* Tap-to-select range. Tapping a line marks the start, tapping another
-     * marks the end, and the bar offers a one-tap copy of exactly that span.
-     * No drag, and -- unlike the marker convention this replaces -- nothing
-     * the session's Claude has to cooperate with. */
-    var bar = document.createElement('div');
-    bar.style.cssText =
-      'display:none;align-items:center;gap:8px;margin-bottom:8px;flex-shrink:0;' +
-      'font-size:11px;color:var(--con-muted);';
-
-    var barLabel = document.createElement('span');
-    barLabel.style.cssText = 'flex:1;min-width:0;';
-
-    var barCopy = document.createElement('button');
-    barCopy.type = 'button';
-    barCopy.textContent = '\ubcf5\uc0ac';
-    styleBtn(barCopy, 'ok');
-    barCopy.addEventListener('click', copySelection);
-
-    var barClear = document.createElement('button');
-    barClear.type = 'button';
-    barClear.textContent = '\ud574\uc81c';
-    styleBtn(barClear, '');
-    barClear.addEventListener('click', clearSelection);
-
-    bar.appendChild(barLabel);
-    bar.appendChild(barCopy);
-    bar.appendChild(barClear);
+    /* The gesture is not guessable from a pane that looks like plain text, and
+     * it is the whole copy story now. */
+    tail.title = '\ud0ed\ud558\uba74 \uac31\uc2e0\uc774 \uba48\ucda5\ub2c8\ub2e4 \u2014 \uadf8 \uc0c1\ud0dc\ub85c \ub4dc\ub798\uadf8\ud574 \ubcf5\uc0ac\ud558\uc138\uc694. \ub2e4\uc2dc \ud0ed\ud558\uba74 \uc7ac\uac1c';
 
     /* Keys first: answering a permission prompt is the thing you most often
      * need in a hurry, and send_prompt refuses while one is pending. */
@@ -818,7 +793,6 @@
     sttInit();
     root.appendChild(header);
     root.appendChild(tailWrap);
-    root.appendChild(bar);
     root.appendChild(status);
     root.appendChild(keys);
     root.appendChild(row);
@@ -827,7 +801,7 @@
 
     el = { keys: keys, keysMore: more, endPill: endPill,
            root: root, strip: strip, title: title, status: status, tail: tail, mic: mic,
-           frozen: frozen, bar: bar, barLabel: barLabel, input: input,
+           frozen: frozen, input: input,
            send: send, silent: silent, quad: quad, quadNum: quadNum };
 
     /* The keyboard shrinks the visual viewport, and iOS does not always fire a
@@ -902,13 +876,18 @@
     tail.addEventListener('touchmove', function () { touchLease(); noteScrolling(); }, { passive: true });
     tail.addEventListener('touchend', function () { touchUntil = 0; noteScrolling(); }, { passive: true });
     tail.addEventListener('touchcancel', function () { touchUntil = 0; noteScrolling(); }, { passive: true });
-    /* Delegated: 'click' (not touchstart) so a scroll gesture never selects. */
+    /* Delegated: 'click' (not touchstart) so a scroll gesture never toggles. */
     tail.addEventListener('click', function (e) {
-      /* A link click is a navigation, not the start of a copy range: without
+      /* A link click is a navigation, not a request to hold the pane: without
        * this the tap opened the page AND froze the tail behind it. */
       if (e.target.closest && e.target.closest('[data-tail-link]')) return;
-      var line = e.target.closest && e.target.closest('[data-line]');
-      if (line) onLineTap(parseInt(line.getAttribute('data-line'), 10));
+      /* A drag that selected text is the copy itself, not a second tap: the
+       * click that ends it must not thaw the pane the selection was made on.
+       * The tap that follows -- which collapses that selection -- is the one
+       * that lets go. */
+      var sel = window.getSelection && window.getSelection();
+      if (sel && !sel.isCollapsed) return;
+      toggleHold();
     });
 
     /* Reading the pane should not cost you the caret. A click in the tail blurs
@@ -947,7 +926,7 @@
         if (ns && ns.isOpen && ns.isOpen()) return;   /* the sheet's Escape */
         if (findOpen()) closeFind(true);
         else if (searchOpen()) closeSearch();
-        else if (state.selStart !== null) clearSelection();
+        else if (state.held) unhold();
         else hide();
       }
     });
@@ -2837,7 +2816,7 @@
       frag.appendChild(div);
     });
     el.tail.appendChild(frag);
-    paintSelection();
+    paintPending();
     if (findOpen()) runFind(fnd.q, fnd.at);
     updateEndPill();
   }
@@ -2858,26 +2837,10 @@
         + 'Enter \uc804\uc5d0 \ud655\uc778\ud558\uc138\uc694.';
   }
 
-  function selectionRange() {
-    if (state.selStart === null) return null;
-    var end = state.selEnd === null ? state.selStart : state.selEnd;
-    return [Math.min(state.selStart, end), Math.max(state.selStart, end)];
-  }
-
-  function paintSelection() {
-    var range = selectionRange();
+  function paintPending() {
     var pending = state.pending;
     var nodes = el.tail.querySelectorAll('[data-line]');
     for (var i = 0; i < nodes.length; i++) {
-      var inRange = range && i >= range[0] && i <= range[1];
-      /* A copy range the reader made outranks the marking: it is the thing
-       * they are doing right now. */
-      if (inRange) {
-        nodes[i].style.background = 'rgba(52,211,153,0.18)';
-        nodes[i].style.boxShadow = 'inset 2px 0 0 #34d399';
-        nodes[i].title = '';
-        continue;
-      }
       /* Blue: text is sitting in the box, unsent. Green: the last key
        * changed what sits there (a Tab took the prefill, a key cleared it),
        * held until the box changes again -- so before and after a key look
@@ -2910,34 +2873,31 @@
     }
   }
 
-  /* The pane stops updating for more than one reason -- a selection being
-   * made, a find in progress -- and each has to be able to end without
-   * thawing the other. Everything that used to test `state.selStart !== null`
-   * asks here instead. */
-  function selecting() { return state.selStart !== null; }
+  /* The pane stops updating for more than one reason -- the reader holding
+   * it to copy from, a find in progress -- and each has to be able to end
+   * without thawing the other. */
+  function held() { return !!state.held; }
 
-  function frozen() { return selecting() || findOpen(); }
+  function frozen() { return held() || findOpen(); }
 
-  function onLineTap(index) {
-    if (isNaN(index)) return;
-
-    /* A completed range: the next tap starts a new one rather than extending
-     * an old selection the user has probably forgotten about. */
-    if (state.selStart === null || state.selEnd !== null) {
-      state.selStart = index;
-      state.selEnd = null;
-      /* Freeze the tail: lines must not shift under a finger mid-selection. */
-      stopPolling();
-    } else {
-      state.selEnd = index;
-    }
-    paintSelection();
-    updateBar();
+  /* Copying from a pane that repaints under the cursor is the problem; a pane
+   * that stands still is trivially selectable with the ordinary drag the
+   * platform already gives you. So the tap does the one thing the browser
+   * cannot do for itself -- stop the repaints -- and the copy is the reader's
+   * own. That is why there is no line-range bar here any more: it existed only
+   * to work around the motion. */
+  function toggleHold() {
+    if (!state.session) return;
+    if (state.held) { unhold(); return; }
+    state.held = true;
+    stopPolling();
+    setFrozen(true);
+    setStatus('\uac31\uc2e0 \uc815\uc9c0\ub428 \u2014 \ub4dc\ub798\uadf8\ud574\uc11c \ubcf5\uc0ac\ud558\uc138\uc694. \ub2e4\uc2dc \ud0ed\ud558\uba74 \uc7ac\uac1c', 'var(--con-warn)');
   }
 
-  /* Called from every path that starts or ends a selection -- clearing it,
-   * switching session, closing the sheet -- so none of them can leave the
-   * console looking frozen while it is in fact live. */
+  /* Called from every path that ends the hold -- a second tap, a send, a
+   * switch, closing the sheet -- so none of them can leave the console
+   * looking frozen while it is in fact live. */
   function setFrozen(on) {
     on = !!on && frozen();   /* one reason ending does not thaw the other */
     if (el.frozen) el.frozen.style.display = on ? 'inline-flex' : 'none';
@@ -2947,35 +2907,11 @@
       ? 'var(--con-well-edge), inset 0 0 0 2px rgba(245,158,11,0.55)' : '';
   }
 
-  function updateBar() {
-    var range = selectionRange();
-    if (!range) {
-      el.bar.style.display = 'none';
-      setFrozen(frozen());
-      return;
-    }
-    el.bar.style.display = 'flex';
-    setFrozen(true);
-    var count = range[1] - range[0] + 1;
-    el.barLabel.textContent = state.selEnd === null
-      ? '\uc2dc\uc791 \uc9c0\uc815\ub428 \u2014 \ub05d\ub098\ub294 \uc904\uc744 \ud0ed\ud558\uc138\uc694 (\uac31\uc2e0 \uc77c\uc2dc\uc815\uc9c0)'
-      : count + '\uc904 \uc120\ud0dd\ub428 (\uac31\uc2e0 \uc77c\uc2dc\uc815\uc9c0)';
-  }
-
-  function copySelection() {
-    var range = selectionRange();
-    if (!range || !state.lines) return;
-    var text = cleanLines(state.lines.slice(range[0], range[1] + 1));
-    copyText(text, (range[1] - range[0] + 1) + '\uc904 \ubcf5\uc0ac\ub428');
-  }
-
-  function clearSelection() {
-    state.selStart = null;
-    state.selEnd = null;
-    if (el.tail) paintSelection();
-    if (el.bar) el.bar.style.display = 'none';
+  function unhold() {
+    if (!state.held) return;
+    state.held = false;
     setFrozen(frozen());
-    /* Selection was what paused the tail; resume now -- unless a find is
+    /* The hold was what paused the tail; resume now -- unless a find is
      * still holding it. */
     if (state.session && !state.timer && !frozen()) startPolling();
   }
@@ -3092,7 +3028,7 @@
         /* Same pane as last time: nothing to paint. */
         if (data.unchanged) return;
         /* A frozen pane wins over a refresh: repainting would move the lines
-         * out from under whoever is selecting or searching them.
+         * out from under whoever is copying from or searching them.
          *
          * The hash is deliberately NOT banked here. It used to be, one line
          * above this check, and the server then answered `unchanged` for a
@@ -3199,9 +3135,9 @@
     if (!state.session || state.growing || state.exhausted) return;
     /* A frozen pane stays frozen -- including the automatic deepening that
      * scrolling up asks for. Find does its own deepening, on request. */
-    /* A selection freeze is never overridden -- the reader's finger is on the
-     * lines. A find freeze is, but only by the find bar's own button. */
-    if (selecting()) return;
+    /* A hold is never overridden -- the reader is copying off the pane.
+     * A find freeze is, but only by the find bar's own button. */
+    if (held()) return;
     if (findOpen() && !deliberate) return;
     if (state.depth >= MAX_TAIL_LINES) return;
 
@@ -3224,7 +3160,7 @@
           /* The freeze may have arrived while this was in flight: a find
            * opened after an automatic grow started must not have the pane
            * rebuilt underneath its matches. */
-          if (state.session !== name || selecting()) return;
+          if (state.session !== name || held()) return;
           if (findOpen() && !deliberate) return;
           state.cols = data.cols || 0;
           state.hash = data.hash || '';
@@ -3276,11 +3212,11 @@
   /* --- back to live ------------------------------------------------------ */
 
   /* Everything that can leave the console looking dead, undone in one call:
-   * a half-made selection freezing the pane, a find holding it, a fling whose
+   * a hold freezing the pane, a find holding it, a fling whose
    * lease never expired, a reader parked in history, a poll timer lost to a
    * backgrounded tab. The pill presses it; so does Enter.
    *
-   * Exactly one request goes out, whichever path got here: clearSelection()
+   * Exactly one request goes out, whichever path got here: unhold()
    * restarts the poll (which polls immediately) when it is the thing that
    * stopped it, and the branches below cover the cases where it was not. */
   var recoveredEnter = false;
@@ -3288,13 +3224,13 @@
   function resumeLive() {
     if (!state.session) return;
     closeFind();
-    /* Whether anything was polling BEFORE the thaw: clearSelection() restarts
-     * the timer only when it was the selection that stopped it, and a timer
+    /* Whether anything was polling BEFORE the thaw: unhold() restarts
+     * the timer only when it was the hold that stopped it, and a timer
      * that was already running has to be given its own poll below. Getting
      * this wrong is silent -- the console comes back and then sits on the
      * same stale pane until the next tick. */
     var hadTimer = !!state.timer;
-    if (selecting()) clearSelection();
+    unhold();
     state.skipped = 0;
     /* A lost touchend, or a queued repaint waiting on a fling that ended
      * without a final scroll event: both hold repaints off on their own. */
@@ -3316,7 +3252,7 @@
       state.hash = '';
       pollTail(true);
     }
-    /* else: clearSelection() restarted the timer, which polled on the way in. */
+    /* else: unhold() restarted the timer, which polled on the way in. */
     if (el.input) {
       el.input.focus();
       var end = el.input.value.length;
@@ -3472,9 +3408,9 @@
     closeSearch();
     closeQuadMenu();
     /* Two freeze reasons at once is a state nobody can reason about: the
-     * copy bar and the find bar would each be waiting for the other to let
-     * go of the pane. A search replaces a half-made selection. */
-    if (selecting()) clearSelection();
+     * hold and the find bar would each be waiting for the other to let
+     * go of the pane. A search replaces a hold. */
+    unhold();
     fnd.open = true;
     fnd.root.style.display = 'flex';
     setFrozen(true);
@@ -3495,10 +3431,10 @@
     fnd.at = 0;
     fnd.q = '';
     clearMatches();
-    setFrozen(selecting());
+    setFrozen(held());
     if (!live) return;
     if (el.input && state.session) el.input.focus();
-    /* A selection made before the find still owns the freeze. */
+    /* A hold made before the find still owns the freeze. */
     if (state.session && !state.timer && !frozen()) startPolling();
   }
 
@@ -4032,6 +3968,7 @@
 
   function submit() {
     if (state.busy || !state.session) return;
+    unhold();
     var text = el.input.value;
     /* An empty box means the gesture was not "send this text" but "press
      * Enter" -- answering a prompt, accepting a default, nudging a pane. It
@@ -4112,6 +4049,9 @@
    * nothing visible in the pane leaves no other sign that it was taken. */
   function sendKey(key, label) {
     if (!state.session) return;
+    /* A hold is for reading; sending is the end of reading. Leaving the pane
+     * frozen would hide the very thing the key was pressed to cause. */
+    unhold();
     var name = state.session;
     var what = label || ('키 ' + key);
     var before = { text: state.pending ? state.pending.text : '', ghost: state.ghost };
@@ -4319,8 +4259,7 @@
     /* The armed key was meant for the session that was open when it was
      * armed, not for whatever is open by the time it is pressed. */
     disarmSend(true);
-    state.selStart = null;
-    state.selEnd = null;
+    state.held = false;
     state.lines = null;
     /* Another session, another pane width -- and the console is about to
      * resize this one. Nothing is joined until the next poll says how wide. */
@@ -4333,7 +4272,6 @@
     state.exhausted = false;
     state.hash = '';
     state.pinned = true;
-    if (el.bar) el.bar.style.display = 'none';
     setFrozen(false);
     el.title.textContent = name.replace(/^claude[_-]/, '');
     /* The last pane this console painted for the session, if there is one,
@@ -4384,10 +4322,8 @@
     closeSearch();
     closeFind();
     disarmSend(true);
-    state.selStart = null;
-    state.selEnd = null;
+    state.held = false;
     state.lines = null;
-    if (el.bar) el.bar.style.display = 'none';
     setFrozen(false);
     hideHints();
     if (el.endPill) el.endPill.style.display = 'none';
