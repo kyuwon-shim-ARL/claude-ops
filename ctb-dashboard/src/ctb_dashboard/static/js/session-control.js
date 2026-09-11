@@ -3296,10 +3296,13 @@
     return el.tail.scrollHeight - el.tail.scrollTop - el.tail.clientHeight;
   }
 
+  /* One full pane, not half of one. At half a screen the pill sat over lines
+   * the reader could still see the bottom of -- it covered the output to
+   * offer a trip you had not left for yet. A page is the point where the
+   * bottom is genuinely off-screen and getting back is worth a button. */
   function updateEndPill() {
     if (!el.endPill) return;
-    var far = !!state.session
-      && endDistance() > Math.max(240, el.tail.clientHeight * 0.5);
+    var far = !!state.session && endDistance() > el.tail.clientHeight;
     el.endPill.style.display = far ? 'inline-flex' : 'none';
   }
 

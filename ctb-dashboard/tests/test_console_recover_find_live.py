@@ -139,6 +139,32 @@ def test_the_pill_appears_far_from_the_end_and_takes_you_there(board):
     board.wait_for_selector(PILL, state="hidden")
 
 
+def test_the_pill_waits_for_a_full_page_of_scrolling(board):
+    """Half a screen up, the bottom is still in sight -- a button covering the
+    output to offer a trip you have not left for yet is pure obstruction."""
+    open_console(board)
+
+    def show_at(fraction):
+        """Scroll so the end is `fraction` of a pane height away."""
+        return board.eval_on_selector(
+            "#ctb-console pre",
+            "(el, f) => { el.scrollTop = el.scrollHeight - el.clientHeight"
+            "                          - el.clientHeight * f;"
+            "             return el.scrollHeight - el.clientHeight"
+            "                    - el.scrollTop >= el.clientHeight * f - 2; }",
+            fraction)
+
+    assert show_at(0.7), "the pane is too short to scroll this test"
+    # The pill answers a scroll event, not the assignment: at 120ms this read
+    # "hidden" even with the old half-screen rule, which is a pass for the
+    # wrong reason.
+    board.wait_for_timeout(400)
+    assert board.is_hidden(PILL)
+
+    assert show_at(1.5)
+    board.wait_for_selector(PILL, state="visible")
+
+
 def test_the_pill_thaws_a_frozen_pane_too(board):
     open_console(board)
     board.click("#ctb-console [data-line='3']")
