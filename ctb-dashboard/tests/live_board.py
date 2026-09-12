@@ -80,6 +80,19 @@ def open_board(theme=None):
         page.ctb_keys = []
         page.ctb_log = LOG
         page.ctb_log_hash = "h1"
+        # See the /log route below: off by default, so no existing expectation
+        # about the canned pane changes.
+        page.ctb_log_window = False
+        page.ctb_hold_log = False
+        page.ctb_held = []
+
+        def release_log(index=0):
+            """Answer a request the route was told to hold."""
+            route_obj, body = page.ctb_held.pop(index)
+            route_obj.fulfill(status=200, content_type="application/json",
+                              body=json.dumps(body))
+
+        page.ctb_release_log = release_log
         # A control token the page already has: without one the first write
         # opens a window.prompt(), which a headless browser dismisses.
         page.add_init_script("localStorage.setItem('ctb.controlToken', 'test-token')")
@@ -148,6 +161,25 @@ def open_board(theme=None):
                         "cols": 80, "ghost": False}
                 if "since=" + page.ctb_log_hash in url:
                     body = {"unchanged": True}
+                # Opt-in, because most tests want the whole canned pane at any
+                # depth. A test about LOADING history needs the other thing: a
+                # window that really only holds the last N lines, so asking for
+                # more brings something back.
+                elif page.ctb_log_window:
+                    asked = 0
+                    for part in url.split("?", 1)[-1].split("&"):
+                        if part.startswith("lines="):
+                            asked = int(part[6:] or 0)
+                    if asked:
+                        rows = page.ctb_log.split("\n")
+                        body["log"] = "\n".join(rows[-asked:])
+                        body["hash"] = "%s-%d" % (page.ctb_log_hash,
+                                                  min(asked, len(rows)))
+                # Held until the test releases it: the only way to assert on
+                # what happens while a fetch is still in flight.
+                if page.ctb_hold_log:
+                    page.ctb_held.append((r, body))
+                    return
                 return r.fulfill(status=200, content_type="application/json",
                                  body=json.dumps(body))
             if path.startswith("/api/sessions/create"):

@@ -29,7 +29,7 @@
   var POLL_MS = 2000;
 
   var state = { session: null, prev: null, timer: null, busy: false,
-                lines: null, held: false, order: null,
+                lines: null, held: false, walk: null, order: null,
                 fitted: false, fails: 0, warned: false, cols: 0,
                 pending: null, sent: null,
                 depth: TAIL_LINES, growing: false, exhausted: false,
@@ -784,9 +784,36 @@
       resumeLive();
     });
 
+    /* The other direction. Going back means going back to a REQUEST: the turn
+     * boundary is where the information is -- a conclusion, and the ask that
+     * was built on it -- and it is the only landmark in a pane of output that
+     * a reader can name. Scrolling by pages to find one is what this replaces.
+     *
+     * Right, not centre: the frozen badge is top-right and the find bar takes
+     * the full width of the top, so centre would have collided with both. */
+    var prevPill = document.createElement('button');
+    prevPill.type = 'button';
+    prevPill.appendChild(icon('up', 14));
+    prevPill.appendChild(document.createTextNode('\uc774\uc804 \uc694\uccad'));
+    prevPill.setAttribute('aria-label', '\uc774\uc804 \uc694\uccad\uc73c\ub85c \uac00\uae30');
+    prevPill.style.cssText = [
+      'display:none', 'position:absolute', 'left:50%', 'top:14px',
+      'transform:translateX(-50%)', 'z-index:3',
+      'align-items:center', 'gap:5px', 'min-height:34px', 'padding:0 14px',
+      'border:0', 'border-radius:99px', 'cursor:pointer',
+      'font:600 12px/1 ui-sans-serif,system-ui,sans-serif',
+      'background:var(--con-accent,rgba(129,140,248,0.92))', 'color:#fff',
+      'box-shadow:0 6px 18px rgba(16,24,40,0.35)',
+    ].join(';');
+    prevPill.addEventListener('click', function (e) {
+      e.stopPropagation();
+      gotoPrevPrompt();
+    });
+
     tailWrap.appendChild(tail);
     tailWrap.appendChild(buildFindBar());
     tailWrap.appendChild(endPill);
+    tailWrap.appendChild(prevPill);
     tailWrap.appendChild(frozen);
 
     root.appendChild(strip);
@@ -799,7 +826,7 @@
     keepCaret(root, input);
     document.body.appendChild(root);
 
-    el = { keys: keys, keysMore: more, endPill: endPill,
+    el = { keys: keys, keysMore: more, endPill: endPill, prevPill: prevPill,
            root: root, strip: strip, title: title, status: status, tail: tail, mic: mic,
            frozen: frozen, input: input,
            send: send, silent: silent, quad: quad, quadNum: quadNum };
@@ -2623,12 +2650,29 @@
    * rule -- so column zero plus no rule above is what separates them.
    * Wrapped tails are the indented lines that follow, to the first blank.
    * Pure; tested. */
+  /* One line, one question: is line `i` a prompt the user submitted? Column
+   * zero, something after the \u276f, and no rule above it. Both readers of
+   * this -- recall and the jump-back pill -- must agree on what a turn
+   * boundary is, so there is one copy of the test. Pure; tested. */
+  function isSubmitted(lines, i) {
+    if (lines[i].charAt(0) !== '\u276f') return false;
+    if (!lines[i].slice(1).replace(/^[\s\u00a0]+|[\s\u00a0]+$/g, '')) return false;
+    return !(i > 0 && RULE_RE.test(lines[i - 1]));        /* that is the box */
+  }
+
+  /* Every submitted prompt, top to bottom, as line indices. Pure; tested. */
+  function submittedLines(lines) {
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      if (isSubmitted(lines, i)) out.push(i);
+    }
+    return out;
+  }
+
   function findLastSubmitted(lines) {
     for (var i = lines.length - 1; i >= 0; i--) {
-      if (lines[i].charAt(0) !== '\u276f') continue;
+      if (!isSubmitted(lines, i)) continue;
       var text = lines[i].slice(1).replace(/^[\s\u00a0]+|[\s\u00a0]+$/g, '');
-      if (!text) continue;
-      if (i > 0 && RULE_RE.test(lines[i - 1])) continue;   /* that is the box */
       var parts = [text];
       for (var j = i + 1; j < lines.length; j++) {
         if (!/^[\s\u00a0]{2,}\S/.test(lines[j])) break;
@@ -2905,6 +2949,9 @@
      * shadow channel, on top of the well's own edge. */
     if (el.tail) el.tail.style.boxShadow = on
       ? 'var(--con-well-edge), inset 0 0 0 2px rgba(245,158,11,0.55)' : '';
+    /* A freeze changes what the walk can do -- a held pane cannot fetch older
+     * history -- and every path that freezes or thaws comes through here. */
+    updatePrevPill();
   }
 
   function unhold() {
@@ -3130,8 +3177,12 @@
    * from the bottom is what holds the view still. */
   /* `deliberate` is a request the reader made in so many words -- the find
    * bar's "더 불러오기" -- as opposed to the automatic deepening that scrolling
-   * up performs. Only the deliberate kind runs while the pane is frozen. */
-  function growTail(deliberate) {
+   * up performs. Only the deliberate kind runs while the pane is frozen.
+   *
+   * `after` runs once the deeper pane is on screen -- the walk back uses it to
+   * continue past the oldest loaded turn. It does not run when the grow was
+   * refused or brought nothing back: there is nothing new to walk into. */
+  function growTail(deliberate, after) {
     if (!state.session || state.growing || state.exhausted) return;
     /* A frozen pane stays frozen -- including the automatic deepening that
      * scrolling up asks for. Find does its own deepening, on request. */
@@ -3166,7 +3217,10 @@
           state.hash = data.hash || '';
           var before = state.lines ? state.lines.length : 0;
           var fromBottom = el.tail.scrollHeight - el.tail.scrollTop;
-          var held = findOpen() && fnd.hits[fnd.at] ? fnd.hits[fnd.at] : null;
+          /* NOT named `held`: `var held` hoists over the held() predicate
+           * used above in this same callback, and calling it then threw
+           * "held is not a function" -- every scroll-up grow died there. */
+          var hit = findOpen() && fnd.hits[fnd.at] ? fnd.hits[fnd.at] : null;
           renderTail(data.log || '');
           rememberTail(name, data);
           el.tail.scrollTop = el.tail.scrollHeight - fromBottom;
@@ -3174,10 +3228,10 @@
           var gained = (state.lines ? state.lines.length : 0) - before;
           /* Older lines arrive above, so every match moved down by `gained`.
            * Re-point at the same one rather than jumping back to the first. */
-          if (held && gained > 0) {
+          if (hit && gained > 0) {
             for (var h = 0; h < fnd.hits.length; h++) {
-              if (fnd.hits[h].line === held.line + gained
-                  && fnd.hits[h].start === held.start) {
+              if (fnd.hits[h].line === hit.line + gained
+                  && fnd.hits[h].start === hit.start) {
                 fnd.at = h;
                 paintCurrent(false);
                 renderFindCount();
@@ -3189,9 +3243,14 @@
             /* The pane has no more history: stop asking on every scroll. */
             state.exhausted = true;
             state.depth = was;
+            /* The pill was last decided while a deepening was still possible.
+             * Nothing else repaints on a zero-gain answer, so it would have
+             * sat there enabled with nowhere to go. */
+            updatePrevPill();
             setStatus('더 이상 이전 내용이 없습니다', 'var(--con-muted)');
           } else {
             setStatus('이전 ' + gained + '줄 불러옴', 'var(--con-ok)');
+            if (after) after(gained);
           }
         });
       })
@@ -3241,6 +3300,7 @@
     onSettled = null;
     state.growing = false;
     state.pinned = true;
+    endWalk();                      /* back at the end: the walk is over */
     if (el.tail) el.tail.scrollTop = el.tail.scrollHeight;
     updateEndPill();
     if (!state.timer) {
@@ -3302,8 +3362,169 @@
    * bottom is genuinely off-screen and getting back is worth a button. */
   function updateEndPill() {
     if (!el.endPill) return;
-    var far = !!state.session && endDistance() > el.tail.clientHeight;
+    var far = !!state.session && endDistance() > el.tail.clientHeight * 2;
     el.endPill.style.display = far ? 'inline-flex' : 'none';
+    updatePrevPill();
+  }
+
+  /* --- back to the previous request -------------------------------------- */
+
+  /* Where the walk stands, counted from the NEWEST submitted request: 1 is the
+   * last thing the reader sent, 2 the one before it.
+   *
+   * Not a line number: the pane is a fixed window on a growing transcript, and
+   * older history arrives 400 lines at a time ABOVE what is drawn, so an index
+   * names a different line a moment later. Not the text either -- the same
+   * request sent twice makes two identical lines, and "the nearest occurrence"
+   * then handed the walk back the turn it had just left.
+   *
+   * Counted from the end, neither the window sliding nor a prepend can move it,
+   * because both only ever change what is above. A newly SENT request would --
+   * so sending clears the walk, which is what going back to work means anyway.
+   *
+   *   -> the line the walk stands on, or -1 when there is no walk.
+   */
+  function walkLine() {
+    if (!state.walk || !state.lines) return -1;
+    var at = submittedLines(state.lines);
+    var i = at.length - state.walk;
+    return i >= 0 && i < at.length ? at[i] : -1;
+  }
+
+  /* Is the walk still the reader's position, or have they moved on?
+   *
+   * It stays theirs while the landing is anywhere from one pane above the view
+   * down to the bottom of it. Above that band, live output has pushed it out of
+   * sight over many repaints; below it, the reader has scrolled up past it by
+   * hand. Either way their eyes are the mark now, not the last press.
+   *
+   * Asked only when the reader presses, never while painting: a repaint that
+   * prepends history has the new rows in the DOM before the scroll position is
+   * restored, and judged in that instant every landing looks hundreds of rows
+   * below the view. Answering there deleted walks that were perfectly alive. */
+  function walkOwnsView() {
+    var line = walkLine();
+    if (line < 0) return false;
+    var node = el.tail.querySelector('[data-line="' + line + '"]');
+    if (!node) return true;             /* not drawn yet; trust the count */
+    var box = el.tail.getBoundingClientRect();
+    var top = node.getBoundingClientRect().top;
+    return top >= box.top - el.tail.clientHeight && top <= box.bottom;
+  }
+
+  /* The turn to jump to, or -1.
+   *
+   * Mid-walk it is simply the turn before the one we stand on -- counted in the
+   * transcript, not measured on screen. Geometry cannot do this job: two
+   * requests three lines apart both sit inside the pane after a jump, and
+   * "above the top edge" then skips the nearer one.
+   *
+   * Cold, with no walk in progress, geometry is all there is: the nearest turn
+   * whose FIRST row is above the top edge. First row, not last -- a long
+   * request rejoined by capture-pane -J wraps to most of the pane, and judged
+   * by its last row it was unreachable with its opening words already gone. */
+  function prevPromptLine() {
+    if (!el.tail || !state.lines) return -1;
+    var at = submittedLines(state.lines);
+    if (!at.length) return -1;
+    var k;
+    var line = walkLine();
+    if (line >= 0) {
+      k = at.length - state.walk;
+      return k > 0 ? at[k - 1] : -1;
+    }
+    var nodes = el.tail.querySelectorAll('[data-line]');
+    var top = el.tail.getBoundingClientRect().top;
+    for (k = at.length - 1; k >= 0; k--) {
+      var node = nodes[at[k]];
+      if (node && node.getBoundingClientRect().top < top - 2) return at[k];
+    }
+    return -1;
+  }
+
+  /* Older history is fetched a page at a time, so the oldest turn in the window
+   * is usually not the oldest turn there is. A reader mid-walk is offered the
+   * next page rather than a button that vanishes; a pane that holds no turns at
+   * all is offered nothing, because there is nothing to walk.
+   *
+   * The grow's own refusals are part of the test: a held pane cannot be grown,
+   * and a button that does nothing when pressed -- no movement, no fetch, no
+   * word -- is worse than an absent one. */
+  function canDeepenForWalk() {
+    return !state.exhausted && !state.growing && !held()
+      && state.depth < MAX_TAIL_LINES
+      && !!state.lines && submittedLines(state.lines).length > 0;
+  }
+
+  function updatePrevPill() {
+    if (!el.prevPill) return;
+    /* The find bar owns the top of the pane while it is open, full width. */
+    var show = !!state.session && !findOpen()
+      && (prevPromptLine() >= 0 || canDeepenForWalk());
+    el.prevPill.style.display = show ? 'inline-flex' : 'none';
+  }
+
+  /* Clear of the pill itself. Landing the prompt flush at the top edge puts it
+   * under the button that was just pressed -- the one line the press was for,
+   * hidden by the press. So it lands just below, and what follows it -- the
+   * answer to that request -- fills the rest of the pane. */
+  var PROMPT_HEAD = 56;
+
+  /* scrollIntoView is not used: it walks up the ancestors and has scrolled the
+   * sheet itself out of place. */
+  function landOnPrompt(line) {
+    var node = el.tail.querySelector('[data-line="' + line + '"]');
+    if (!node) return false;
+    var at = submittedLines(state.lines);
+    var ordinal = at.length - at.indexOf(line);
+    if (ordinal <= 0) return false;
+    var box = el.tail.getBoundingClientRect();
+    /* A pane shorter than the offset would put the prompt below the fold. */
+    var head = Math.min(PROMPT_HEAD, Math.max(0, el.tail.clientHeight - 24));
+    el.tail.scrollTop += node.getBoundingClientRect().top - box.top - head;
+    state.walk = ordinal;
+    /* The reader has left the end: the poll must stop dragging them back. */
+    state.pinned = false;
+    updateEndPill();
+    return true;
+  }
+
+  /* Bumped by everyone who takes the pane over from the walk. A deferred
+   * landing compares it and gives up: the fetch behind a press to deepen is
+   * still in flight when Enter takes the reader back to live, and landing then
+   * undid that -- scrolled them away, and set pinned back to false. */
+  var walkAsk = 0;
+
+  /* One call for "the walk is over": forget where it stood, and refuse the
+   * landing of any press still in flight. */
+  function endWalk() {
+    state.walk = null;
+    walkAsk += 1;
+  }
+
+  function gotoPrevPrompt() {
+    if (!state.session || !state.lines) return;
+    /* Asked here, where the layout has settled, and nowhere else. */
+    if (state.walk && !walkOwnsView()) state.walk = null;
+    var ask = ++walkAsk;
+    var name = state.session;
+    var line = prevPromptLine();
+    if (line >= 0) {
+      if (landOnPrompt(line)) {
+        setStatus('\uc774\uc804 \uc694\uccad\uc73c\ub85c \uc774\ub3d9\ud588\uc2b5\ub2c8\ub2e4 \u00b7 \ub2e4\uc2dc \ub204\ub974\uba74 \uadf8 \uc804 \uc694\uccad', 'var(--con-muted)');
+      }
+      return;
+    }
+    if (!canDeepenForWalk()) return;
+    /* Past the oldest loaded turn: fetch a page and carry the walk into it.
+     * Deliberate, because this is a press, not a scroll. */
+    growTail(true, function () {
+      if (ask !== walkAsk || state.session !== name) return;
+      if (findOpen() || held()) return;
+      var deeper = prevPromptLine();
+      if (deeper >= 0) landOnPrompt(deeper);
+      updatePrevPill();
+    });
   }
 
   /* --- find in the output ------------------------------------------------ */
@@ -3416,6 +3637,8 @@
     unhold();
     fnd.open = true;
     fnd.root.style.display = 'flex';
+    endWalk();                           /* a landing in flight is not wanted */
+    updatePrevPill();                    /* the bar covers the pill's slot */
     setFrozen(true);
     stopPolling();
     fnd.input.focus();
@@ -3430,6 +3653,7 @@
     if (!fnd.open) return;
     fnd.open = false;
     fnd.root.style.display = 'none';
+    updatePrevPill();
     fnd.hits = [];
     fnd.at = 0;
     fnd.q = '';
@@ -3972,6 +4196,7 @@
   function submit() {
     if (state.busy || !state.session) return;
     unhold();
+    endWalk();
     var text = el.input.value;
     /* An empty box means the gesture was not "send this text" but "press
      * Enter" -- answering a prompt, accepting a default, nudging a pane. It
@@ -4055,6 +4280,7 @@
     /* A hold is for reading; sending is the end of reading. Leaving the pane
      * frozen would hide the very thing the key was pressed to cause. */
     unhold();
+    endWalk();
     var name = state.session;
     var what = label || ('키 ' + key);
     var before = { text: state.pending ? state.pending.text : '', ghost: state.ghost };
@@ -4263,6 +4489,7 @@
      * armed, not for whatever is open by the time it is pressed. */
     disarmSend(true);
     state.held = false;
+    endWalk();
     state.lines = null;
     /* Another session, another pane width -- and the console is about to
      * resize this one. Nothing is joined until the next poll says how wide. */
@@ -4326,10 +4553,12 @@
     closeFind();
     disarmSend(true);
     state.held = false;
+    endWalk();
     state.lines = null;
     setFrozen(false);
     hideHints();
     if (el.endPill) el.endPill.style.display = 'none';
+    if (el.prevPill) el.prevPill.style.display = 'none';
     if (el.root) el.root.style.display = 'none';
     /* After the sheet is hidden, so it does not hand focus to a button that
      * is no longer on screen. */
@@ -4419,6 +4648,7 @@
     _splitLinks: splitLinks,
     _findPendingInput: findPendingInput,
     _findLastSubmitted: findLastSubmitted,
+    _submittedLines: submittedLines,
     _pageTail: pageTail,
     _rowsNeeded: rowsNeeded,
     _planKeys: planKeys,

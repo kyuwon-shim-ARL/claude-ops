@@ -97,3 +97,47 @@ def test_nothing_to_recall():
 
 def test_empty_prompt_line_is_skipped():
     assert recall(["❯ 실제 요청", "", "❯", ""]) == "실제 요청"
+
+
+# --- the turn boundaries the jump-back pill walks ---------------------------
+
+def submitted(lines):
+    script = _HARNESS.replace("_findLastSubmitted", "_submittedLines").format(
+        path=json.dumps(str(CONSOLE_JS)), payload=json.dumps(lines)
+    )
+    result = subprocess.run(
+        ["node", "-e", script], capture_output=True, text=True, timeout=20
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+def test_every_submitted_prompt_in_order():
+    assert submitted([
+        "❯ 첫 요청",
+        "  답",
+        "",
+        "❯ 두 번째 요청",
+        "  답",
+    ]) == [0, 3]
+
+
+def test_the_pill_and_recall_agree_on_what_a_turn_is():
+    """One test, two readers. A boundary the pill jumps to that recall would
+    not take back is a boundary that means two different things."""
+    lines = [
+        "❯ 진짜로 보낸 요청",
+        "",
+        "  Do you trust the files in this folder?",
+        "  ❯ 1. Yes, proceed",
+        "",
+        RULE,
+        "❯ 아직 안 보낸 초안",
+        RULE,
+    ]
+    assert submitted(lines) == [0]
+    assert recall(lines) == "진짜로 보낸 요청"
+
+
+def test_no_turns_at_all():
+    assert submitted(["그냥 출력", "", "  더 많은 출력"]) == []
