@@ -176,3 +176,18 @@ class TestNotificationSequences:
         assert self._poll(SessionState.IDLE, "done\n", 0) is False          # hold created
         assert self._poll(SessionState.UNKNOWN, "", 60) is False
 
+    def test_stale_error_screen_does_not_refire_across_cooldown_rearm(self):
+        """
+        The observed signature: claude_generative-antibiotic-pa sent "Error Detected" three
+        times in thirteen minutes — 8-minute gaps, i.e. once per cooldown re-arm — with the
+        same unresolved screen. The re-arm itself is not the defect; what made it visible was
+        a branch that could fire from screen text alone. With that branch gone, re-arming as
+        often as you like produces nothing until real work happens and ends.
+        """
+        screen = "Traceback (most recent call last):\nValueError: boom\n"
+        for _ in range(3):
+            # Simulate the cooldown window reopening and the dedup latch re-arming.
+            self.monitor.notification_sent[self.session] = False
+            self.monitor.last_notification_time[self.session] = 0
+            assert self._poll(SessionState.IDLE, screen, 600) is False
+
