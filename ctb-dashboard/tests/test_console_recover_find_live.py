@@ -60,6 +60,25 @@ def test_a_tap_holds_the_pane_and_a_second_tap_lets_go(board):
     assert not frozen(board)
 
 
+def status(page):
+    return page.eval_on_selector("#ctb-console [aria-live='polite']",
+                                 "el => el.style.visibility === 'hidden'"
+                                 "      ? '' : el.textContent")
+
+
+def test_letting_go_takes_the_instruction_down_with_it(board):
+    """The hold explains itself on the status line. Left up afterwards it told
+    a live pane to do what it had already done -- and the next tap, which is
+    the hold coming back, read as the message having been ignored."""
+    open_console(board)
+    board.click("#ctb-console pre")
+    assert "다시 탭하면 재개" in status(board)
+
+    board.click("#ctb-console pre")
+    assert not frozen(board)
+    assert "다시 탭하면 재개" not in status(board)
+
+
 def test_a_held_pane_stops_asking_for_the_log(board):
     open_console(board)
     board.click("#ctb-console pre")

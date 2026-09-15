@@ -2930,13 +2930,15 @@
    * cannot do for itself -- stop the repaints -- and the copy is the reader's
    * own. That is why there is no line-range bar here any more: it existed only
    * to work around the motion. */
+  var HOLD_MSG = '\uac31\uc2e0 \uc815\uc9c0\ub428 \u2014 \ub4dc\ub798\uadf8\ud574\uc11c \ubcf5\uc0ac\ud558\uc138\uc694. \ub2e4\uc2dc \ud0ed\ud558\uba74 \uc7ac\uac1c';
+
   function toggleHold() {
     if (!state.session) return;
     if (state.held) { unhold(); return; }
     state.held = true;
     stopPolling();
     setFrozen(true);
-    setStatus('\uac31\uc2e0 \uc815\uc9c0\ub428 \u2014 \ub4dc\ub798\uadf8\ud574\uc11c \ubcf5\uc0ac\ud558\uc138\uc694. \ub2e4\uc2dc \ud0ed\ud558\uba74 \uc7ac\uac1c', 'var(--con-warn)');
+    setStatus(HOLD_MSG, 'var(--con-warn)');
   }
 
   /* Called from every path that ends the hold -- a second tap, a send, a
@@ -2957,6 +2959,15 @@
   function unhold() {
     if (!state.held) return;
     state.held = false;
+    /* The line that said "다시 탭하면 재개" goes with the hold it was
+     * describing. Left up, it told a live pane to do what it had already done,
+     * and the next tap -- which is the hold coming back -- then read as the
+     * message having been ignored.
+     *
+     * Unconditional: a thaw on the way to somewhere else -- a key, a prompt --
+     * is followed by that somewhere else putting its own line up, so there is
+     * nothing here worth keeping. */
+    setStatus('', '');
     setFrozen(frozen());
     /* The hold was what paused the tail; resume now -- unless a find is
      * still holding it. */
