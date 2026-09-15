@@ -116,6 +116,8 @@ class MultiSessionMonitor:
         # C-c는 MCP tool call 등 정상적인 장기 작업을 죽일 수 있어 opt-in으로 변경.
         # STALL_ENABLE_CTRLC=1 환경변수로 활성화.
         self._working_since: Dict[str, float] = {}        # session -> WORKING 진입 시간
+        self._pending_completion: Dict[str, float] = {}   # session -> 안정성 대기 중인 완료 후보 시각
+        self._work_seen: Dict[str, bool] = {}             # session -> 마지막 알림 이후 WORKING을 목격했는가
         self._stall_notified_at: Dict[str, float] = {}    # session -> 마지막 stall 알림 시간
         self._stall_nudge_count: Dict[str, int] = {}      # session -> 텍스트 nudge 횟수 (Phase 1)
         self._stall_escape_count: Dict[str, int] = {}     # session -> Escape 인터럽트 횟수 (Phase 2)
@@ -322,6 +324,13 @@ class MultiSessionMonitor:
                 # 위 분기가 실행되지 않아 _working_since가 초기화되지 않는 버그 수정.
                 # 이 경우 재시작 시점을 기준으로 타이머 시작.
                 self._working_since[session_name] = current_time
+            # Work resumed, so any completion we were holding is stale. This is not
+            # redundant with branch 1: if the session later passes through SCHEDULED on its
+            # way to a terminal state, previous_state is no longer WORKING and the ending
+            # lands on the deferred branch, which would otherwise release the stale hold.
+            self._pending_completion.pop(session_name, None)
+            # Evidence that there is real work behind any later heuristic completion.
+            self._work_seen[session_name] = True
             return False, None
         else:
             # working-stall: WORKING 이탈 시 추적 제거
@@ -342,6 +351,9 @@ class MultiSessionMonitor:
         if current_state == SessionState.CONTEXT_LIMIT and previous_state != SessionState.CONTEXT_LIMIT and (current_time - last_restart) > restart_cooldown:
             self.notification_sent[session_name] = True
             self.last_notification_time[session_name] = current_time
+            # This return notifies, so it closes the work episode like any other notification.
+            self._work_seen[session_name] = False
+            self._pending_completion.pop(session_name, None)
             logger.info(f"📢 Notification: {session_name} - Context limit reached - session needs restart")
             self.debugger.log_notification(
                 session_name, NotificationEvent.SENT,
@@ -389,40 +401,72 @@ class MultiSessionMonitor:
         notification_reason = ""
         should_notify = False
 
-        # 1. Task-specific completion detected
-        if task_completion and task_completion.confidence > 0.7:
-            should_notify = True
-            notification_reason = f"Task completed: {task_completion.message}"
-            # Adjust cooldown based on priority
-            if task_completion.priority == AlertPriority.CRITICAL:
-                should_notify = True  # Always notify for critical
-            elif task_completion.priority == AlertPriority.LOW:
-                # More restrictive for low priority
-                if current_time - last_notification_time < 60:
-                    return False, None
-        # 2. Original triggers: WORKING->completed or any->WAITING_INPUT
-        elif previous_state == SessionState.WORKING and current_state not in (SessionState.WORKING, SessionState.SCHEDULED):
+        # 1. Original triggers: WORKING->completed or any->WAITING_INPUT
+        #
+        # NOTE: `task_completion` (screen-text scraping) deliberately does NOT originate a
+        # notification. It used to, and it was the single largest source of false alarms:
+        # over 2026-09-13..15, 37 of 68 notifications came from it, including seven idle
+        # sessions firing "Test Execution Finished" within 16 minutes because their panes
+        # still displayed old pytest output. The detector greps the last 20 screen lines for
+        # bare substrings ("Traceback", "Timeout", "All tests passed", ...), so any pane that
+        # merely DISPLAYS such text qualifies — no state transition required. It also bought
+        # nothing in return: the sender discards task_completion and sends the standard
+        # completion message anyway (see send_work_completion_notification below).
+        # It is still computed, because the delivery path uses its priority for the emoji.
+        if previous_state == SessionState.WORKING and current_state not in (SessionState.WORKING, SessionState.SCHEDULED):
             # RACE CONDITION FIX: During tool transitions, Claude briefly shows no
             # working indicators. Require screen stability to confirm real completion.
             # SCHEDULED is treated as still-working (e.g. PIU-v2 running cron tasks)
             if screen_stable_duration >= min_stability:
                 should_notify = True
                 notification_reason = f"Work completed (WORKING → {current_state})"
+                self._pending_completion.pop(session_name, None)
             else:
-                logger.debug(f"Suppressed notification for {session_name}: "
+                # Do NOT drop the transition. previous_state is consumed at the top of this
+                # method, so without this the completion would be lost forever once the
+                # stability guard suppressed it — the missed-notification failure mode that
+                # the screen-scraping branch used to paper over by accident.
+                self._pending_completion[session_name] = current_time
+                logger.debug(f"Deferred notification for {session_name}: "
                            f"screen changed {screen_stable_duration:.1f}s ago "
                            f"(need {min_stability}s stability)")
+        # 2. The session is asking for something. This is checked BEFORE the deferred
+        # completion below: a held completion must never shadow a live request for input.
+        # (Sequence that used to go silent forever: WORKING → unstable IDLE creates a hold,
+        # then WAITING_INPUT arrives while a timer keeps repainting the pane, so the hold
+        # branch matched every poll and the input request was never announced.)
         elif current_state == SessionState.WAITING_INPUT and previous_state != SessionState.WAITING_INPUT:
             # BUGFIX: Ignore UNKNOWN -> WAITING_INPUT transitions (restart false positive)
             if previous_state != SessionState.UNKNOWN:
                 should_notify = True
                 notification_reason = "Waiting for input"
-        # 3. Quiet completion detection
-        elif self.state_analyzer.detect_quiet_completion(session_name):
+                self._pending_completion.pop(session_name, None)
+        # 3. A completion we deferred earlier, now that the screen has settled.
+        # OVERLOADED and UNKNOWN do not release a hold: OVERLOADED means the monitor is
+        # retrying a 529 on its own (nothing finished, nothing is being asked of the user),
+        # and UNKNOWN means we cannot tell — neither establishes completion.
+        elif session_name in self._pending_completion and current_state not in (
+                SessionState.WORKING, SessionState.SCHEDULED,
+                SessionState.OVERLOADED, SessionState.UNKNOWN):
+            if screen_stable_duration >= min_stability:
+                should_notify = True
+                notification_reason = f"Work completed (deferred → {current_state})"
+                self._pending_completion.pop(session_name, None)
+        # 4. Quiet completion detection
+        #
+        # Branches 3 and 4 are heuristic fallbacks for completions the state machine never
+        # saw as WORKING. Both read the screen, so on their own they fire on any idle pane
+        # that still displays old output. They are therefore conditioned on having actually
+        # observed this session working since the last notification. Limitation, stated
+        # plainly: _work_seen lives in memory and is keyed by session name, so a monitor
+        # restart or a session recreated under the same name loses or misattributes it. In
+        # the lost case these fallbacks stay silent until the session works again; branch 1
+        # still covers the ordinary path from persisted state.
+        elif self._work_seen.get(session_name, False) and self.state_analyzer.detect_quiet_completion(session_name):
             should_notify = True
             notification_reason = "Quiet completion detected"
-        # 4. Completion message detection
-        elif current_state == SessionState.IDLE:
+        # 5. Completion message detection
+        elif current_state == SessionState.IDLE and self._work_seen.get(session_name, False):
             if screen_content and self.state_analyzer.has_completion_indicators(screen_content):
                 # Require screen stability AND cooldown to prevent false alarms
                 if current_time - last_notification_time > 10 and screen_stable_duration >= min_stability:
@@ -448,6 +492,8 @@ class MultiSessionMonitor:
         if should_notify:
             self.notification_sent[session_name] = True
             self.last_notification_time[session_name] = current_time
+            # This work episode has been reported; later heuristics need fresh evidence.
+            self._work_seen[session_name] = False
             logger.info(f"📢 Notification: {session_name} - {notification_reason}")
             
             # Log notification event
@@ -1544,6 +1590,8 @@ class MultiSessionMonitor:
                     # BUGFIX: Always start with notification_sent=False on restart
                     # The persisted hash allows skip logic, but we should detect NEW work
                     self.notification_sent[session_name] = False
+                    self._pending_completion.pop(session_name, None)
+                    self._work_seen.pop(session_name, None)
                     try:
                         self.last_state[session_name] = SessionState(persisted_state.last_state)
                     except ValueError:
@@ -1554,6 +1602,8 @@ class MultiSessionMonitor:
                     self.last_screen_hash[session_name] = ""
                     self.notification_sent[session_name] = False
                     self.last_state[session_name] = SessionState.UNKNOWN
+                    self._pending_completion.pop(session_name, None)
+                    self._work_seen.pop(session_name, None)
 
                 self.last_notification_time[session_name] = 0
                 # Preserve existing wait time records across restarts.
@@ -1611,6 +1661,8 @@ class MultiSessionMonitor:
                         # Reset state after reconnection
                         self.notification_sent[session_name] = False
                         self.last_state[session_name] = SessionState.UNKNOWN
+                        self._pending_completion.pop(session_name, None)
+                        self._work_seen.pop(session_name, None)
                     
                     # --- 529 Overloaded auto-retry ---
                     current_screen = self.state_analyzer.get_screen_content(session_name)
