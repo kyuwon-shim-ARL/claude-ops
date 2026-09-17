@@ -252,6 +252,113 @@ def test_escape_reaches_the_launcher_when_the_card_is_gone_from_view(board):
         == "btn-find-session"
 
 
+# --- the transition cue ------------------------------------------------------
+
+def _flashed(page, name):
+    return page.eval_on_selector(
+        f'{CHIP}[data-switch-session="{name}"]',
+        "c => c.classList.contains('ctb-notice')")
+
+
+def test_a_session_that_starts_wanting_you_flashes(board):
+    """The steady signals only work if you are looking. This is for when you
+    are not: the moment a session starts needing something."""
+    open_console(board, "claude_alpha")
+    board.ctb_set_state("claude_gamma", "waiting")
+    assert _flashed(board, "claude_gamma")
+
+
+def test_work_finishing_flashes(board):
+    open_console(board, "claude_alpha")
+    board.ctb_set_state("claude_alpha", "idle")   # was working
+    assert _flashed(board, "claude_alpha")
+
+
+def test_a_session_merely_getting_on_with_it_does_not(board):
+    """유휴 → 작업중 is the machine doing its job. A cue that fires for every
+    change is a rail that always flickers, and a flicker that means nothing
+    in particular is one you stop reading."""
+    open_console(board, "claude_alpha")
+    board.ctb_set_state("claude_gamma", "working")
+    assert not _flashed(board, "claude_gamma")
+    assert "작업중" in chip_text(board, "claude_gamma")
+
+
+def test_opening_the_console_does_not_set_the_whole_rail_flashing(board):
+    """Those states have been true for an hour; none of them just happened.
+
+    (Guards the build paths specifically: a rail drawn from scratch paints
+    state, it does not announce it.)
+    """
+    board.ctb_set_state("claude_gamma", "waiting")
+    open_console(board, "claude_alpha")
+    board.wait_for_timeout(120)
+    assert board.eval_on_selector_all(
+        CHIP, "c => c.filter(x => x.classList.contains('ctb-notice')).length") == 0
+
+
+def test_a_session_that_appears_arrives_quietly_and_can_speak_later(board):
+    """Arriving already waiting is not the same as starting to wait.
+
+    A session appearing is added to the rail, not patched onto it, so the cue
+    is structurally out of that path -- this pins that, and pins the other
+    half: a chip that arrived this way is still wired into the cue for its
+    next move. (The `was !== undefined` clause in noticedTransitions states
+    the same idea one level down, where it is unreachable today: by the time
+    a chip exists, its session has been through a publication. It is kept as
+    the honest statement of "no before, no transition", not as live defence.)
+    """
+    open_console(board, "claude_alpha")
+    board.ctb_sessions = board.ctb_sessions + [
+        {"name": "claude_newborn", "state": "waiting",
+         "updated_at": 0, "last_activity": 0, "work_context": ""}]
+    board.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
+    board.wait_for_timeout(250)
+    chip = f'{CHIP}[data-switch-session="claude_newborn"]'
+    assert board.is_visible(chip)
+    assert "입력대기" in board.inner_text(chip)
+    assert not _flashed(board, "claude_newborn")
+    # ...and it can still announce its NEXT move.
+    board.ctb_set_state("claude_newborn", "error")
+    assert _flashed(board, "claude_newborn")
+
+
+def test_the_cue_clears_so_the_next_one_can_fire(board):
+    """Removed on a timer, not on animationend: with reduced motion that
+    event never arrives, and the class staying on would eat the next alert."""
+    open_console(board, "claude_alpha")
+    board.ctb_set_state("claude_gamma", "waiting")
+    assert _flashed(board, "claude_gamma")
+    board.wait_for_timeout(1400)
+    assert not _flashed(board, "claude_gamma")
+    board.ctb_set_state("claude_gamma", "error")
+    assert _flashed(board, "claude_gamma")
+
+
+def test_the_palette_flashes_the_same_transition(board):
+    open_console(board, "claude_alpha")
+    open_palette(board)
+    board.ctb_set_state("claude_gamma", "stuck_after_agent")
+    assert board.eval_on_selector(
+        '[data-search-session="claude_gamma"]',
+        "r => r.classList.contains('ctb-notice')")
+
+
+def test_the_cue_does_not_paint_over_the_selection(board):
+    """The palette marks where you are with the row background; a cue that
+    used the background would hide it."""
+    open_console(board, "claude_alpha")
+    open_palette(board)
+    before = board.eval_on_selector(
+        "[aria-selected='true']", "r => getComputedStyle(r).backgroundColor")
+    sel = board.eval_on_selector(
+        "[aria-selected='true']", "r => r.dataset.searchSession")
+    board.ctb_set_state(sel, "waiting")
+    after = board.eval_on_selector(
+        "[aria-selected='true']", "r => getComputedStyle(r).backgroundColor")
+    assert after == before
+
+
 def test_the_palette_follows_a_state_change_while_it_is_open(board):
     open_console(board)
     open_palette(board)

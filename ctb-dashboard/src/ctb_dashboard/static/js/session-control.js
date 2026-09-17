@@ -313,6 +313,17 @@
        * session going from 유휴 to 응답없음 widens its chip and slides every
        * chip after it sideways, which under a finger already on its way
        * down means pressing the wrong session. */
+      /* The one-shot cue. The breathing dot says a session is alive; this
+       * says it just became something you have to do something about -- the
+       * gap the steady signals leave, which is that you have to be looking
+       * to notice a change. An inset ring rather than a background wash: the
+       * palette paints its selection with the background, and a cue that
+       * fights the selection is a cue that hides where you are. */
+      '@keyframes ctb-notice{0%{box-shadow:inset 0 0 0 2px var(--ctb-notice)}'
+        + '70%{box-shadow:inset 0 0 0 2px var(--ctb-notice)}'
+        + '100%{box-shadow:inset 0 0 0 2px transparent}}',
+      '.ctb-notice{animation:ctb-notice 1.2s ease-out}',
+      '@media(prefers-reduced-motion:reduce){.ctb-notice{animation:none}}',
       '.ctb-slabel{font-size:10px;font-weight:600;flex-shrink:0;letter-spacing:-.01em;'
         + 'min-width:4em;text-align:right;white-space:nowrap}',
       '#ctb-console .con-chip:active{transform:scale(.97)}',
@@ -1141,6 +1152,54 @@
 
   function stateText(st) { return STATE_TEXT[st] || STATE_TEXT.unknown; }
 
+  /* Transitions worth interrupting for: the ones that end with the session
+   * wanting something from you, plus work finishing. Everything else --
+   * 유휴 → 작업중 most of all, which is just the machine getting on with it --
+   * changes its word and says nothing. With seventy sessions on the rail, a
+   * cue that fires for every change is a rail that is always flickering, and
+   * a flicker that means nothing in particular is one you stop reading. */
+  var STATE_WANTS_YOU = {
+    waiting: true, stuck_after_agent: true, error: true, context_limit: true,
+  };
+
+  function worthNoticing(from, to) {
+    if (STATE_WANTS_YOU[to]) return true;
+    return from === 'working' && to === 'idle';   /* it finished */
+  }
+
+  /* What each session was doing when the surfaces were last painted. Seeded
+   * by the first publication -- which arrives from the board before any
+   * console exists -- so opening the console does not set the whole rail
+   * flashing at states that have been true for an hour. */
+  var lastSeen = {};
+
+  function noticedTransitions() {
+    var flash = {};
+    var live = sessionCatalog();
+    for (var i = 0; i < live.length; i++) {
+      var name = live[i].name, now = live[i].state;
+      var was = lastSeen[name];
+      if (was !== undefined && was !== now && worthNoticing(was, now)) flash[name] = true;
+      lastSeen[name] = now;
+    }
+    return flash;
+  }
+
+  /* Removed on a timer rather than on animationend: with reduced motion, or
+   * anywhere else the animation does not run, that event never arrives and
+   * the class would stay on -- so the NEXT transition would have nothing to
+   * re-trigger. */
+  function flashElement(node, st) {
+    if (!node) return;
+    node.style.setProperty('--ctb-notice', STATE_DOT[st] || 'var(--con-accent)');
+    node.classList.remove('ctb-notice');
+    /* Reading offsetWidth restarts an animation that is already running --
+     * two alerts in a row have to be two flashes, not one that never blinks. */
+    void node.offsetWidth;
+    node.classList.add('ctb-notice');
+    window.setTimeout(function () { node.classList.remove('ctb-notice'); }, 1300);
+  }
+
   function makeDot(st) {
     var dot = document.createElement('span');
     dot.className = 'ctb-sdot';
@@ -1471,8 +1530,12 @@
    * went away. The ORDER is settled when the rail is built and left alone
    * until something else rebuilds it. */
   function syncSurfaces() {
-    syncStrip();
-    syncPalette();
+    /* Worked out once, before either surface is touched: both have to flash
+     * the same sessions, and the reckoning also records what was seen, so it
+     * can only happen once per publication. */
+    var flash = noticedTransitions();
+    syncStrip(flash);
+    syncPalette(flash);
   }
 
   function catalogMap() {
@@ -1482,7 +1545,7 @@
     return map;
   }
 
-  function syncStrip() {
+  function syncStrip(flash) {
     if (!el.strip) return;
     /* A hidden rail is the empty rail, and it must still be able to come
      * back: the last session ending hides it, and the next one starting has
@@ -1519,6 +1582,7 @@
       if (dot) paintDot(dot, item.state);
       if (lab) paintStateLabel(lab, item.state);
       paintChipName(chip, item);
+      if (flash && flash[name]) flashElement(chip, item.state);
     }
     /* A session that appeared gets a chip on the end. Not a rebuild: a
      * rebuild replaces every chip with a new node in the newly sorted order
@@ -2667,7 +2731,7 @@
    * key; sessions that have appeared since are added to the end. A session
    * that ended is marked rather than removed, for the same reason: the row
    * you are pointing at must not vanish as you reach for it. */
-  function syncPalette() {
+  function syncPalette(flash) {
     if (!searchOpen() || !search.catalog) return;
     /* Membership first. Patching rows cannot show a session that has no row,
      * so a palette opened before the board had data sat on "일치하는 세션
@@ -2692,6 +2756,7 @@
       if (lab) paintStateLabel(lab, live.state);
       /* The row keeps the name it was drawn with; only the word changes. */
       paintRowState(row, stateText(live.state));
+      if (flash && flash[name]) flashElement(row, live.state);
     }
   }
 
