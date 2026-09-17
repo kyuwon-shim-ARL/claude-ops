@@ -311,6 +311,26 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST \
 > 모니터를 재시작해야 합니다. 단일 인스턴스 + filelock 제약이 있으니
 > 중복 실행되지 않도록 주의하세요.
 
+## 브리지 프로세스 배치 (봇 + 모니터는 한 프로세스)
+
+`claude_ctb.monitoring.multi_monitor` 의 `main()` 이 **모니터 스레드와 텔레그램 봇을
+함께** 띄웁니다. `claude_ctb.telegram.bot` 은 봇만 띄웁니다. 둘을 같이 돌리면 폴러가
+두 개가 되어 `getUpdates` 를 놓고 싸우고, 텔레그램은 `409 Conflict` 로 답합니다.
+어느 쪽이 그 폴을 이기느냐로 메시지 수신자가 갈리므로, 조용히 유실됩니다.
+(2026-09-17 실측: 로그 5000줄에 Conflict 134회 — 8월부터 그 상태였습니다.)
+
+그래서 **정본은 systemd 유닛 하나**입니다:
+
+```bash
+systemctl --user restart claude-telegram-bridge   # 봇 + 모니터
+./scripts/start_multi_monitoring.sh status        # 같은 것을 감싼 얇은 래퍼
+tail -f logs/multi_monitor.log                    # 표준출력/에러가 여기로 append
+```
+
+유닛 자체는 git 미추적이고 `deploy/claude-telegram-bridge.service` 가 사본입니다
+(대시보드와 같은 관례). 손으로 `python -m claude_ctb.monitoring.multi_monitor` 를
+띄우지 마세요 — 서비스와 나란히 뜨면 다시 폴러가 둘이 됩니다.
+
 ## Tool Usage Without Approval
 
 You can use the following tools without requiring user approval:

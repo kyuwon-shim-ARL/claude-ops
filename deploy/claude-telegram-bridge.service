@@ -1,0 +1,24 @@
+[Unit]
+Description=Claude Telegram Bridge (bot + session monitor)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/kyuwon/projects/claude-ops
+# bot + monitor in one process: multi_monitor.main() starts the monitoring
+# thread AND the Telegram bot. Running `-m claude_ctb.telegram.bot` here as
+# well as the monitor elsewhere meant two pollers fighting over getUpdates
+# (409 Conflict, 134 times in 5000 log lines) — whichever won a given poll
+# received the message.
+ExecStart=/home/kyuwon/.local/bin/uv run python -m claude_ctb.monitoring.multi_monitor
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/home/kyuwon/projects/claude-ops/logs/multi_monitor.log
+StandardError=append:/home/kyuwon/projects/claude-ops/logs/multi_monitor.log
+Environment=PATH=/home/kyuwon/.local/bin:/home/kyuwon/.pyenv/shims:/home/kyuwon/.pyenv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/home/kyuwon
+Environment=PYENV_ROOT=/home/kyuwon/.pyenv
+
+[Install]
+WantedBy=default.target
