@@ -52,7 +52,6 @@ def _no_live_tmux(monkeypatch):
     launched = []
     monkeypatch.setattr(session_create, "launch_session",
                         lambda s, p: launched.append((s, str(p))))
-    monkeypatch.setattr(session_create, "schedule_remote_control", lambda s: None)
     monkeypatch.setattr(session_create, "_live_sessions", lambda: set())
     return launched
 

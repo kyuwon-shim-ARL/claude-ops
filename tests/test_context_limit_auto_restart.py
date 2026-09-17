@@ -19,11 +19,9 @@ from claude_ctb.utils.session_state import SessionState
 
 
 @pytest.fixture
-def monitor(tmp_path):
+def monitor():
     """Create a MultiSessionMonitor with mocked config."""
-    with patch('claude_ctb.monitoring.multi_monitor.ClaudeOpsConfig') as MockConfig, \
-         patch('claude_ctb.utils.remote_control._TELEMETRY_FILE',
-               str(tmp_path / "telemetry.json")):
+    with patch('claude_ctb.monitoring.multi_monitor.ClaudeOpsConfig') as MockConfig:
         cfg = MockConfig.return_value
         cfg.telegram_bot_token = "test_token"
         cfg.telegram_chat_id = "test_chat"
@@ -385,15 +383,13 @@ class TestAutoRestartConfig:
 class TestFullRestartFlow:
     """Integration test for the complete restart sequence."""
 
-    @patch.dict('os.environ', {'CTB_AUTO_REMOTE_CONTROL': '1'})
     @patch('claude_ctb.monitoring.multi_monitor.subprocess.run')
     @patch('claude_ctb.monitoring.multi_monitor.time.sleep')
     def test_full_restart_step_order(self, mock_sleep, mock_run, monitor):
         """Verify the full restart sends commands in correct order.
 
-        /remote-control auto-registration (3 send-keys) is part of the sequence,
-        between starting claude and delivering the handoff. Forced on via env so
-        the assertion is independent of the ambient CTB_AUTO_REMOTE_CONTROL.
+        Remote-control auto-registration was removed, so the sequence goes
+        straight from starting claude to delivering the handoff.
         """
         monitor._build_handoff_prompt = MagicMock(return_value="handoff text")
 
@@ -414,9 +410,6 @@ class TestFullRestartFlow:
             ["Enter"],                                  # Step 1d: execute /exit
             ["clear", "Enter"],                         # Step 3: clear screen
             ["claude --dangerously-skip-permissions", "Enter"],  # Step 4: start new claude
-            ["/remote-control"],                        # Step 4b: register remote control
-            ["Escape"],                                 # Step 4c: dismiss autocomplete
-            ["Enter"],                                  # Step 4d: execute /remote-control
             ["handoff text"],                           # Step 5a: send handoff text
             ["Enter"],                                  # Step 5b: execute handoff (separate for reliability)
         ]
@@ -446,15 +439,10 @@ class TestFullRestartFlow:
                         assert len(a) <= 4000, f"Handoff not truncated: {len(a)} chars"
                         assert "잘렸습니다" in a
 
-    @patch.dict('os.environ', {'CTB_AUTO_REMOTE_CONTROL': '1'})
     @patch('claude_ctb.monitoring.multi_monitor.subprocess.run')
     @patch('claude_ctb.monitoring.multi_monitor.time.sleep')
     def test_empty_handoff_skips_send(self, mock_sleep, mock_run, monitor):
-        """Empty handoff prompt should not trigger the handoff send-keys.
-
-        Still registers /remote-control (3 send-keys). Forced on via env so the
-        count is independent of the ambient CTB_AUTO_REMOTE_CONTROL.
-        """
+        """Empty handoff prompt should not trigger the handoff send-keys."""
         monitor._build_handoff_prompt = MagicMock(return_value="")
 
         monitor._auto_restart_session("test_session")
@@ -464,10 +452,9 @@ class TestFullRestartFlow:
             if isinstance(c[0][0], list) and "send-keys" in c[0][0]
         ]
 
-        # No handoff → 9 calls: C-c, /exit, Escape, Enter, clear+Enter,
-        # claude+Enter, then /remote-control, Escape, Enter (registration).
-        assert len(send_keys_calls) == 9, \
-            f"Expected 9 send-keys (no handoff, with /remote-control), got {len(send_keys_calls)}: {send_keys_calls}"
+        # No handoff → 6 calls: C-c, /exit, Escape, Enter, clear+Enter, claude+Enter.
+        assert len(send_keys_calls) == 6, \
+            f"Expected 6 send-keys (no handoff), got {len(send_keys_calls)}: {send_keys_calls}"
 
 
 class TestContextLimitBypassesNotificationSent:

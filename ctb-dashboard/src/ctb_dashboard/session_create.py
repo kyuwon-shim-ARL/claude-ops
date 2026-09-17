@@ -378,26 +378,6 @@ def _shquote(s: str) -> str:
     return shlex.quote(s)
 
 
-def schedule_remote_control(session: str) -> None:
-    """Register /remote-control once the TUI is up, as ``cs`` does on launch.
-
-    Best effort by design: the session is already usable without it, so an
-    unavailable helper must not turn a successful create into a failure.
-    """
-    try:
-        import sys
-        ctb_home = os.environ.get("CTB_HOME", "/home/kyuwon/projects/claude-ops")
-        if ctb_home not in sys.path:
-            sys.path.insert(0, ctb_home)
-        from claude_ctb.utils.remote_control import send_remote_control_bg
-    except Exception as e:
-        logger.info("remote-control helper unavailable (%s); skipping for %s", e, session)
-        return
-    try:
-        send_remote_control_bg(session)
-    except Exception as e:
-        logger.warning("remote-control scheduling failed for %s: %s", session, e)
-
 
 def create_session(
     project: Optional[str] = None,
@@ -461,5 +441,4 @@ def create_session(
             result["status"] = "exists"
             return result
         raise
-    schedule_remote_control(session)
     return result
