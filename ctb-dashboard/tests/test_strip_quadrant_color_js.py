@@ -34,6 +34,8 @@ El.prototype.appendChild = function (c) {{ this.children.push(c); return c; }};
 El.prototype.addEventListener = function () {{}};
 El.prototype.removeEventListener = function () {{}};
 El.prototype.getAttribute = function (k) {{ return this.attrs[k]; }};
+El.prototype.removeAttribute = function (k) {{ delete this.attrs[k]; }};
+El.prototype.hasAttribute = function (k) {{ return this.attrs[k] !== undefined; }};
 El.prototype.querySelector = function () {{ return null; }};
 El.prototype.querySelectorAll = function () {{ return []; }};
 El.prototype.closest = function () {{ return null; }};

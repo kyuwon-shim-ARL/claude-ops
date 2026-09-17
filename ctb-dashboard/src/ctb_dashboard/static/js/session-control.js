@@ -298,6 +298,23 @@
       '@keyframes con-flash{0%{background:rgba(16,185,129,0.35)}100%{background:transparent}}',
       '#ctb-console .con-flash{animation:con-flash 1.2s ease-out}',
       '@media(prefers-reduced-motion:reduce){#ctb-console .con-flash{animation:none}}',
+      /* State, told the same way on both surfaces -- the rail at the top of
+       * the console and the search palette over it. The board says a session
+       * is alive by breathing its dot; these do the same, and both say it in
+       * words beside the dot, because colour alone is not a state anyone can
+       * read out loud. The dot is decoration to a screen reader: the words
+       * are in the row's accessible name. */
+      '@keyframes ctb-breathe{0%,100%{transform:scale(1);opacity:.55}50%{transform:scale(1.35);opacity:1}}',
+      '.ctb-sdot{width:7px;height:7px;border-radius:50%;flex-shrink:0;background:#6b7280}',
+      '.ctb-sdot[data-live]{animation:ctb-breathe 2.8s cubic-bezier(.45,0,.55,1) infinite}',
+      '@media(prefers-reduced-motion:reduce){.ctb-sdot[data-live]{animation:none}}',
+      /* A lane of its own, wide enough for the longest word (응답없음,
+       * 입력대기, 상태미상 -- four characters). Without the reserved width a
+       * session going from 유휴 to 응답없음 widens its chip and slides every
+       * chip after it sideways, which under a finger already on its way
+       * down means pressing the wrong session. */
+      '.ctb-slabel{font-size:10px;font-weight:600;flex-shrink:0;letter-spacing:-.01em;'
+        + 'min-width:4em;text-align:right;white-space:nowrap}',
       '#ctb-console .con-chip:active{transform:scale(.97)}',
       '#ctb-console .con-chip:focus-visible{outline:2px solid var(--con-accent);outline-offset:1px}',
       '#ctb-console .con-well{border:0;border-radius:16px;box-shadow:var(--con-well-edge)}',
@@ -1103,15 +1120,81 @@
 
   var STATE_DOT = {
     working: '#34d399', stuck_after_agent: '#f97316', waiting: '#fbbf24',
-    error: '#ef4444', context_limit: '#a78bfa', idle: '#6b7280',
+    error: '#ef4444', context_limit: '#f43f5e', idle: '#6b7280',
   };
+
+  /* The word for each state. "대기" was doing double duty for idle and for
+   * waiting-on-you, which are opposite things to do next, so they are named
+   * apart here: 입력대기 is waiting for you, 유휴 is waiting for nothing. */
+  var STATE_TEXT = {
+    working: '작업중', stuck_after_agent: '응답없음', waiting: '입력대기',
+    error: '오류', context_limit: '한도', idle: '유휴', unknown: '상태미상',
+  };
+
+  /* Which states are a session doing something, or wanting something. Those
+   * breathe; the settled ones sit still, so motion on the rail means
+   * "something is going on here" rather than "there is a list here". */
+  var STATE_LIVE = {
+    working: true, waiting: true, stuck_after_agent: true,
+    error: true, context_limit: true,
+  };
+
+  function stateText(st) { return STATE_TEXT[st] || STATE_TEXT.unknown; }
+
+  function makeDot(st) {
+    var dot = document.createElement('span');
+    dot.className = 'ctb-sdot';
+    /* Decoration: the same fact is in the row's text and its accessible
+     * name, and a screen reader reading "bullet" adds nothing. */
+    dot.setAttribute('aria-hidden', 'true');
+    paintDot(dot, st);
+    return dot;
+  }
+
+  function paintDot(dot, st) {
+    dot.style.background = STATE_DOT[st] || '#6b7280';
+    if (STATE_LIVE[st]) dot.setAttribute('data-live', '');
+    else dot.removeAttribute('data-live');
+  }
+
+  function makeStateLabel(st) {
+    var lab = document.createElement('span');
+    lab.className = 'ctb-slabel';
+    lab.setAttribute('aria-hidden', 'true');
+    paintStateLabel(lab, st);
+    return lab;
+  }
+
+  /* The word is text, and text has to be readable: the dot's colours are
+   * picked to glow against a dark pane and measure about 1.5:1 against the
+   * light one, which is unreadable at 10px -- and painting the word in the
+   * state's colour would have made it a second colour channel anyway. The
+   * colour is the dot's job. The word's job is to be read, so it takes the
+   * theme's own foreground: full strength when something is going on, dimmed
+   * when nothing is. */
+  function paintStateLabel(lab, st) {
+    lab.textContent = stateText(st);
+    /* Both of these are foreground colours the theme picks to be read at
+     * small sizes. The quiet one is --con-muted, not --con-dim: dim is the
+     * placeholder grey, which measures 3.8:1 on the light sheet and 2.1:1 on
+     * a selected row -- a word nobody can read is not a state signal, it is
+     * decoration with a font. */
+    lab.style.color = STATE_LIVE[st] ? 'var(--con-text)' : 'var(--con-muted)';
+    lab.style.opacity = '1';
+  }
 
   /* The dashboard publishes the order it renders; without it (a console opened
    * before the first paint, or from a deep link) fall back to the raw snapshot,
    * which is at least a list of live sessions. */
   function sessionOrder() {
     var list = window.ctbSessionOrder;
-    if (Array.isArray(list) && list.length) return list;
+    /* Same rule as sessionCatalog: published-and-empty means there is
+     * nothing, and only nothing-published falls back to the snapshot this
+     * console fetched for itself. They have to agree -- with the catalogue
+     * saying "no sessions" and the order still naming yesterday's, the rail
+     * removed its dead chips and then immediately rebuilt them from the
+     * stale list, one repaint later. */
+    if (Array.isArray(list)) return list;
     return state.order || [];
   }
 
@@ -1122,9 +1205,19 @@
    * that lies about what exists. */
   function sessionCatalog() {
     var all = window.ctbSessionAll;
-    if (Array.isArray(all) && all.length) return all;
+    /* An empty array is an answer -- the board has data and there are no
+     * sessions. Treating it as "no answer yet" and falling back to the last
+     * order left the palette offering sessions that had all ended, and Enter
+     * on one of those opened a console onto nothing. Only a missing array
+     * (nothing published yet) falls back. */
+    if (Array.isArray(all)) return all;
     return sessionOrder();
   }
+
+  /* The board tells us it has new session data; both surfaces take it from
+   * the globals it has just republished. Kept passive: the console asks for
+   * nothing here and repaints nothing that is not already on screen. */
+  window.addEventListener('ctb:sessions', function () { syncSurfaces(); });
 
   function fetchOrder() {
     if (Array.isArray(window.ctbSessionOrder) && window.ctbSessionOrder.length) return;
@@ -1345,13 +1438,189 @@
     return searchOpen() || sheetOpen() || findOpen();
   }
 
+  /* The name a screen reader reads: who, which branch, and what it is doing.
+   * The chip's visible text can be clipped to an ellipsis and its dot is
+   * hidden from assistive tech, so this is the only place the whole answer
+   * exists. */
+  function paintChipName(chip, item) {
+    var who = item.branch ? item.label + ' 워크트리 ' + item.branch : item.label;
+    chip.setAttribute('data-who', who);
+    paintChipState(chip, stateText(item.state));
+  }
+
+  function paintChipState(chip, word) {
+    chip.setAttribute('aria-label',
+      (chip.getAttribute('data-who') || '') + ', ' + word + ' — 전환');
+  }
+
+  /* --- keeping the two surfaces current ---------------------------------
+   *
+   * The rail used to be drawn when the console opened and then left alone:
+   * it was repainted on a switch, on the number-hint hold, on a quadrant
+   * write and when a session ended, but NOT when the board got new data. A
+   * session could finish, or stall, and its dot would still say 작업중 for as
+   * long as the console stayed open -- the surface meant to tell you what is
+   * going on was the one surface that had stopped asking.
+   *
+   * It is fixed by patching, not by redrawing. A full renderStrip() re-sorts
+   * the rail by state, and a rail that reorders under the hand costs the
+   * thing it is for: the chip you were reaching for moves, the frozen number
+   * shortcuts stop matching, and the scroll position jumps. So a data update
+   * only ever rewrites the dot and the word on the chips that are already
+   * there, adds chips for sessions that appeared, and drops the ones that
+   * went away. The ORDER is settled when the rail is built and left alone
+   * until something else rebuilds it. */
+  function syncSurfaces() {
+    syncStrip();
+    syncPalette();
+  }
+
+  function catalogMap() {
+    var map = {};
+    var all = sessionCatalog();
+    for (var i = 0; i < all.length; i++) map[all[i].name] = all[i];
+    return map;
+  }
+
+  function syncStrip() {
+    if (!el.strip) return;
+    /* A hidden rail is the empty rail, and it must still be able to come
+     * back: the last session ending hides it, and the next one starting has
+     * to be able to put it back on screen. */
+    if (el.strip.style.display === 'none') {
+      if (sessionOrder().length) renderStrip();
+      return;
+    }
+    /* While the accelerator is held the rail is showing a frozen order with
+     * numbers on it; the digits fire on that same snapshot. Adding or
+     * removing chips under the hold would renumber what the badges promise. */
+    if (accelDown) return;
+    var map = catalogMap();
+    var chips = el.strip.querySelectorAll('[data-switch-session]');
+    var seen = {};
+    for (var i = 0; i < chips.length; i++) {
+      var chip = chips[i];
+      var name = chip.getAttribute('data-switch-session');
+      var item = map[name];
+      if (!item) {
+        /* Gone. Keep the one the console is actually showing -- losing it
+         * from the rail is how you end up unable to switch away from a
+         * session whose pane is still on screen -- but say that it ended.
+         * Keeping it AND leaving it saying 작업중 is the worst of both. */
+        if (name === state.session) { seen[name] = true; markChipGone(chip); continue; }
+        chip.parentNode.removeChild(chip);
+        continue;
+      }
+      seen[name] = true;
+      chip.removeAttribute('data-gone');
+      chip.style.opacity = '';
+      var dot = chip.querySelector('.ctb-sdot');
+      var lab = chip.querySelector('.ctb-slabel');
+      if (dot) paintDot(dot, item.state);
+      if (lab) paintStateLabel(lab, item.state);
+      paintChipName(chip, item);
+    }
+    /* A session that appeared gets a chip on the end. Not a rebuild: a
+     * rebuild replaces every chip with a new node in the newly sorted order
+     * and recentres the rail, which between a finger going down and coming
+     * up throws away the chip that was being pressed, and mid-drag fights
+     * the gesture for the scroll position. The end is the one place a chip
+     * can be added without moving anything that is already there; the next
+     * open sorts it in.
+     *
+     * Measured against what the rail is BUILT from (the board's visible
+     * order), not the whole catalogue: the catalogue also holds sessions the
+     * board's age filter is hiding, which were never on the rail. */
+    var railList = sessionOrder();
+    for (var j = 0; j < railList.length; j++) {
+      if (!seen[railList[j].name]) appendChip(railList[j], j);
+    }
+  }
+
+  /* The rail's version of 종료됨. The open session keeps its chip when it
+   * ends, and this is what stops that chip from going on claiming the state
+   * it had at the moment it died. Which of the two signals arrives first --
+   * the board dropping it from the list, or its own pane answering 404 --
+   * decides nothing: both paths end here. */
+  function markChipGone(chip) {
+    chip.setAttribute('data-gone', '');
+    chip.style.opacity = '0.55';
+    var dot = chip.querySelector('.ctb-sdot');
+    var lab = chip.querySelector('.ctb-slabel');
+    if (dot) paintDot(dot, 'idle');
+    if (lab) {
+      lab.textContent = '\uc885\ub8cc\ub428';
+      lab.style.color = 'var(--con-muted)';
+      lab.style.opacity = '1';
+    }
+    paintChipState(chip, '\uc885\ub8cc\ub428');
+  }
+
+  /* The display name for a session the catalogue no longer carries: the same
+   * trimming the board does, done here because there is nothing left to ask. */
+  function shortLabel(name) {
+    var stripped = String(name).replace(/^claude[_-]/, '');
+    var wt = stripped.indexOf('_wt_');
+    return wt === -1 ? stripped : stripped.slice(0, wt);
+  }
+
+  function makeChip(item, index) {
+    var chip = document.createElement('button');
+    chip.type = 'button';
+    chip.setAttribute('data-switch-session', item.name);
+    if (item.name === state.session) chip.setAttribute('aria-current', 'true');
+    /* Content-sized, not one-third of the sheet: three fixed slots wasted the
+     * row on short names and forced a scroll to reach the fourth session.
+     * Capped so one long name cannot take the whole bar. */
+    chip.className = 'con-chip';
+    var quad = window.ctbQuadOf && window.ctbQuadOf[item.name];
+    if (quad) chip.setAttribute('data-quad', quad);
+    chip.title = quad ? item.name + ' · ' + (QUAD_LABELS[quad] || quad) : item.name;
+
+    var text = document.createElement('span');
+    text.style.cssText = 'min-width:0;white-space:nowrap;overflow:hidden;' +
+      'text-overflow:ellipsis;';
+    text.textContent = item.branch ? item.label + ' ⎇' + item.branch : item.label;
+
+    chip.appendChild(makeDot(item.state));
+    /* While the numbers are frozen the chip carries the number that will
+     * actually fire, not its position in a rail that may have re-sorted
+     * since. Unfrozen, the two are the same thing. */
+    var numbered = accelDown ? slotOfName(item.name) : index;
+    if (numbered > -1 && numbered < HINT_MAX) {
+      var num = document.createElement('b');
+      num.setAttribute('data-numhint', '');
+      num.textContent = String(numbered + 1);
+      num.style.cssText = "font-family:'JetBrains Mono',monospace;" +
+        'font-size:9px;font-weight:700;color:var(--con-warn);flex-shrink:0;' +
+        'padding:0 3px;border-radius:4px;background:rgba(245,158,11,0.16);' +
+        'border:1px solid rgba(245,158,11,0.4);' +
+        'display:' + (accelDown ? 'inline-block' : 'none') + ';';
+      chip.appendChild(num);
+    }
+    chip.appendChild(text);
+    chip.appendChild(makeStateLabel(item.state));
+    paintChipName(chip, item);
+    return chip;
+  }
+
+  function appendChip(item, index) {
+    el.strip.style.display = 'flex';
+    el.strip.appendChild(makeChip(item, index));
+  }
+
   function renderStrip() {
     paintSilentBadge();
     paintQuadBtn();
     if (!el.strip) return;
     var list = sessionOrder();
     el.strip.textContent = '';
-    if (!list.length) {
+    /* Empty is not necessarily empty: the board's age filter can hide every
+     * session while one of them is open on this very screen, and the rail
+     * going dark then takes the only marker of where the user is. The chip
+     * for the open session is added below whatever the list says; the rail
+     * is hidden only if that leaves nothing either. */
+    if (!list.length && !state.session) {
       el.strip.style.display = 'none';
       return;
     }
@@ -1359,49 +1628,40 @@
 
     var current = null;
     list.forEach(function (item, index) {
-      var active = item.name === state.session;
-      var chip = document.createElement('button');
-      chip.type = 'button';
-      chip.setAttribute('data-switch-session', item.name);
-      chip.setAttribute('aria-label', item.label + ' 세션으로 전환');
-      if (active) chip.setAttribute('aria-current', 'true');
-      /* Content-sized, not one-third of the sheet: three fixed slots wasted the
-       * row on short names and forced a scroll to reach the fourth session.
-       * Capped so one long name cannot take the whole bar. */
-      chip.className = 'con-chip';
-      var quad = window.ctbQuadOf && window.ctbQuadOf[item.name];
-      if (quad) chip.setAttribute('data-quad', quad);
-
-      var dot = document.createElement('span');
-      dot.style.cssText = 'width:7px;height:7px;border-radius:50%;flex-shrink:0;' +
-        'background:' + (STATE_DOT[item.state] || '#6b7280') + ';';
-
-      var text = document.createElement('span');
-      text.style.cssText = 'min-width:0;white-space:nowrap;overflow:hidden;' +
-        'text-overflow:ellipsis;';
-      text.textContent = item.branch ? item.label + ' ⎇' + item.branch : item.label;
-      chip.title = quad ? item.name + ' · ' + (QUAD_LABELS[quad] || quad) : item.name;
-
-      chip.appendChild(dot);
-      /* While the numbers are frozen the chip carries the number that will
-       * actually fire, not its position in a rail that may have re-sorted
-       * since. Unfrozen, the two are the same thing. */
-      var numbered = accelDown ? slotOfName(item.name) : index;
-      if (numbered > -1 && numbered < HINT_MAX) {
-        var num = document.createElement('b');
-        num.setAttribute('data-numhint', '');
-        num.textContent = String(numbered + 1);
-        num.style.cssText = "font-family:'JetBrains Mono',monospace;" +
-          'font-size:9px;font-weight:700;color:var(--con-warn);flex-shrink:0;' +
-          'padding:0 3px;border-radius:4px;background:rgba(245,158,11,0.16);' +
-          'border:1px solid rgba(245,158,11,0.4);' +
-          'display:' + (accelDown ? 'inline-block' : 'none') + ';';
-        chip.appendChild(num);
-      }
-      chip.appendChild(text);
+      var chip = makeChip(item, index);
       el.strip.appendChild(chip);
-      if (active) current = chip;
+      if (item.name === state.session) current = chip;
     });
+
+    /* The open session, when it is not in the list the rail is built from.
+     * sessionGone() rebuilds from that list, so without this the chip for the
+     * pane still on screen vanished -- and which signal landed first (the
+     * board's update, or this session's own 404) decided whether the user
+     * could still see where they were.
+     *
+     * Whether it ENDED is a different question, and the list cannot answer
+     * it: that list is the board's VISIBLE order, which its age filter
+     * shortens. Search reaches sessions the filter is hiding and opens them,
+     * so a perfectly live session arrives here routinely. The catalogue is
+     * what knows, and only the catalogue may write the headstone. */
+    if (state.session && !current) {
+      var live = null;
+      var all = sessionCatalog();
+      for (var k = 0; k < all.length; k++) {
+        if (all[k].name === state.session) { live = all[k]; break; }
+      }
+      var chip = makeChip(live || { name: state.session,
+                                    label: shortLabel(state.session),
+                                    branch: null, state: 'idle' }, -1);
+      if (!live) markChipGone(chip);
+      el.strip.appendChild(chip);
+      current = chip;
+    }
+
+    if (!el.strip.children.length) {
+      el.strip.style.display = 'none';
+      return;
+    }
 
     if (current) {
       /* Keep the open session in view without yanking the page around it. */
@@ -2001,11 +2261,18 @@
        * raw name made 'c', 'cl', 'cla'... match all seventy of them. The
        * prefix carries no information; strip it before searching. */
       var name = String(item.name || '').toLowerCase().replace(/^claude[_-]/, '');
+      /* What the session is working on -- the board's own description of it
+       * and the last prompt it was given. The board's search box read these
+       * too, and it is gone; a search that can only match the name cannot
+       * find "the one where I was fixing the parser" the way that box could.
+       * Scored below the name so a name match always wins the top row. */
+      var work = String(item.hay || '').toLowerCase();
       var score = -1;
       if (label.indexOf(q) === 0) score = 0;
       else if (label.indexOf(q) !== -1) score = 1;
       else if (branch.indexOf(q) !== -1 || name.indexOf(q) !== -1) score = 2;
       else if (isSubsequence(q, label + ' ' + branch)) score = 3;
+      else if (work.indexOf(q) !== -1) score = 4;
       if (score !== -1) scored.push({ item: item, score: score, index: index });
     });
     scored.sort(function (a, b) {
@@ -2022,7 +2289,21 @@
     return i === needle.length;
   }
 
-  var search = { root: null, input: null, list: null, hits: [], cursor: 0 };
+  /* `catalog` is a snapshot taken when the palette opens, and `sel` is a
+   * session NAME rather than a row index.
+   *
+   * Both exist for the same reason. The list used to be rebuilt from the
+   * live catalogue on every keystroke AND every arrow press, with the
+   * selection kept as a number. The catalogue is sorted by pin, then state,
+   * then recency -- so a session changing state re-sorts it -- and the
+   * number pointed at whatever had landed in that slot by the time Enter was
+   * pressed. Arrow down, a session finishes, press Enter, open a session you
+   * were not looking at. Freezing membership and order for the few seconds
+   * the palette is up, and naming the selection, removes the race; states
+   * are still kept current in place (see syncPalette). */
+  var search = { root: null, input: null, list: null, note: null, hits: [],
+                 cursor: 0, catalog: null, sel: null, opener: null,
+                 openerEl: null };
 
   function searchOpen() {
     return !!(search.root && search.root.style.display !== 'none');
@@ -2030,6 +2311,12 @@
 
   function buildSearch() {
     if (search.root) return;
+    /* The dots and the state words are styled by the console's stylesheet,
+     * which used to be installed only when a console was built. Opened from
+     * the board before any console existed, the palette's dots were empty
+     * spans with no size at all -- the state signal simply was not there on
+     * first use, which is the one use a new surface gets judged on. */
+    injectStyle();
 
     var root = document.createElement('div');
     root.setAttribute('role', 'dialog');
@@ -2057,6 +2344,13 @@
     var input = document.createElement('input');
     input.type = 'text';
     input.setAttribute('aria-label', '\uc138\uc158 \uc774\ub984 \uac80\uc0c9');
+    /* The highlight moves with the arrow keys but focus never leaves this
+     * box, so without the combobox relationship there is nothing to announce
+     * -- the selected row exists only as a colour. */
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-expanded', 'true');
+    input.setAttribute('aria-autocomplete', 'list');
+    input.setAttribute('aria-controls', 'ctb-search-list');
     input.placeholder = '\uc138\uc158 \uac80\uc0c9 (\u2191\u2193 \uc120\ud0dd \u00b7 Enter \uc774\ub3d9 \u00b7 Esc \ub2eb\uae30)';
     input.style.cssText = [
       'width:100%', 'box-sizing:border-box', 'padding:12px 14px',
@@ -2065,10 +2359,13 @@
       /* 16px keeps iOS from zooming the page in on focus. */
       'font-size:16px', "font-family:'JetBrains Mono',monospace",
     ].join(';');
-    input.addEventListener('input', function () { renderResults(); });
+    input.addEventListener('input', function () { searchNote(''); renderResults(); });
     input.addEventListener('keydown', onSearchKey);
 
     var list = document.createElement('div');
+    list.id = 'ctb-search-list';
+    list.setAttribute('role', 'listbox');
+    list.setAttribute('aria-label', '\uac80\uc0c9 \uacb0\uacfc');
     list.style.cssText =
       'overflow-y:auto;overscroll-behavior:contain;' +
       'max-height:min(52vh,420px);-webkit-overflow-scrolling:touch;';
@@ -2077,8 +2374,22 @@
       if (row) pick(row.getAttribute('data-search-session'));
     });
 
+    /* The palette's own voice. It used to borrow the console's status line,
+     * which does not exist until a console has been built and is off screen
+     * once one is closed -- so opened from the board, a refusal was silent.
+     * A live region, because the thing it has to say arrives without the
+     * user having moved. */
+    var note = document.createElement('div');
+    note.setAttribute('role', 'status');
+    note.setAttribute('aria-live', 'polite');
+    note.style.cssText =
+      'display:none;padding:8px 14px;font-size:11px;font-weight:600;' +
+      'color:var(--con-err);border-top:1px solid var(--con-line);';
+
     box.appendChild(input);
     box.appendChild(list);
+    box.appendChild(note);
+    search.note = note;
     root.appendChild(box);
     document.body.appendChild(root);
     search.root = root;
@@ -2092,6 +2403,21 @@
      * Enter as "send the draft" rather than "choose this quadrant". */
     closeQuadMenu();
     buildSearch();
+    /* Where the caret was when this opened, so closing can give it back.
+     * Opened from the board there is no prompt box to fall to, and focus
+     * landed on <body> -- from where the board's own keys do nothing. */
+    /* Not the node: the board rebuilds its grid on every update, so the card
+     * that opened this is very often detached by the time it closes, and
+     * focus() on a detached node silently does nothing -- leaving the board's
+     * arrow keys and Enter dead with no visible reason. Remember WHICH
+     * session it was and find it again. */
+    var from = document.activeElement;
+    search.opener = (from && from.getAttribute
+                     && from.getAttribute('data-session-name')) || null;
+    search.openerEl = from;
+    search.catalog = sessionCatalog().slice();
+    search.sel = null;
+    searchNote('');
     search.root.style.display = 'flex';
     search.input.value = '';
     search.cursor = 0;
@@ -2099,22 +2425,135 @@
     search.input.focus();
   }
 
+  function searchNote(text) {
+    if (!search.note) return;
+    search.note.textContent = text || '';
+    search.note.style.display = text ? 'block' : 'none';
+  }
+
   function closeSearch() {
     if (!search.root) return;
     search.root.style.display = 'none';
+    search.catalog = null;
     /* Give the caret back to the box the user was typing in -- unless the
      * find bar is up, where the caret belongs to the query. */
     if (findOpen()) { fnd.input.focus(); return; }
-    if (el.input && state.session) el.input.focus();
+    if (el.input && state.session) { el.input.focus(); return; }
+    var name = search.opener;
+    var node = search.openerEl;
+    search.opener = null;
+    search.openerEl = null;
+    /* focus() on a node that is not displayed is a no-op that reports
+     * nothing, and the board hides cards its age filter has aged out -- so
+     * "did it land" has to be asked, not assumed. Otherwise Escape leaves the
+     * caret nowhere and the board's arrows and Enter are dead. */
+    if (name) {
+      var card = document.querySelector('[data-session-name="' + name + '"]');
+      if (card && card.focus) { card.focus(); if (document.activeElement === card) return; }
+    }
+    if (node && node !== document.body && document.contains(node) && node.focus) {
+      node.focus();
+      if (document.activeElement === node) return;
+    }
+    /* Nothing to go back to: the button that opens this is always there. */
+    var launcher = document.getElementById('btn-find-session');
+    if (launcher && launcher.focus) launcher.focus();
+  }
+
+  /* What the palette lists, and in what order.
+   *
+   * ORDER comes from the snapshot taken when it opened, so the list cannot
+   * rearrange itself between a keystroke and the Enter that follows it.
+   * MEMBERSHIP is reconciled here, not frozen: a palette opened while the
+   * board was still loading would otherwise say "no sessions" forever, and a
+   * session started while it is up would be permanently unfindable without
+   * closing and reopening. New names go on the end, where they cannot move a
+   * row that is already on screen -- the same rule the rail follows.
+   * STATE is never taken from the snapshot; see stateOf(). A snapshot's idea
+   * of what a session is doing is exactly as old as the snapshot, and typing
+   * one more letter used to bring those stale words back. */
+  function searchSource() {
+    var live = sessionCatalog();
+    if (!search.catalog) return live;
+    var have = {};
+    for (var i = 0; i < search.catalog.length; i++) have[search.catalog[i].name] = true;
+    for (var j = 0; j < live.length; j++) {
+      if (!have[live[j].name]) search.catalog.push(live[j]);
+    }
+    return search.catalog;
+  }
+
+  /* The current state of every session, by name. Built once per render
+   * rather than scanned once per row: seventy sessions and a row-by-row
+   * scan is a square, and this runs on every keystroke in the box. */
+  function liveStates() {
+    var map = {};
+    var live = sessionCatalog();
+    for (var i = 0; i < live.length; i++) map[live[i].name] = live[i].state;
+    return map;
+  }
+
+  function makeRow(item, i, live) {
+    var row = document.createElement('div');
+    row.id = 'ctb-search-opt-' + i;
+    row.setAttribute('data-search-session', item.name);
+    row.setAttribute('role', 'option');
+    row.style.cssText = [
+      'display:flex', 'align-items:center', 'gap:8px',
+      'padding:9px 14px', 'cursor:pointer',
+      "font-family:'JetBrains Mono',monospace", 'font-size:12px',
+    ].join(';');
+
+    var now = live[item.name] || null;
+    row.appendChild(makeDot(now || 'idle'));
+
+    var text = document.createElement('span');
+    text.style.cssText =
+      'flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+    text.textContent = item.branch
+      ? item.label + ' \u2387' + item.branch : item.label;
+    row.appendChild(text);
+
+    if (item.name === state.session) {
+      var here = document.createElement('span');
+      here.textContent = '\ud604\uc7ac';
+      here.setAttribute('aria-hidden', 'true');
+      here.style.cssText =
+        'font-size:10px;color:var(--con-info);flex-shrink:0;';
+      row.appendChild(here);
+    }
+
+    /* The word, last and in a lane of its own, so the eye can run straight
+     * down it: every row says what that session is doing, in the same place,
+     * whatever the name in front of it is. */
+    row.appendChild(makeStateLabel(now || 'idle'));
+
+    paintRowWho(row, item);
+    if (now) paintRowState(row, stateText(now));
+    else markRowGone(row);
+    paintRow(row, false);
+    return row;
   }
 
   function renderResults() {
-    search.hits = matchSessions(sessionCatalog(), search.input.value);
-    if (search.cursor >= search.hits.length) search.cursor = 0;
+    search.hits = matchSessions(searchSource(), search.input.value);
+    /* The selection is a name; the cursor is wherever that name landed after
+     * the query narrowed the list. A selection the query filtered out falls
+     * back to the top, which is what the eye expects while typing. */
+    var idx = -1;
+    if (search.sel) {
+      for (var k = 0; k < search.hits.length; k++) {
+        if (search.hits[k].name === search.sel) { idx = k; break; }
+      }
+    }
+    search.cursor = idx === -1 ? 0 : idx;
+    search.sel = search.hits.length ? search.hits[search.cursor].name : null;
     search.list.textContent = '';
 
     if (!search.hits.length) {
+      search.input.removeAttribute('aria-activedescendant');
       var empty = document.createElement('div');
+      empty.setAttribute('data-search-empty', '');
       empty.textContent = '\uc77c\uce58\ud558\ub294 \uc138\uc158 \uc5c6\uc74c';
       empty.style.cssText =
         'padding:14px;color:var(--con-dim);font-size:12px;text-align:center;';
@@ -2122,57 +2561,152 @@
       return;
     }
 
+    var live = liveStates();
     search.hits.forEach(function (item, i) {
-      var active = i === search.cursor;
-      var row = document.createElement('div');
-      row.setAttribute('data-search-session', item.name);
-      row.setAttribute('role', 'option');
-      if (active) row.setAttribute('aria-selected', 'true');
-      row.style.cssText = [
-        'display:flex', 'align-items:center', 'gap:8px',
-        'padding:9px 14px', 'cursor:pointer',
-        "font-family:'JetBrains Mono',monospace", 'font-size:12px',
-        'color:' + (active ? 'var(--con-text)' : 'var(--con-muted)'),
-        'background:' + (active ? 'var(--con-active)' : 'transparent'),
-      ].join(';');
-
-      var dot = document.createElement('span');
-      dot.style.cssText = 'width:7px;height:7px;border-radius:50%;flex-shrink:0;' +
-        'background:' + (STATE_DOT[item.state] || '#6b7280') + ';';
-
-      var text = document.createElement('span');
-      text.style.cssText =
-        'flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-      text.textContent = item.branch
-        ? item.label + ' \u2387' + item.branch : item.label;
-
-      row.appendChild(dot);
-      row.appendChild(text);
-      if (item.name === state.session) {
-        var here = document.createElement('span');
-        here.textContent = '\ud604\uc7ac';
-        here.style.cssText =
-          'font-size:10px;color:var(--con-info);flex-shrink:0;';
-        row.appendChild(here);
-      }
+      var row = makeRow(item, i, live);
+      paintRow(row, i === search.cursor);
       search.list.appendChild(row);
-      if (active && row.scrollIntoView) {
-        row.scrollIntoView({ block: 'nearest' });
-      }
     });
+    scrollSelectionIntoView();
+  }
+
+  /* Who the row is, kept on the row itself. The state part is rewritten
+   * whenever the session changes, and reassembling the name by cutting the
+   * old label at a comma loses whatever else was in it. */
+  function paintRowWho(row, item) {
+    var who = item.branch ? item.label + ' \uc6cc\ud06c\ud2b8\ub9ac ' + item.branch : item.label;
+    if (item.name === state.session) who += ', \ud604\uc7ac \uc5f4\ub9b0 \uc138\uc158';
+    row.setAttribute('data-who', who);
+  }
+
+  /* A session that has ended is dimmed and named, not deleted: the row you
+   * are pointing at must not vanish as you reach for it, and a list that
+   * shortens under the cursor moves every choice below it. */
+  function markRowGone(row) {
+    row.setAttribute('data-gone', '');
+    row.style.opacity = '0.45';
+    var dot = row.querySelector('.ctb-sdot');
+    var lab = row.querySelector('.ctb-slabel');
+    if (dot) paintDot(dot, 'idle');
+    if (lab) {
+      lab.textContent = '\uc885\ub8cc\ub428';
+      lab.style.color = 'var(--con-dim)';
+      lab.style.opacity = '1';
+    }
+    paintRowState(row, '\uc885\ub8cc\ub428');
+  }
+
+  function paintRowState(row, word) {
+    row.setAttribute('aria-label', (row.getAttribute('data-who') || '') + ', ' + word);
+  }
+
+  function paintRow(row, active) {
+    row.style.color = active ? 'var(--con-text)' : 'var(--con-muted)';
+    row.style.background = active ? 'var(--con-active)' : 'transparent';
+    if (active) row.setAttribute('aria-selected', 'true');
+    else row.setAttribute('aria-selected', 'false');
+  }
+
+  /* Moving the highlight repaints two rows. It does NOT rebuild the list:
+   * rebuilding restarts every row's animation, throws away the node under a
+   * finger mid-tap, and used to re-read a catalogue that could have re-sorted
+   * since the palette opened. */
+  function moveSelection(step) {
+    if (!search.hits.length) return;
+    var rows = search.list.querySelectorAll('[data-search-session]');
+    var from = search.cursor;
+    search.cursor = (search.cursor + step + search.hits.length) % search.hits.length;
+    search.sel = search.hits[search.cursor].name;
+    if (rows[from]) paintRow(rows[from], false);
+    if (rows[search.cursor]) paintRow(rows[search.cursor], true);
+    scrollSelectionIntoView();
+  }
+
+  function scrollSelectionIntoView() {
+    var row = search.list.querySelector('#ctb-search-opt-' + search.cursor);
+    if (!row) return;
+    search.input.setAttribute('aria-activedescendant', row.id);
+    if (row.scrollIntoView) row.scrollIntoView({ block: 'nearest' });
+  }
+
+  /* Sessions that have appeared since the list was drawn, added to the end
+   * of it. Not a redraw: replacing every row while the palette is up throws
+   * away the row under a finger mid-tap and scrolls back to the keyboard
+   * selection, and a newcomer that does not even match what is typed would
+   * have done both for nothing. Late arrivals land at the bottom rather than
+   * in the place a fresh search would have put them -- the list stays where
+   * the eye left it, which is worth more here than perfect ranking. */
+  function appendNewRows() {
+    var rendered = {};
+    for (var i = 0; i < search.hits.length; i++) rendered[search.hits[i].name] = true;
+    var src = searchSource();
+    var q = search.input.value;
+    var live = liveStates();
+    for (var j = 0; j < src.length; j++) {
+      var item = src[j];
+      if (rendered[item.name]) continue;
+      if (!matchSessions([item], q).length) continue;
+      search.list.appendChild(makeRow(item, search.hits.length, live));
+      search.hits.push(item);
+    }
+    if (!search.hits.length) return;
+    /* The empty-state line is not a row, and it has to go once there is one. */
+    var empty = search.list.querySelector('[data-search-empty]');
+    if (empty) {
+      empty.parentNode.removeChild(empty);
+      search.sel = search.hits[0].name;
+      search.cursor = 0;
+      paintRow(search.list.querySelector('[data-search-session]'), true);
+      scrollSelectionIntoView();
+    }
+  }
+
+  /* New data while the palette is up. Existing rows keep their places and
+   * their identities -- only the dot, the word and the accessible name
+   * change -- so a search cannot re-sort itself out from under the Enter
+   * key; sessions that have appeared since are added to the end. A session
+   * that ended is marked rather than removed, for the same reason: the row
+   * you are pointing at must not vanish as you reach for it. */
+  function syncPalette() {
+    if (!searchOpen() || !search.catalog) return;
+    /* Membership first. Patching rows cannot show a session that has no row,
+     * so a palette opened before the board had data sat on "일치하는 세션
+     * 없음" until the user typed another letter -- the arrival of the very
+     * thing it was waiting for changed nothing on screen. searchSource()
+     * folds new names onto the end of the frozen order; if it grew, the list
+     * is redrawn, which keeps every existing row where it was and keeps the
+     * selection, because the selection is a name. */
+    appendNewRows();
+    var map = catalogMap();
+    var rows = search.list.querySelectorAll('[data-search-session]');
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      var name = row.getAttribute('data-search-session');
+      var live = map[name];
+      var dot = row.querySelector('.ctb-sdot');
+      var lab = row.querySelector('.ctb-slabel');
+      if (!live) { markRowGone(row); continue; }
+      row.removeAttribute('data-gone');
+      row.style.opacity = '';
+      if (dot) paintDot(dot, live.state);
+      if (lab) paintStateLabel(lab, live.state);
+      /* The row keeps the name it was drawn with; only the word changes. */
+      paintRowState(row, stateText(live.state));
+    }
   }
 
   function onSearchKey(e) {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
-      if (!search.hits.length) return;
-      var step = e.key === 'ArrowDown' ? 1 : -1;
-      search.cursor =
-        (search.cursor + step + search.hits.length) % search.hits.length;
-      renderResults();
+      moveSelection(e.key === 'ArrowDown' ? 1 : -1);
       return;
     }
     if (e.key === 'Enter') {
+      /* Mid-Hangul the Enter belongs to the IME: it is confirming the
+       * syllable being typed, not choosing a session. Taking it here opened
+       * whatever was highlighted while the user was still writing the query
+       * -- the same guard the console's other key handlers already carry. */
+      if (e.isComposing || e.keyCode === 229) return;
       e.preventDefault();
       var hit = search.hits[search.cursor];
       if (hit) pick(hit.name);
@@ -2195,18 +2729,40 @@
   }
 
   function pick(name) {
+    /* The list is a snapshot; a session in it can have ended since it was
+     * taken. Opening one is a console that sits on a pane which will never
+     * answer, so say so and stay put -- with the list repainted, the row now
+     * reads 종료됨 and the next choice is an informed one. */
+    if (name && !inCatalog(name)) {
+      syncPalette();
+      searchNote('\uadf8 \uc138\uc158\uc740 \uc885\ub8cc\ub418\uc5c8\uc2b5\ub2c8\ub2e4');
+      /* A click lands on a row, which is not focusable, so focus fell to the
+       * dialog and the arrows, the typing and Escape all stopped working --
+       * on a board with no console there is no other Escape handler to get
+       * out with either. Refusing has to hand the keyboard back. */
+      if (search.input) search.input.focus();
+      return;
+    }
     closeSearch();
-    if (name && name !== state.session) show(name, true);
+    if (!name || name === state.session) return;
+    /* Picked from the board in the VSCode webview: bring that session's
+     * terminal up instead of opening a console that is read-only there --
+     * the same rule the digit shortcuts and the rail walk follow. */
+    if (!state.session && IS_VSCODE && window.ctbFocusSession
+        && window.ctbFocusSession(name)) return;
+    show(name, true);
   }
 
   document.addEventListener('keydown', function (e) {
-    /* Only over an open console: on the grid, Ctrl+F stays the browser's find,
-     * which is what searches the card labels there. */
+    /* The board has no search box of its own: the one search is this palette,
+     * which answers "which session" and hands you its console with the caret
+     * already in the prompt -- the same move as finding a session in the
+     * terminal. The board's own F/Ctrl+F comes through here too. */
     /* Not keysTaken(): this handler deliberately claims the chord while its
      * own palette is up (see below), and standing down for searchOpen() here
      * handed the second press to the browser's find bar. Only the sheet in
      * front of everything makes it let go. */
-    if (!state.session || sheetOpen()) return;
+    if (sheetOpen()) return;
     if (e.key !== 'f' && e.key !== 'F') return;
     if (!(IS_MAC ? e.metaKey : e.ctrlKey) || e.shiftKey || e.altKey) return;
     /* Claimed before the already-open check: letting the second press through
@@ -4650,6 +5206,14 @@
   window.ctbConsole = {
     open: show,
     close: hide,
+    /* The board's F / Ctrl+F: the palette is the board's search too. */
+    openPalette: function () {
+      if (searchOpen()) { search.input.focus(); search.input.select(); return; }
+      hideHints();
+      fetchOrder();
+      openSearch();
+    },
+    paletteOpen: searchOpen,
     /* The dashboard's own shortcuts sit behind this sheet; they ask. */
     isOpen: function () { return !!state.session; },
     /* exposed for tests / debugging */

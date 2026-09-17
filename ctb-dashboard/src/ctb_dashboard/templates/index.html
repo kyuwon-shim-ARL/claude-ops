@@ -290,9 +290,7 @@
 
   <div id="filter-bar" class="px-5 pt-3 flex flex-wrap items-center gap-2">
     <button id="btn-new-session" class="hover:bg-white/10 text-xs px-2.5 py-0.5 rounded-full transition-colors cursor-pointer flex-shrink-0" style="background: rgba(129,140,248,0.18); border: 1px solid rgba(129,140,248,0.45);" title="새 세션 시작 (N / Ctrl+N) — 프로젝트 / 워크트리 선택">+ 새 세션</button>
-    <input id="filter-search" type="text" placeholder="🔎 세션 검색  (F / Ctrl+F)" autocomplete="off"
-           class="font-mono"
-           style="flex:1;min-width:180px;max-width:340px;font-size:16px;padding:6px 12px;border-radius:10px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:inherit;outline:none;">
+    <button id="btn-find-session" class="hover:bg-white/10 text-xs px-2.5 py-0.5 rounded-full transition-colors cursor-pointer flex-shrink-0" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);" title="세션 검색 (F / Ctrl+F) — 고르면 그 세션 콘솔이 열립니다">🔎 세션 검색</button>
     <div id="filter-age" class="flex items-center gap-1"></div>
     <span id="filter-count" class="text-xs" style="color:#8b85a0;"></span>
   </div>
@@ -1187,7 +1185,6 @@
       { id: '30d', label: '한 달', secs: 30 * 86400 },
     ];
     const DEFAULT_ENABLED = ['1h', '3h', '1d', '3d', '7d', '30d'];
-    let _filterSearch = '';
     let _filterAge = localStorage.getItem(FILTER_AGE_KEY) || 'all';
     // 'within' = 기준 시점 이후(최근), 'older' = 기준 시점 이전(오래된 세션 — 정리용)
     let _filterDir = localStorage.getItem(FILTER_DIR_KEY) || 'within';
@@ -1231,20 +1228,20 @@
         state: s.state,
         label: p.display,
         branch: p.isWorktree ? p.branch : null,
+        /* What it is working on. The board's search box matched this as well
+         * as the name, and that box is gone -- without carrying it over, the
+         * palette that replaced it could no longer find a session by what is
+         * happening in it, only by what it is called. */
+        hay: `${s.work_context || ''} ${s.last_prompt || ''}`.trim(),
       };
     }
 
     // Filters apply to ALL sessions including pinned — so stale pinned sessions
     // can be surfaced/hidden and cleaned up too.
     function applyFilters(sessions, pinned) {
-      const q = _filterSearch.trim().toLowerCase();
       const maxAge = _ageOption().secs;
       const now = Date.now() / 1000;
       return sessions.filter(s => {
-        if (q) {
-          const hay = (s.name + ' ' + (s.work_context || '') + ' ' + (s.last_prompt || '')).toLowerCase();
-          if (!hay.includes(q)) return false;
-        }
         if (maxAge > 0) {
           const ts = s.last_activity || s.updated_at || 0;
           if (ts > 0) {
@@ -1284,7 +1281,7 @@
       const visible = applyFilters(sessions, pinned).sort(_bySessionOrder(pinned));
       const shown = new Set(visible.map(s => s.name));
 
-      const filterActive = _filterSearch.trim() !== '' || _filterAge !== 'all';
+      const filterActive = _filterAge !== 'all';
       const filterCountEl = document.getElementById('filter-count');
       if (filterCountEl) {
         filterCountEl.textContent = filterActive ? `${visible.length} / ${sessions.length} 표시` : '';
@@ -1342,6 +1339,17 @@
       /* The console's switcher strip reads this: the same order the grid shows,
        * but flat — worktree grouping is a layout device, not an ordering. */
       window.ctbSessionOrder = visible.map(_toOrderItem);
+      _publishSessions();
+    }
+
+    /* The console's rail and its search palette both show session state, and
+     * both used to be painted once and then left alone -- the rail from the
+     * moment the console opened, the palette from the moment it was opened.
+     * They read the globals above, so this is the one line that tells them
+     * those globals moved. They patch what is on screen in place; nothing
+     * here decides how. */
+    function _publishSessions() {
+      window.dispatchEvent(new CustomEvent('ctb:sessions'));
     }
 
     /* Hidden cards stay in the DOM now, so anything that walks the grid has to
@@ -1457,53 +1465,46 @@
       }, 0);
     }
 
-    const _searchInput = document.getElementById('filter-search');
-    _searchInput.addEventListener('input', (e) => {
-      _filterSearch = e.target.value;
-      applyFilterVisibility();
-    });
-    _searchInput.addEventListener('keydown', (e) => {
-      // Esc clears + blurs the search
-      if (e.key === 'Escape') {
-        _searchInput.value = '';
-        _filterSearch = '';
-        applyFilterVisibility();
-        _searchInput.blur();
-        return;
-      }
-      // Enter jumps to the first matching card so arrow-key nav can take over
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        const first = visibleCards()[0];
-        if (first) first.focus();
-      }
-    });
-    // Keyboard shortcut to jump into the search box:
-    //   Ctrl/Cmd+F (overrides browser find), or a bare "f" when not typing.
+    /* The board's search is the console's palette.
+
+     * The box that used to sit here filtered the grid: type and the sessions
+     * that did not match went away. But finding a session is not the reason
+     * to look at this board -- the reason is to start typing at it, which is
+     * a second move after the filtering, back through a grid that has just
+     * rearranged itself. The palette is the move the terminal makes: name it,
+     * press Enter, and the caret is in its prompt. Nothing is hidden on the
+     * way, so the board behind stays the board you knew. The age filter is
+     * unrelated and stays -- that one is for clearing out old sessions, not
+     * for reaching one. */
+    function openSessionPalette() {
+      const c = window.ctbConsole;
+      if (c && c.openPalette) c.openPalette();
+    }
+    document.getElementById('btn-find-session')
+      .addEventListener('click', openSessionPalette);
+
     function _isTypingTarget(el) {
       if (!el) return false;
       const tag = el.tagName;
       return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
     }
     document.addEventListener('keydown', (e) => {
-      /* The console is a full-bleed sheet drawn over this box. Focusing it from
-       * under there took the keystroke and typed into something invisible --
-       * the query filtered a grid nobody could see, and the console's own
-       * search (which the same chord opens) never got the characters. Over an
-       * open console the shortcut belongs to the console. */
+      /* Over an open console "f" is a letter someone is typing into a prompt,
+       * not a shortcut -- and the palette, once up, owns its own keyboard. */
       if (window.ctbConsole && window.ctbConsole.isOpen && window.ctbConsole.isOpen()) return;
-      const focusSearch = () => {
-        e.preventDefault();
-        _searchInput.focus();
-        _searchInput.select();
-      };
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'f' || e.key === 'F')) {
-        focusSearch();
-        return;
-      }
+      if (window.ctbConsole && window.ctbConsole.paletteOpen && window.ctbConsole.paletteOpen()) return;
+      /* The new-session sheet is drawn over everything and owns the keyboard
+       * while it is up; a palette on top of it would take Escape and Enter
+       * out from under a dialog that is mid-form. */
+      const ns = window.ctbNewSession;
+      if (ns && ns.isOpen && ns.isOpen()) return;
+      /* Only the bare letter. Ctrl/Cmd+F is the palette's own chord, bound
+       * beside it in session-control.js for the board as well as the console
+       * -- handling it here too would open it twice on one press. */
       if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey
-          && !_isTypingTarget(e.target)) {
-        focusSearch();
+          && !_isTypingTarget(e.target) && !e.isComposing) {
+        e.preventDefault();
+        openSessionPalette();
       }
     });
     buildAgeButtons();
@@ -1895,8 +1896,14 @@
          * paint its pin control, and a board with nothing on it still has to
          * tell the truth about what is pinned. */
         window.ctbSessionAll = [];
+        /* Cleared together: the console's catalogue falls back to this order
+         * when nothing has been published, and leaving yesterday's names in
+         * it behind an empty board is how the palette ends up offering
+         * sessions that no longer exist. */
+        window.ctbSessionOrder = [];
         window.ctbPinned = [...pinned];
         window.ctbQuadOf = _quadOfMap();
+        _publishSessions();
         emptyState.classList.remove('hidden');
         btnCopyNames.classList.add('hidden');
         sortedSessionNames = [];

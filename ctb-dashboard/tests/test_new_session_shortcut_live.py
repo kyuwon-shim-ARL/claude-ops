@@ -14,6 +14,7 @@ import pytest  # noqa: F401
 
 from live_board import board  # noqa: F401  (fixture)
 
+PALETTE = "[role='dialog'][aria-label='세션 검색']"
 SHEET = "#new-session-modal"
 
 
@@ -32,20 +33,14 @@ def test_the_chord_opens_the_sheet(board):
     board.wait_for_selector(SHEET, state="visible")
 
 
-def test_typing_n_into_the_filter_box_does_not_open_it(board):
-    """The board's search box is the one place "n" is just a letter."""
-    board.click("#filter-search")
+def test_typing_n_into_the_search_palette_does_not_open_it(board):
+    """In a text field "n" is just a letter -- and the board's only text
+    field is the session palette, since the filter box was retired."""
+    board.keyboard.press("f")
+    board.wait_for_selector(PALETTE, state="visible")
     board.keyboard.press("n")
-    assert board.input_value("#filter-search") == "n"
+    assert board.input_value(f"{PALETTE} input") == "n"
     assert not opened(board)
-
-
-def test_the_chord_still_works_from_a_text_field(board):
-    """A chord is never a character, so the filter box does not own it."""
-    board.click("#filter-search")
-    board.keyboard.press("Control+n")
-    board.wait_for_selector(SHEET, state="visible")
-    assert board.input_value("#filter-search") == ""
 
 
 def test_ctrl_shift_n_is_left_to_the_browser(board):
@@ -218,14 +213,13 @@ def test_a_second_press_does_not_reopen_the_sheet(board):
 def test_the_cmd_chord_works_too(board):
     """Cmd+N on a Mac is the same request as Ctrl+N.
 
-    Pressed from inside the filter box: over the board a bare "n" would open
-    the sheet anyway, so only a text field can tell a recognised chord from an
-    unrecognised modifier.
+    Pressed over an open console: on the bare board an unrecognised modifier
+    would fall through to the plain "n" shortcut and open the sheet anyway,
+    so only a surface that swallows the letter can tell the two apart.
     """
-    board.click("#filter-search")
+    open_console(board)
     board.keyboard.press("Meta+n")
     board.wait_for_selector(SHEET, state="visible")
-    assert board.input_value("#filter-search") == ""
 
 
 def test_a_dragged_card_keeps_the_key(board):
@@ -256,9 +250,6 @@ def test_a_composing_ime_keeps_the_key(board):
         "document.dispatchEvent(new KeyboardEvent('keydown',"
         " {key:'n', isComposing:true, bubbles:true}))")
     assert not opened(board)
-
-
-PALETTE = "[role='dialog'][aria-label='세션 검색']"
 
 
 def test_the_palette_chord_still_belongs_to_the_palette(board):

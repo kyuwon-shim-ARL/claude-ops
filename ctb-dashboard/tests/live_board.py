@@ -9,6 +9,7 @@ off the machine.
 
 import contextlib
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -28,11 +29,20 @@ def _page_html():
 
 
 def _session(name, *, state="idle", age=60, context=""):
+    """`age` is seconds before now, on the same clock the browser uses.
+
+    The board's age filter compares last_activity against the browser's own
+    Date.now(), so these have to be wall-clock. They used to be offsets from
+    a fixed NOW that sits in the future, which made every session read as
+    "recent" no matter what age it was given -- and would have flipped them
+    all to "old" on its own, silently, the day real time passed it.
+    """
+    ts = time.time() - age
     return {
         "name": name,
         "state": state,
-        "updated_at": NOW - age,
-        "last_activity": NOW - age,
+        "updated_at": ts,
+        "last_activity": ts,
         "work_context": context,
     }
 
@@ -43,7 +53,10 @@ SESSIONS = [
     # header, and the header carries a count the filter has to keep honest.
     _session("claude_alpha_wt_topic", state="idle"),
     _session("claude_beta", state="waiting"),
-    _session("claude_gamma", state="idle"),
+    # Three days since it last did anything: the one session the age filter
+    # can reach, and the one the palette must still find while it is
+    # filtered away.
+    _session("claude_gamma", state="idle", age=3 * 86400),
     _session("claude_delta", state="idle", context="alpha mentioned here"),
 ]
 # A pane worth scrolling and searching: 120 lines, with "needle" on three of
@@ -85,6 +98,39 @@ def open_board(theme=None):
         page.ctb_log_window = False
         page.ctb_hold_log = False
         page.ctb_held = []
+        page.ctb_sessions = [dict(x) for x in SESSIONS]
+        page.ctb_gone = set()
+
+        def set_state(name, state):
+            """Change a session's state and make the board fetch it now.
+
+            The board's own poll is on a 5s timer; the visibility handler
+            refetches immediately, which is the same code path.
+            """
+            for sess in page.ctb_sessions:
+                if sess["name"] == name:
+                    sess["state"] = state
+            page.evaluate(
+                "() => document.dispatchEvent(new Event('visibilitychange'))")
+            page.wait_for_timeout(120)
+
+        page.ctb_set_state = set_state
+
+        def drop_session(name):
+            """End a session for real: it leaves the list AND its pane 404s.
+
+            Without the 404 the console keeps polling a pane that answers
+            happily, which hid the path where a poll failure calls
+            sessionGone() and rebuilds the rail.
+            """
+            page.ctb_gone.add(name)
+            page.ctb_sessions = [x for x in page.ctb_sessions
+                                 if x["name"] != name]
+            page.evaluate(
+                "() => document.dispatchEvent(new Event('visibilitychange'))")
+            page.wait_for_timeout(120)
+
+        page.ctb_drop_session = drop_session
 
         def release_log(index=0):
             """Answer a request the route was told to hold."""
@@ -155,6 +201,11 @@ def open_board(theme=None):
                 return r.fulfill(status=200, content_type="application/json",
                                  body='{"ok":true}')
             if path.startswith("/api/sessions/") and path.endswith("/log"):
+                who = path.split("/")[3]
+                if who in page.ctb_gone:
+                    # What the server says about a pane that is not there.
+                    return r.fulfill(status=404, content_type="application/json",
+                                     body='{"detail":"no such session"}')
                 # A real pane: long enough to scroll, with a word that appears
                 # more than once so a find has somewhere to step to.
                 body = {"log": page.ctb_log, "hash": page.ctb_log_hash,
@@ -198,8 +249,11 @@ def open_board(theme=None):
                                           "session_exists": False},
                                      ]}))
             if path.startswith("/api/sessions"):
+                # Mutable, so a test can change what the board sees next and
+                # then force a refetch -- the only way to assert on what the
+                # console's rail does when a session changes state under it.
                 return r.fulfill(status=200, content_type="application/json",
-                                 body=json.dumps({"sessions": SESSIONS,
+                                 body=json.dumps({"sessions": page.ctb_sessions,
                                                   "updated_at": NOW}))
             if path.startswith("/static/"):
                 f = SRC / path.lstrip("/")
@@ -225,12 +279,30 @@ def open_board(theme=None):
         # Nothing leaves the machine: the CDN fonts and Tailwind are not what
         # is under test, and a suite that needs the network is a flaky suite.
         # Registered first so the page's own routes, added below, win.
+        # An exception thrown inside the page is a failure, not a detail.
+        # A missing function left a whole update path dead -- the rail simply
+        # stopped following its sessions -- and every one of these tests went
+        # on passing, because nothing was watching the console.
+        page.ctb_errors = []
+
+        def note_error(exc):
+            # The CDN is blocked on purpose (see the catch-all abort below),
+            # so the page's own Tailwind config call has nothing to call.
+            # That one is the fixture's doing, not the page's.
+            if "tailwind is not defined" in str(exc):
+                return
+            page.ctb_errors.append(str(exc))
+
+        page.on("pageerror", note_error)
+
         page.route("**", lambda r: r.abort())
         page.route("http://ctb.test/**", route)
         page.goto("http://ctb.test/")
         page.wait_for_selector('[data-session-name="claude_alpha"]')
         try:
             yield page
+            assert not page.ctb_errors, (
+                "the page threw: " + " | ".join(page.ctb_errors))
         finally:
             browser.close()
 
