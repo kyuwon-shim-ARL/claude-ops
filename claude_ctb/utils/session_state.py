@@ -107,6 +107,118 @@ class SessionStateAnalyzer:
     # Completed marker (fixed): ✻
     _TOOL_GLYPHS = '·✢✳✶✻✽●⏺'
 
+    # A completion line names how long it took: "✻ Cogitated for 5m 8s",
+    # "✻ Worked for 57s". The duration is what makes it a completion.
+    #
+    # Without the unit the shape also fits a line that means the opposite --
+    # "✻ Waiting for 1 background agent to finish" is glyph + word + "for" +
+    # number, and was read as "this turn is over" by three of the four places
+    # that tested for it. A session waiting on an agent therefore reported
+    # IDLE: the strongest evidence that it was still working was being taken
+    # as proof that it had stopped. (The fourth place already required the
+    # unit -- see self.completion_patterns -- which is where this form comes
+    # from.)
+    _DURATION_RE = r'\d+(?:\.\d+)?\s*(?:ms|s|m|h)\b'
+
+    # "✻ Waiting for 1 background agent to finish" — Claude Code's own line
+    # for a turn that has handed off and is waiting. The main loop is not
+    # generating, so nothing says 'esc to interrupt'; this is the only thing
+    # on screen that says the session is not finished.
+    #
+    # Whitespace is loose between the words and N must be at least 1. The
+    # looseness is for tmux: a narrow pane breaks the line at the pane edge,
+    # not at a space, and capture-pane strips the trailing blank, so the rows
+    # are rejoined with nothing between them. "…background age" + "nt to
+    # finish" has to read the same as "…background agent" + "to finish".
+    _WAITING_ON_AGENT_RE = re.compile(
+        r'^\s*[' + _TOOL_GLYPHS + r'*]?\s*'
+        r'waiting\s*for\s*[1-9]\d*\s*background\s*agents?\s*to\s*finish\s*$',
+        re.IGNORECASE,
+    )
+
+    # The input box and the rules Claude Code draws around it.
+    _INPUT_BOX_RE = re.compile(r'^\s*(?:\u276f|\u2502\s*>)')
+    _RULE_RE = re.compile(r'^\s*[\u2500\u2501\u2550]{5,}\s*$')
+
+    # How many rows a wrapped line may be spread over when rejoining it.
+    _WRAP_ROWS = 3
+
+    @classmethod
+    def _logical_lines(cls, lines, index):
+        """The row at `index`, and it rejoined with the rows above it.
+
+        tmux splits a long line at the pane edge and capture-pane hands back
+        the pieces as separate rows, so a rule that reads one row at a time
+        cannot see a line that did not fit. Both halves of this file's
+        problem are wrapped-line problems: a completion line broken across
+        `57` and `s` stopped looking like a completion, and the waiting line
+        broken anywhere stopped looking like itself.
+        """
+        out = [lines[index]]
+        joined = lines[index]
+        for back in range(1, cls._WRAP_ROWS):
+            j = index - back
+            if j < 0:
+                break
+            joined = lines[j].rstrip('\n') + joined.lstrip()
+            out.append(joined)
+        return out
+
+    @classmethod
+    def _input_box_top(cls, lines):
+        """Index of the rule that opens the input box, or None.
+
+        The box is the last thing Claude Code draws: a rule, the row carrying
+        ❯ (or │ >), any further rows of a multi-line draft, and a closing
+        rule. What is INSIDE it is the user's draft -- text they have typed or
+        pasted and not sent -- and a draft can contain anything, including a
+        ❯ of its own and a transcript that mentions waiting for an agent.
+        That is the difference this looks for: the rule above the box is the
+        line between what the session did and what the user is typing.
+
+        No opening rule means no box boundary, and this says nothing rather
+        than guessing. Failing closed here costs a working session being
+        called idle; failing open costs a finished one being called working,
+        which is the one that silences the completion notification.
+        """
+        box = None
+        for i in range(len(lines) - 1, -1, -1):
+            if cls._INPUT_BOX_RE.match(lines[i]):
+                box = i
+                break
+        if box is None:
+            return None
+        for j in range(box - 1, max(-1, box - 6), -1):
+            if cls._RULE_RE.match(lines[j]):
+                return j
+            if lines[j].strip():
+                # Content between the rule and the ❯: this ❯ is not the top
+                # row of a box.
+                return None
+        return None
+
+    @classmethod
+    def _waiting_on_background_agent(cls, lines) -> bool:
+        """True when the live bottom of the screen is that waiting line.
+
+        Position is what makes it evidence, not the words. The words are
+        written into the transcript at the end of every such turn -- one real
+        capture held five copies -- and they also arrive as ordinary prose
+        when somebody pastes a transcript into the box. So the only copy that
+        counts is the one directly above the input box: what sits above the
+        box is what the session did, what sits inside it is what the user is
+        typing.
+        """
+        top = cls._input_box_top(lines)
+        if top is None:
+            return False
+        for j in range(top - 1, -1, -1):
+            if not lines[j].strip() or cls._RULE_RE.match(lines[j]):
+                continue
+            return any(cls._WAITING_ON_AGENT_RE.match(cand)
+                       for cand in cls._logical_lines(lines, j))
+        return False
+
     # "✻ Sautéed for 40s · done 3:58 PM · 4 shells still running"
     # Claude Code (2026-04+) stamps the completion line with `· done <time>`.
     # The date part varies with age ("3:58 PM", "Tuesday 5:38 PM",
@@ -524,6 +636,15 @@ class SessionStateAnalyzer:
                 logger.debug("🎯 WORKING: Claude background task(s)/local agents still running detected in recent lines")
                 return True
 
+        # PRIORITY 1c-3: Claude Code is waiting on a background agent.
+        # The turn has handed off; the main loop shows no interrupt string
+        # because it is not the thing that is running. Anchored to the input
+        # box -- see _waiting_on_background_agent for why the words alone are
+        # not evidence.
+        if self._waiting_on_background_agent(recent_lines):
+            logger.debug("🎯 WORKING: waiting on a background agent (live, above the input box)")
+            return True
+
         # PRIORITY 1c-2: OMC status bar shows active sub-agents
         # When OMC sub-agents are running, the main Claude sits at ❯ prompt
         # (no interrupt strings). The OMC bar reports live agent count:
@@ -539,7 +660,7 @@ class SessionStateAnalyzer:
         # matches the past-tense completion pattern → skip agents:N.
         _omc_agents_re = re.compile(r'\bagents:([1-9]\d*)\b')
         _past_completion_re = re.compile(
-            rf'[{SessionStateAnalyzer._TOOL_GLYPHS}] \w+ for \d+'
+            rf'[{SessionStateAnalyzer._TOOL_GLYPHS}] \w+ for {SessionStateAnalyzer._DURATION_RE}'
         )
         # Pre-compute last content line before ❯ (for GUARD C)
         # Also pre-compute whether ANY recent line is a past-tense completion
@@ -571,10 +692,18 @@ class SessionStateAnalyzer:
                     _last_before_prompt = _s
             # Secondary: scan all recent lines for any past-tense completion
             _past_completion_re_check = re.compile(
-                rf'[{SessionStateAnalyzer._TOOL_GLYPHS}] \w+ for \d+'
+                rf'[{SessionStateAnalyzer._TOOL_GLYPHS}] \w+ for {SessionStateAnalyzer._DURATION_RE}'
             )
+            # Logical lines, not rows: a completion line that wrapped ("✻
+            # Worked for 57" / "s · done 3:58 PM") carries its duration
+            # across the break, and requiring the unit -- which is what stops
+            # "✻ Waiting for 1 background agent" reading as a completion --
+            # made every wrapped completion invisible to this scan. A stale
+            # agents:N then won over a turn that had plainly finished.
             _any_past_completion = any(
-                _past_completion_re_check.search(l) for l in recent_lines
+                _past_completion_re_check.search(cand)
+                for i in range(len(recent_lines))
+                for cand in self._logical_lines(recent_lines, i)
             )
 
         for line in recent_lines:
@@ -721,7 +850,7 @@ class SessionStateAnalyzer:
         # These indicate Claude finished; must not be confused with working.
         # Exception: "Worked for Xs · N background task(s) still running" IS still working.
         if re.search(
-            rf'^\s*[{SessionStateAnalyzer._TOOL_GLYPHS}] \w+ for \d+',
+            rf'^\s*[{SessionStateAnalyzer._TOOL_GLYPHS}] \w+ for {SessionStateAnalyzer._DURATION_RE}',
             check_content, re.MULTILINE,
         ):
             if ('background task' not in check_content and 'local agents' not in check_content) \

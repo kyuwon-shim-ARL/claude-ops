@@ -1283,9 +1283,10 @@ class MultiSessionMonitor:
                     )
                     self._log_stall_baseline(session_name, bash_child, net_est, curr_state.value, False)
                     return
-                # OMC 서브에이전트 실행 중이면 stall 아님 (agents:N, N≥1)
-                if self._has_active_omc_agents(session_name):
-                    logger.debug(f"⏸️ {session_name}: stall skip — OMC subagent active (agents:N≥1)")
+                # 서브에이전트가 돌고 있으면 stall 이 아니다 (OMC agents:N,
+                # 또는 Claude Code 자신의 "waiting for N background agent")
+                if self._has_active_subagents(session_name):
+                    logger.debug(f"⏸️ {session_name}: stall skip — subagent active")
                     return
                 self._log_stall_baseline(session_name, bash_child, net_est, curr_state.value, False)
                 if time.time() - last_stall > cooldown:
@@ -1391,12 +1392,21 @@ class MultiSessionMonitor:
             pass
         return None
 
-    def _has_active_omc_agents(self, session_name: str) -> bool:
-        """OMC status bar에서 agents:N (N≥1) 을 감지해 서브에이전트 실행 중 여부를 반환합니다.
+    def _has_active_subagents(self, session_name: str) -> bool:
+        """서브에이전트가 돌고 있는지 — 두 가지 증거 중 하나라도 있으면 True.
 
-        OMC status bar 예: [OMC#4.13.2] | ... | agents:1 | ...
-        서브에이전트가 실행 중이면 파일 I/O만 하므로 bash child / network 신호가 없어도
-        stall이 아닙니다.
+        1. OMC status bar 의 agents:N (N≥1) — 예: [OMC#4.13.2] | ... | agents:1
+        2. Claude Code 자신의 "✻ Waiting for N background agent to finish"
+
+        (2) 가 필요한 이유: 현재 OMC HUD 는 agents:N 을 출력하지 않는다.
+        실측한 HUD 는 `🔧154 🤖7` 과 `← 9 agents` 를 쓰는데, 앞은 누적 카운터고
+        뒤는 정적 힌트다(놀고 있는 세션도 같은 문자열을 찍는다). 즉 (1) 만으로는
+        지금의 세션에서 면제가 걸리지 않는다.
+
+        서브에이전트는 파일 I/O 만 하므로 bash child / network 신호가 없어도
+        stall 이 아니다. 여기서 면제하지 않으면, 한 시간짜리 에이전트 실행이
+        20분 지점부터 stall 경보를 만든다 — 잘못된 "완료" 알림을 잘못된 "멈춤"
+        알림으로 바꾼 셈이 된다.
         """
         import re
         try:
@@ -1410,8 +1420,13 @@ class MultiSessionMonitor:
             m = re.search(r'\bagents:(\d+)\b', screen)
             if m and int(m.group(1)) >= 1:
                 return True
+            # Claude Code 가 직접 말해주는 경우. 판정기와 같은 규칙을 쓴다:
+            # 문구가 아니라 입력상자 위에 있다는 위치가 증거다.
+            from ..utils.session_state import SessionStateAnalyzer
+            if SessionStateAnalyzer._waiting_on_background_agent(screen.split('\n')):
+                return True
         except Exception as exc:
-            logger.debug(f"_has_active_omc_agents error for {session_name}: {exc}")
+            logger.debug(f"_has_active_subagents error for {session_name}: {exc}")
         return False
 
     def _check_stall_signals(self, session_name: str) -> tuple:

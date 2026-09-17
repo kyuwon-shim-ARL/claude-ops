@@ -105,6 +105,78 @@ class SessionStateAnalyzer:
     # "Friday, Jun 26, 9:44 AM"), so the match is anchored on the H:MM clock
     # that every variant ends in -- "· done reviewing the diff" in prose does
     # not qualify. AM/PM optional for a 24h locale.
+    # A completion line names how long it took. Without the unit the same
+    # shape fits "Waiting for 1 background agent to finish", which means the
+    # opposite -- see the canonical detector for the whole story.
+    _DURATION_RE = r'\d+(?:\.\d+)?\s*(?:ms|s|m|h)\b'
+
+    # Claude Code's own line for a turn that has handed off to an agent. The
+    # main loop is not generating, so nothing says 'esc to interrupt'.
+    # Whitespace is loose: tmux breaks a long line at the pane edge, not at a
+    # space, and capture-pane strips the trailing blank.
+    _WAITING_ON_AGENT_RE = re.compile(
+        r'^\s*[' + _TOOL_GLYPHS + r'*]?\s*'
+        r'waiting\s*for\s*[1-9]\d*\s*background\s*agents?\s*to\s*finish\s*$',
+        re.IGNORECASE,
+    )
+    _INPUT_BOX_RE = re.compile(r'^\s*(?:\u276f|\u2502\s*>)')
+    _RULE_RE = re.compile(r'^\s*[\u2500\u2501\u2550]{5,}\s*$')
+    _WRAP_ROWS = 3
+
+    @classmethod
+    def _logical_lines(cls, lines, index):
+        """The row at `index`, and it rejoined with the rows above it."""
+        out = [lines[index]]
+        joined = lines[index]
+        for back in range(1, cls._WRAP_ROWS):
+            j = index - back
+            if j < 0:
+                break
+            joined = lines[j].rstrip('\n') + joined.lstrip()
+            out.append(joined)
+        return out
+
+    @classmethod
+    def _input_box_top(cls, lines):
+        """Index of the rule that opens the input box, or None.
+
+        What is inside the box is the user's draft -- typed or pasted, and it
+        can contain anything, including a ❯ of its own and a transcript that
+        mentions waiting for an agent. The rule above the box is the line
+        between what the session did and what the user is typing.
+        """
+        box = None
+        for i in range(len(lines) - 1, -1, -1):
+            if cls._INPUT_BOX_RE.match(lines[i]):
+                box = i
+                break
+        if box is None:
+            return None
+        for j in range(box - 1, max(-1, box - 6), -1):
+            if cls._RULE_RE.match(lines[j]):
+                return j
+            if lines[j].strip():
+                return None
+        return None
+
+    @classmethod
+    def _waiting_on_background_agent(cls, lines) -> bool:
+        """True when the live bottom of the screen is that waiting line.
+
+        Position is the evidence, not the words: they are written into the
+        transcript every time it happens, and they arrive as prose when
+        somebody pastes a transcript.
+        """
+        top = cls._input_box_top(lines)
+        if top is None:
+            return False
+        for j in range(top - 1, -1, -1):
+            if not lines[j].strip() or cls._RULE_RE.match(lines[j]):
+                continue
+            return any(cls._WAITING_ON_AGENT_RE.match(cand)
+                       for cand in cls._logical_lines(lines, j))
+        return False
+
     _DONE_MARKER_RE = re.compile(r'\u00b7\s*done\s+[^\u00b7\n]*?\d{1,2}:\d{2}(?:\s*[AP]M)?')
 
     # Fragments Claude Code appends after `done` for things left alive in the
@@ -378,6 +450,11 @@ class SessionStateAnalyzer:
                 logger.debug("WORKING: Claude background task(s)/local agents still running detected")
                 return True
 
+        # PRIORITY 1c-3: waiting on a background agent (live, above the input box)
+        if self._waiting_on_background_agent(recent_lines):
+            logger.debug("WORKING: waiting on a background agent")
+            return True
+
         # PRIORITY 1d: Active spinner glyph with ellipsis
         _spinner_active_re = re.compile(
             rf'^\s*[{SessionStateAnalyzer._TOOL_GLYPHS}] \S+\u2026'
@@ -446,7 +523,7 @@ class SessionStateAnalyzer:
 
         # 2b-guard: Past-tense completion line -> NOT working
         if re.search(
-            rf'^\s*[{SessionStateAnalyzer._TOOL_GLYPHS}] \w+ for \d+',
+            rf'^\s*[{SessionStateAnalyzer._TOOL_GLYPHS}] \w+ for {SessionStateAnalyzer._DURATION_RE}',
             check_content, re.MULTILINE,
         ):
             if ('background task' not in check_content and 'local agents' not in check_content) \
