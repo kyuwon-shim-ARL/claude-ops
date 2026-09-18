@@ -123,6 +123,20 @@ class SessionStateAnalyzer:
     _RULE_RE = re.compile(r'^\s*[\u2500\u2501\u2550]{5,}\s*$')
     _WRAP_ROWS = 3
 
+    # Claude Code 2.1.258+ agent roster row (below the input box, not above
+    # it): "\u25ef <name>  <description>   <elapsed> \u00b7 \u2193 <tokens>" for a running
+    # agent, versus "\u25ef <name>  <description>   idle" for a finished one.
+    # The elapsed+token tail is the signal -- a plain "idle" tail must not
+    # match. Anchored to the END of the (joined) row: the metrics must be
+    # the row's terminal status, not a substring followed by more text (a
+    # wrapped description continuing past the metrics is not a live row).
+    # Elapsed is any run of h/m/s components -- "42s", "1h 2m", "1h2m42s".
+    _AGENT_ROSTER_RUNNING_RE = re.compile(
+        r'^\s*\u25ef\s+\S+.*?'
+        r'\d+[hms](?:\s*\d+[hms])*\s*\u00b7\s*\u2193\s*\d+(?:\.\d+)?[kKmM]?'
+        r'\s*(?:tokens?)?\s*$'
+    )
+
     @classmethod
     def _logical_lines(cls, lines, index):
         """The row at `index`, and it rejoined with the rows above it."""
@@ -158,6 +172,56 @@ class SessionStateAnalyzer:
             if lines[j].strip():
                 return None
         return None
+
+    @classmethod
+    def _input_box_row(cls, lines):
+        """Index of the ❯ prompt row itself, or None."""
+        for i in range(len(lines) - 1, -1, -1):
+            if cls._INPUT_BOX_RE.match(lines[i]):
+                return i
+        return None
+
+    @classmethod
+    def _input_box_bottom(cls, lines):
+        """Index of the rule that CLOSES the input box, or None.
+
+        The box is: rule, one or more ❯ rows (a multi-line draft can put
+        arbitrary text -- including a pasted roster row -- between them), then
+        the closing rule. Only rows after that closing rule are the live
+        screen; what is above it, draft included, is not evidence of what the
+        session is doing right now.
+        """
+        box = cls._input_box_row(lines)
+        if box is None:
+            return None
+        for i in range(box + 1, len(lines)):
+            if cls._RULE_RE.match(lines[i]):
+                return i
+        return None
+
+    @classmethod
+    def _agent_roster_running(cls, lines) -> bool:
+        """True when the agent roster (below the input box) shows a live run.
+
+        Claude Code 2.1.258+ prints the roster below the ❯ prompt instead of
+        the 'waiting for N background agents' line above it. Only rows after
+        the box's closing rule count -- a pasted transcript above or inside
+        the draft must not match. Each row is joined cumulatively with up to
+        two following rows to tolerate the narrow-pane wrap that splits
+        '... ↓ 175.1k' (or even '... ·' / '↓ 175.1k') across rows.
+        """
+        bottom = cls._input_box_bottom(lines)
+        if bottom is None:
+            return False
+        for i in range(bottom + 1, len(lines)):
+            joined = lines[i]
+            if cls._AGENT_ROSTER_RUNNING_RE.match(joined):
+                return True
+            for nxt in range(i + 1, min(i + cls._WRAP_ROWS, len(lines))):
+                joined = joined.rstrip('\n') + lines[nxt].lstrip()
+                if cls._AGENT_ROSTER_RUNNING_RE.match(joined):
+                    return True
+        return False
 
     @classmethod
     def _waiting_on_background_agent(cls, lines) -> bool:
@@ -453,6 +517,11 @@ class SessionStateAnalyzer:
         # PRIORITY 1c-3: waiting on a background agent (live, above the input box)
         if self._waiting_on_background_agent(recent_lines):
             logger.debug("WORKING: waiting on a background agent")
+            return True
+
+        # PRIORITY 1c-3b: agent roster below the input box shows a running row
+        if self._agent_roster_running(lines):
+            logger.debug("WORKING: agent roster shows a running agent")
             return True
 
         # PRIORITY 1d: Active spinner glyph with ellipsis
