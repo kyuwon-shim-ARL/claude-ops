@@ -1233,6 +1233,7 @@
          * palette that replaced it could no longer find a session by what is
          * happening in it, only by what it is called. */
         hay: `${s.work_context || ''} ${s.last_prompt || ''}`.trim(),
+        context_percent: (typeof s.context_percent === 'number') ? s.context_percent : null,
       };
     }
 

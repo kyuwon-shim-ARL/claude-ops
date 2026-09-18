@@ -238,6 +238,8 @@
       '#ctb-console .con-chip[aria-current="true"][data-quad="Q2"]{background:var(--con-btn);box-shadow:inset 0 0 0 1.5px rgba(240,165,0,0.5),0 1px 2px rgba(16,24,40,0.10)}',
       '#ctb-console .con-chip[aria-current="true"][data-quad="Q3"]{background:var(--con-btn);box-shadow:inset 0 0 0 1.5px rgba(96,165,250,0.5),0 1px 2px rgba(16,24,40,0.10)}',
       '#ctb-console .con-chip[aria-current="true"][data-quad="Q4"]{background:var(--con-btn);box-shadow:inset 0 0 0 1.5px rgba(139,133,160,0.45),0 1px 2px rgba(16,24,40,0.10)}',
+      '#ctb-console .ctb-sctx{font-family:\'JetBrains Mono\',monospace;font-size:10px;' +
+      'font-variant-numeric:tabular-nums;min-width:4ch;text-align:right;flex-shrink:0}',
       /* The importance key wears the same four hues, but louder than a chip
        * does: this one has to answer "which quadrant is this session in"
        * before it is pressed, so the glyph itself takes the colour and the
@@ -1224,6 +1226,32 @@
     return lab;
   }
 
+  /* Context-window usage slot on the rail chip: a fixed-width number so the
+   * chip's width never moves when a value appears, disappears or changes
+   * digit count. Colour steps mirror the grid card's gauge (60 amber-ish
+   * warn, 80 red-ish err); unknown is the same muted grey as an idle word. */
+  function ctxWord(pct) {
+    return (typeof pct === 'number' && isFinite(pct)) ? ('컨텍스트 ' + pct + '%') : '';
+  }
+
+  function paintCtxSlot(slot, pct) {
+    var known = typeof pct === 'number' && isFinite(pct);
+    slot.textContent = known ? (pct + '%') : '—';
+    slot.style.color = !known ? 'var(--con-muted)'
+      : pct >= 80 ? 'var(--con-err)'
+      : pct >= 60 ? 'var(--con-warn)'
+      : 'var(--con-muted)';
+    slot.style.fontWeight = (known && pct >= 80) ? '700' : '';
+  }
+
+  function makeCtxSlot(pct) {
+    var slot = document.createElement('span');
+    slot.className = 'ctb-sctx';
+    slot.setAttribute('aria-hidden', 'true');
+    paintCtxSlot(slot, pct);
+    return slot;
+  }
+
   /* The word is text, and text has to be readable: the dot's colours are
    * picked to glow against a dark pane and measure about 1.5:1 against the
    * light one, which is unreadable at 10px -- and painting the word in the
@@ -1292,6 +1320,7 @@
             state: s.state,
             label: wt === -1 ? stripped : stripped.slice(0, wt),
             branch: wt === -1 ? null : stripped.slice(wt + 4),
+            context_percent: (typeof s.context_percent === 'number') ? s.context_percent : null,
           };
         });
         renderStrip();
@@ -1504,12 +1533,18 @@
   function paintChipName(chip, item) {
     var who = item.branch ? item.label + ' 워크트리 ' + item.branch : item.label;
     chip.setAttribute('data-who', who);
+    var known = typeof item.context_percent === 'number' && isFinite(item.context_percent);
+    if (known) chip.setAttribute('data-ctx', String(item.context_percent));
+    else chip.removeAttribute('data-ctx');
     paintChipState(chip, stateText(item.state));
   }
 
   function paintChipState(chip, word) {
+    var ctxAttr = chip.getAttribute('data-ctx');
+    var ctx = (ctxAttr !== undefined && ctxAttr !== null) ? Number(ctxAttr) : null;
+    var ctxW = (ctx !== null && isFinite(ctx)) ? ctxWord(ctx) : '';
     chip.setAttribute('aria-label',
-      (chip.getAttribute('data-who') || '') + ', ' + word + ' — 전환');
+      (chip.getAttribute('data-who') || '') + ', ' + word + (ctxW ? ', ' + ctxW : '') + ' — 전환');
   }
 
   /* --- keeping the two surfaces current ---------------------------------
@@ -1579,9 +1614,15 @@
       chip.style.opacity = '';
       var dot = chip.querySelector('.ctb-sdot');
       var lab = chip.querySelector('.ctb-slabel');
+      var ctxSlot = chip.querySelector('.ctb-sctx');
       if (dot) paintDot(dot, item.state);
       if (lab) paintStateLabel(lab, item.state);
+      if (ctxSlot) paintCtxSlot(ctxSlot, item.context_percent);
       paintChipName(chip, item);
+      var quad = chip.getAttribute('data-quad');
+      var ctxW = ctxWord(item.context_percent);
+      chip.title = quad ? name + ' · ' + (QUAD_LABELS[quad] || quad) : name;
+      if (ctxW) chip.title += ' · ' + ctxW;
       if (flash && flash[name]) flashElement(chip, item.state);
     }
     /* A session that appeared gets a chip on the end. Not a rebuild: a
@@ -1611,12 +1652,18 @@
     chip.style.opacity = '0.55';
     var dot = chip.querySelector('.ctb-sdot');
     var lab = chip.querySelector('.ctb-slabel');
+    var ctxSlot = chip.querySelector('.ctb-sctx');
     if (dot) paintDot(dot, 'idle');
     if (lab) {
       lab.textContent = '\uc885\ub8cc\ub428';
       lab.style.color = 'var(--con-muted)';
       lab.style.opacity = '1';
     }
+    if (ctxSlot) paintCtxSlot(ctxSlot, null);
+    chip.removeAttribute('data-ctx');
+    /* The title's ' \u00b7 \ucee8\ud14d\uc2a4\ud2b8 NN%' suffix is stale the moment the slot goes
+     * to unknown -- strip it, keep whatever the title said before that. */
+    chip.title = chip.title.replace(/ \u00b7 \ucee8\ud14d\uc2a4\ud2b8 \d+%$/, '');
     paintChipState(chip, '\uc885\ub8cc\ub428');
   }
 
@@ -1640,6 +1687,8 @@
     var quad = window.ctbQuadOf && window.ctbQuadOf[item.name];
     if (quad) chip.setAttribute('data-quad', quad);
     chip.title = quad ? item.name + ' · ' + (QUAD_LABELS[quad] || quad) : item.name;
+    var ctxTitleWord = ctxWord(item.context_percent);
+    if (ctxTitleWord) chip.title += ' · ' + ctxTitleWord;
 
     var text = document.createElement('span');
     text.style.cssText = 'min-width:0;white-space:nowrap;overflow:hidden;' +
@@ -1664,6 +1713,7 @@
     }
     chip.appendChild(text);
     chip.appendChild(makeStateLabel(item.state));
+    chip.appendChild(makeCtxSlot(item.context_percent));
     paintChipName(chip, item);
     return chip;
   }
@@ -5302,6 +5352,8 @@
     _linkifyLines: linkifyLines,
     _whenSettled: whenSettled,
     _renderStrip: renderStrip,
+    _syncSurfaces: syncSurfaces,
+    _markChipGone: markChipGone,
     _renderTail: renderTail,
     _sessionGone: sessionGone,
     _sendKeyName: sendKeyName,

@@ -38,6 +38,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from .state_detector import SessionStateAnalyzer, SessionState
 from . import push
 from .sessions import get_all_claude_sessions, get_session_path, get_sessions_activity
+from .context_usage import load_context_by_tmux_session
 from .session_delete import check_delete_safety, delete_session
 from . import session_restore as _restore
 from .session_create import (
@@ -603,6 +604,11 @@ def _poll_sessions() -> Dict[str, Any]:
     now = time.time()
     activity_map = get_sessions_activity()
 
+    try:
+        by_tmux = load_context_by_tmux_session()
+    except Exception:
+        by_tmux = {}
+
     # Parallel probe: ~1-2s instead of ~30s for 26 sessions
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(_probe_session, sessions))
@@ -610,6 +616,8 @@ def _poll_sessions() -> Dict[str, Any]:
     session_list = []
     for (name, state_val, path, context_percent, last_prompt, work_context,
          pending_count, working_since, progress, last_reply, recap) in results:
+        ctx_from_file = by_tmux.get(name)
+        context_percent = ctx_from_file if ctx_from_file is not None else context_percent
         # Only update timestamp when state actually changes
         prev_ts = _prev_session_timestamps.get(name, 0)
         prev_state = None

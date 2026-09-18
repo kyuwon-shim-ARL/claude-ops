@@ -310,7 +310,7 @@ class SessionStateAnalyzer:
 
         # Regex for OMC context percentage: ctx:67% or ctx:[████░░░░░░]67%
         self._context_pct_re = re.compile(
-            r'ctx:\[?[█░]*\]?(\d+)%'
+            r'ctx:\[?[█░#\-]*\]?(\d+)%'
         )
         # Fallback: Claude Code native context display
         self._context_native_re = re.compile(
