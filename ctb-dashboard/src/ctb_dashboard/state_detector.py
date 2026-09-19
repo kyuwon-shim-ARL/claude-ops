@@ -1210,8 +1210,7 @@ class SessionStateAnalyzer:
         return None
 
     # Same [Stage N/M ...] grammar the monitor's progress_tracker.py uses.
-    # Vendored, not imported: ctb-dashboard does not depend on claude_ctb
-    # (see dangerous_commands.py for the convention).
+    # Vendored, not imported: ctb-dashboard does not depend on claude_ctb.
     _SCREEN_STAGE_RE = re.compile(r"\[Stage\s+(\d+)/(\d+)(?:\s[^\]]*)?\]")
 
     def extract_screen_progress(self, screen_content: Optional[str]) -> Optional[tuple]:

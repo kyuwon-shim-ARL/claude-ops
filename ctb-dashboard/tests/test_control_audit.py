@@ -87,7 +87,7 @@ def test_successful_prompt_is_recorded(client, audit_log):
 
 @pytest.mark.parametrize("path,body,reason", [
     ("/api/sessions/nope/prompt", {"text": "hi"}, "no_session"),
-    ("/api/sessions/claude_demo/prompt", {"text": "sudo rm -rf /"}, "dangerous_pattern"),
+    ("/api/sessions/claude_demo/prompt", {"text": "a" * (_srv._MAX_PROMPT_BYTES + 1)}, "too_long"),
 ])
 def test_rejections_are_recorded_with_a_reason(client, audit_log, path, body, reason):
     client.post(path, json=body, headers=AUTH)

@@ -108,9 +108,22 @@ def test_empty_prompt_is_rejected(run):
     assert run.argvs == [], "nothing should reach tmux"
 
 
-def test_over_long_prompt_is_rejected(run):
+def test_over_size_prompt_is_rejected(run):
     with pytest.raises(ValueError):
-        session_input.send_prompt("claude_demo", "a" * (session_input.MAX_PROMPT_LENGTH + 1))
+        session_input.send_prompt("claude_demo", "a" * (session_input.MAX_PROMPT_BYTES + 1))
+    assert run.argvs == []
+
+
+def test_over_size_prompt_is_rejected_by_bytes_not_chars(run):
+    """A Korean string can be under the byte limit in char-count but over it
+    in bytes (3 bytes/char) -- this is what would slip through a char-based
+    cap."""
+    char_count = session_input.MAX_PROMPT_BYTES // 2 + 100
+    text = "가" * char_count
+    assert char_count < session_input.MAX_PROMPT_BYTES
+    assert len(text.encode("utf-8")) > session_input.MAX_PROMPT_BYTES
+    with pytest.raises(ValueError):
+        session_input.send_prompt("claude_demo", text)
     assert run.argvs == []
 
 

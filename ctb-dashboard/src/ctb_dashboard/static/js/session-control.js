@@ -4939,9 +4939,9 @@
         } else if (r.status === 409) {
           say('거부: ' + (r.body.reason || ''), 'var(--con-warn)');
           if (r.body.message) window.alert(r.body.message);
-        } else if (r.status === 400) {
-          say('차단됨', 'var(--con-err)');
-          window.alert('위험 명령 패턴으로 차단되었습니다.');
+        } else if (r.status === 413) {
+          say('너무 깁니다', 'var(--con-err)');
+          window.alert('텍스트가 너무 깁니다: ' + (r.body.detail || ''));
         } else {
           say('실패 (' + r.status + ')', 'var(--con-err)');
           if (r.body.detail) window.alert(String(r.body.detail));

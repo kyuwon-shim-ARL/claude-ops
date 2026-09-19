@@ -2,8 +2,9 @@
 
 send_prompt deliberately refuses when a session is WAITING_INPUT, which is
 precisely when a y/n or numbered choice is needed. This endpoint covers that
-gap, and its safety property is the allowlist: it must not become a way to type
-shell commands around the destructive-command screening.
+gap by skipping send_prompt's readiness gate, so its safety property is the
+allowlist: it must not become a way to type shell commands into a pane that
+gate would otherwise have refused.
 """
 
 import pytest

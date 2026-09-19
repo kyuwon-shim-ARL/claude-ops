@@ -19,7 +19,14 @@ import subprocess
 
 logger = logging.getLogger(__name__)
 
-MAX_PROMPT_LENGTH = 4000
+# tmux send-keys passes the body as a single argv element, and Linux caps one
+# argument at MAX_ARG_STRLEN (128 KiB), so oversize text fails at execve
+# instead of arriving. That is the binding path: load-buffer (used for
+# multi-line prompts, below) takes text over stdin and is not subject to it.
+# 64 KiB leaves headroom below the 128 KiB ceiling. The cap counts BYTES, not
+# characters: Korean is 3 bytes per character, so a character-based cap would
+# reject a short Korean message while letting an oversized one through.
+MAX_PROMPT_BYTES = 64 * 1024
 _TMUX_TIMEOUT = 5
 _BUFFER_NAME = "ctb-prompt"
 
@@ -145,9 +152,10 @@ def _validate(text: str) -> str:
     stripped = text.strip()
     if not stripped:
         raise ValueError("prompt is empty")
-    if len(text) > MAX_PROMPT_LENGTH:
+    size = len(text.encode("utf-8"))
+    if size > MAX_PROMPT_BYTES:
         raise ValueError(
-            f"prompt is {len(text)} chars, over the {MAX_PROMPT_LENGTH} limit"
+            f"prompt is {size} bytes, over the {MAX_PROMPT_BYTES} limit"
         )
     return stripped
 
@@ -224,8 +232,9 @@ def send_interrupt(name: str) -> None:
 
 # Keys the dashboard may send. An allowlist, not an escape hatch: this endpoint
 # exists to answer Claude's permission prompts (y/n, numbered choices, arrow
-# selection) from a phone. Arbitrary key sequences would be a way to type
-# commands while bypassing the destructive-command screening on send_prompt.
+# selection) from a phone. It skips send_prompt's readiness gate on purpose
+# (see session_key's docstring), so arbitrary key sequences would be a way to
+# type commands into a bare shell that gate would otherwise have refused.
 ALLOWED_KEYS = frozenset({
     "Enter", "Escape", "Tab", "Space", "BSpace",
     "Up", "Down", "Left", "Right",

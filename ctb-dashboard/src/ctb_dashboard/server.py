@@ -50,6 +50,7 @@ from .session_create import (
 )
 from .session_input import (
     ALLOWED_KEYS,
+    MAX_PROMPT_BYTES as _MAX_PROMPT_BYTES,
     pane_command,
     pane_has_claude,
     send_interrupt,
@@ -57,7 +58,6 @@ from .session_input import (
     send_prompt,
     session_exists,
 )
-from .dangerous_commands import is_dangerous_command
 from .session_readiness import classify_readiness, is_shell
 from . import stt as _stt
 from . import stt_corpus as _stt_corpus
@@ -1249,12 +1249,7 @@ class PromptRequest(BaseModel):
 
 @app.post("/api/sessions/{name}/prompt", dependencies=[Depends(require_control_token)])
 async def session_prompt(name: str, req: PromptRequest, request: Request):
-    """Type a prompt into a session and submit it.
-
-    Screening happens before anything reaches tmux: the same destructive-command
-    list the Telegram bot uses, since this endpoint is reachable from a phone
-    where the screen is not visible.
-    """
+    """Type a prompt into a session and submit it."""
     client = request.client.host if request.client else None
     if not _SESSION_NAME_RE.match(name):
         _audit("prompt", name, client, False, "invalid_name")
@@ -1269,11 +1264,16 @@ async def session_prompt(name: str, req: PromptRequest, request: Request):
         _audit("prompt", name, client, False, "no_session")
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if is_dangerous_command(req.text):
-        _audit("prompt", name, client, False, "dangerous_pattern")
+    # Same limit send_prompt enforces below -- see MAX_PROMPT_BYTES in
+    # session_input.py for why it's this value and why it's byte-based.
+    # Checked here too so the rejection is a clean 413 instead of the
+    # ValueError send_prompt would otherwise raise from inside the executor.
+    size = len(req.text.encode("utf-8"))
+    if size > _MAX_PROMPT_BYTES:
+        _audit("prompt", name, client, False, "too_long")
         raise HTTPException(
-            status_code=400,
-            detail="Blocked: text matches a destructive-command pattern",
+            status_code=413,
+            detail=f"Text too long: {size} bytes (limit {_MAX_PROMPT_BYTES})",
         )
 
     # Refuse rather than send blind: on a phone the screen is not visible, and
@@ -1347,8 +1347,9 @@ async def session_key(name: str, req: KeyRequest, request: Request):
 
     No readiness gate here on purpose: the state this is most needed in is
     exactly the one send_prompt refuses (WAITING_INPUT). Safety comes from the
-    allowlist instead, which also keeps this from becoming a way to type
-    commands around the destructive-command screening.
+    allowlist instead: without it, arbitrary key sequences would let this
+    endpoint type into a bare shell that classify_readiness would have
+    refused as a target for send_prompt.
     """
     client = request.client.host if request.client else None
     if not _SESSION_NAME_RE.match(name):

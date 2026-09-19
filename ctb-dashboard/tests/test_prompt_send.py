@@ -81,11 +81,20 @@ def test_missing_token_is_403(client, sent):
     assert sent == [], "auth must be decided before anything reaches tmux"
 
 
-def test_destructive_text_is_blocked(client, sent):
+def test_destructive_looking_text_is_not_screened(client, sent):
+    """Pattern screening is gone on purpose; this pins that it stays gone.
+
+    It matched prose rather than commands -- "sudo 없이 설치하는 방법 알려줘"
+    was blocked -- while buying nothing: these sessions run with
+    --dangerously-skip-permissions, so this text reaches exactly the same
+    ungated session as text typed into the pane by hand. What protects the
+    shell case is the readiness gate (see _READY_SCREEN above and
+    tests/test_send_confirmation.py), which is unaffected.
+    """
     r = client.post("/api/sessions/claude_demo/prompt",
                     json={"text": "sudo rm -rf /"}, headers=AUTH)
-    assert r.status_code == 400
-    assert sent == []
+    assert r.status_code == 200
+    assert sent == [("claude_demo", "sudo rm -rf /")]
 
 
 def test_empty_text_is_422(client, sent, monkeypatch):
