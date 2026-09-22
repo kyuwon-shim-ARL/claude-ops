@@ -918,6 +918,100 @@ class SessionStateAnalyzer:
     # _detect_working_state_original removed in e007 (dead code since commit 099a52d).
     # Superseded by priority-based _detect_working_state() with OMC-aware filtering.
     
+    # --- a chooser's own footer -------------------------------------------
+    #
+    # When Claude Code puts a chooser up it draws the keys underneath it:
+    #
+    #     Enter to confirm · Esc to cancel
+    #     Enter to select · ↑/↓ to navigate · Esc to cancel
+    #
+    # That footer is worth more than any of the question wordings above it.
+    # The wordings are guesses -- "Do you want to proceed?", "Choose an
+    # option:" -- and they missed the one that matters most in practice: the
+    # "Do you trust this folder?" prompt a session opens with, which blocks it
+    # completely. Eleven live sessions were sitting on a chooser and every one
+    # of them was reported IDLE.
+    #
+    # What identifies the footer is its FORM, not its words: a line made of
+    # nothing but "<key> to <verb>" segments joined by '·'. That is what keeps
+    # the far more common lines that merely mention a key out of it --
+    #
+    #     … +2 lines (ctrl+o to expand)
+    #     Read 1 file (ctrl+o to expand)
+    #     ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 8 agents
+    #
+    # -- all of which are hints parenthesised inside a longer line, and the
+    # last of which sits at the bottom of every working session on the
+    # machine. Prose that quotes a hint ("the Esc to close overlay") is
+    # excluded the same way: the rest of the sentence is not a key segment.
+    _KEY_HINT_KEY = (
+        r'(?:enter|return|esc(?:ape)?|tab|shift\s*\+\s*tab|space|'
+        r'ctrl\s*\+\s*\w+|alt\s*\+\s*\w+|'
+        r'[\u2190-\u2193](?:\s*/\s*[\u2190-\u2193])?|[\u2190-\u2193]{2}|'
+        r'[a-z0-9])'
+    )
+    _KEY_HINT_SEGMENT = re.compile(
+        r'^' + _KEY_HINT_KEY + r'\s+to\s+(?P<verb>[a-z]+)(?:\s+[a-z]+){0,3}$',
+        re.IGNORECASE)
+
+    # Verbs that make a footer mean the opposite. 'interrupt' is what Claude
+    # offers while it is generating, 'cycle' belongs to the permission-mode
+    # line, 'expand' to a collapsed tool result. None of them is a question.
+    _NOT_A_QUESTION = frozenset({"interrupt", "cycle", "expand"})
+
+    # Two segments, not one. A chooser names at least the accept key and the
+    # way out, and the bar has to be above a single "Esc to close" appearing
+    # in a sentence. A one-segment footer, if Claude Code ever draws one, is
+    # left to the wordings above rather than widening this.
+    _MIN_HINT_SEGMENTS = 2
+
+    # Box-drawing verticals. A chooser's footer is drawn OUTSIDE the box, on a
+    # line of its own -- all three forms found in a hundred and sixty thousand
+    # lines of real scrollback are bare. Anything fenced by these is something
+    # else quoting the words: a table, or -- the one that matters -- text the
+    # user typed or pasted into the input box, which Claude Code draws as a
+    # bordered box. An earlier version STRIPPED these before matching, which
+    # turned the continuation line of a pasted draft into a perfect footer and
+    # reported the session as blocked on a chooser that does not exist.
+    # The footer has to be the LAST non-blank line on the pane.
+    #
+    # Not "near the bottom": Claude Code's input box is sometimes drawn with
+    # no side borders, so a draft that quotes a footer --
+    #
+    #     ────────────────────────────────────
+    #     ❯ Please explain this footer:
+    #       Enter to confirm · Esc to cancel
+    #     ────────────────────────────────────
+    #       ⏵⏵ bypass permissions on (shift+tab to cycle)
+    #
+    # -- puts a perfect footer five lines off the bottom while the session is
+    # not blocked on anything. Checked against every pane on this machine: all
+    # eleven live choosers had the footer as the last line, and the only other
+    # matches in a hundred and sixty thousand lines of scrollback were forty
+    # and seventy-nine lines up, in transcript text.
+
+    _BOX_VERTICALS = '\u2502\u2503\u2551|'
+
+    @classmethod
+    def _is_key_hint_footer(cls, line: str) -> bool:
+        """Is this line a chooser's key footer, and nothing else?"""
+        stripped = line.strip()
+        if any(ch in stripped for ch in cls._BOX_VERTICALS):
+            return False
+        parts = [p.strip() for p in stripped.split('\u00b7')]
+        if len(parts) < cls._MIN_HINT_SEGMENTS:
+            return False
+        for part in parts:
+            match = cls._KEY_HINT_SEGMENT.match(part)
+            if not match:
+                return False
+            # From the regex, not a split on a literal ' to ': the pattern
+            # accepts any whitespace, and a tab made the split return one
+            # element and raise IndexError out through get_state.
+            if match.group('verb').lower() in cls._NOT_A_QUESTION:
+                return False
+        return True
+
     def _detect_input_waiting(self, screen_content: str) -> bool:
         """
         Detect if session is waiting for user input based on prompt patterns
@@ -946,6 +1040,16 @@ class SessionStateAnalyzer:
         for indicator in self._WORKING_GUARD_PATTERNS:
             if indicator in recent_content:
                 return False
+
+        # The chooser's own footer first: it is the structural signal, and it
+        # is drawn at the foot of the chooser, which can sit a line or two
+        # above the bottom of the pane. Kept identical to the dashboard's copy
+        # in ctb-dashboard/src/ctb_dashboard/state_detector.py -- the two
+        # detectors are meant to agree, and test_session_state_parity.py is
+        # what says so.
+        tail = [ln for ln in lines if ln.strip()]
+        if tail and self._is_key_hint_footer(tail[-1]):
+            return True
 
         # Check last 10 lines for input waiting patterns
         # Input prompts are typically at the bottom of the screen
