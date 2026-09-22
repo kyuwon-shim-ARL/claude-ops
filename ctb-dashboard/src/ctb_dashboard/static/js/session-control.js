@@ -5303,12 +5303,71 @@
   var TAIL_KEY = 'ctb_console_tails';
   var TAIL_KEEP = 30;
 
+  /* Forty lines, whatever the console is currently showing.
+   *
+   * This used to keep the whole window, at whatever depth the reader had
+   * scrolled it to -- which the comment above never said and nothing bounded.
+   * Every repaint rewrote it, so twice a second the page parsed the entire
+   * store, re-serialised all thirty sessions and wrote them back
+   * synchronously: two megabytes of JSON per poll once a few sessions had
+   * been scrolled through their history. Past the storage quota every one of
+   * those writes threw, was swallowed, and kept happening -- all of the cost,
+   * none of the effect, forever.
+   *
+   * Forty lines is what the store is for: painting something the instant a
+   * session is switched to, until the poll replaces it a second later. */
+  /* Lines are not a size: the pane is captured with `-J`, which joins a
+   * wrapped line back together, so forty of them can still be enormous.
+   * Both limits, and the length one last.
+   *
+   * Characters, not bytes -- UTF-16 code units, which is what String.length
+   * counts and what browsers charge localStorage in, so it is the right unit
+   * for bounding the store even though eight thousand Hangul syllables are
+   * twenty-four thousand bytes of UTF-8. */
+  var TAIL_MAX_CHARS = 8192;
+
+  function trimTail(log) {
+    var text = log || '';
+    var lines = text.split('\n');
+    if (lines.length > TAIL_LINES) text = lines.slice(-TAIL_LINES).join('\n');
+    if (text.length > TAIL_MAX_CHARS) {
+      text = text.slice(-TAIL_MAX_CHARS);
+      /* Cut at a line boundary rather than mid-line: slice() counts UTF-16
+       * units, so it can land inside a surrogate pair and paint a replacement
+       * character, and half a first line looks like a rendering fault rather
+       * than a trim. If there is no newline to cut at, the whole thing is one
+       * joined line and there is nothing to preserve. */
+      var nl = text.indexOf('\n');
+      text = nl >= 0 ? text.slice(nl + 1) : '';
+    }
+    return text;
+  }
+
+  /* Every entry, not just the one being written.
+   *
+   * Trimming only the session in hand would have left the store exactly as
+   * heavy as it already was for anyone who had used the console before this:
+   * the other twenty-nine entries keep their full windows, are parsed and
+   * re-serialised on every poll just the same, and paint untrimmed when
+   * recalled. The store has to be normalised on the way through, once, by
+   * whoever touches it next. */
+  function normalise(entry) {
+    if (!entry || typeof entry.log !== 'string') return null;
+    return { log: trimTail(entry.log), cols: entry.cols || 0,
+             ghost: entry.ghost === true, at: entry.at || 0 };
+  }
+
   function rememberTail(name, data) {
-    var entry = { log: data.log || '', cols: data.cols || 0, ghost: data.ghost === true,
-                  depth: state.depth, at: Date.now() };
+    var entry = { log: trimTail(data.log), cols: data.cols || 0,
+                  ghost: data.ghost === true, at: Date.now() };
     state.cache[name] = entry;
     try {
-      var all = JSON.parse(localStorage.getItem(TAIL_KEY)) || {};
+      var raw = JSON.parse(localStorage.getItem(TAIL_KEY)) || {};
+      var all = {};
+      Object.keys(raw).forEach(function (n) {
+        var kept = normalise(raw[n]);
+        if (kept) all[n] = kept;
+      });
       all[name] = entry;
       var names = Object.keys(all).sort(function (a, b) { return all[b].at - all[a].at; });
       names.slice(TAIL_KEEP).forEach(function (n) { delete all[n]; });
@@ -5320,7 +5379,10 @@
     if (state.cache[name]) return state.cache[name];
     try {
       var all = JSON.parse(localStorage.getItem(TAIL_KEY)) || {};
-      if (all[name] && typeof all[name].log === 'string') return all[name];
+      /* Normalised on the way out too: an entry written before this existed
+       * is a full window, and painting it would put the deep pane back on
+       * screen even though nothing will poll for it again. */
+      return normalise(all[name]);
     } catch (e) { /* unreadable */ }
     return null;
   }
@@ -5420,7 +5482,13 @@
     if (kept) {
       state.cols = kept.cols || 0;
       state.ghost = kept.ghost === true;
-      state.depth = kept.depth || TAIL_LINES;
+      /* The depth deliberately does NOT come back with the pane. Scrolling up
+       * for history raised it by four hundred lines a step, to five thousand,
+       * and restoring it here made that permanent: every later visit to the
+       * session polled and repainted the deep window for as long as the
+       * browser kept its storage, whether or not anyone was reading history.
+       * It is a property of the reading, not of the session, so it starts
+       * over -- set to TAIL_LINES above -- and scrolling up raises it again. */
       renderTail(kept.log || '');
       el.tail.scrollTop = el.tail.scrollHeight;
       setStatus('마지막으로 본 화면 · 갱신 중…', 'var(--con-muted)');
@@ -5581,6 +5649,8 @@
     _syncSurfaces: syncSurfaces,
     _markChipGone: markChipGone,
     _renderTail: renderTail,
+    _trimTail: trimTail,
+    _growTail: growTail,
     _sessionGone: sessionGone,
     _sendKeyName: sendKeyName,
     _sendArmed: sendArmed,
