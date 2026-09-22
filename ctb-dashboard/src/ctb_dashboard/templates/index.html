@@ -640,7 +640,10 @@
       // Raw read. Never awaits the queue -- it runs inside it. Hands back what
       // the server holds; whether to show it is the caller's decision.
       try {
-        const r = await fetch('/api/pinned');
+        // no-store, not just because the server now says so: a response
+        // already sitting in the phone's cache from before that header
+        // existed would still be served from it.
+        const r = await fetch('/api/pinned', { cache: 'no-store' });
         const data = await r.json();
         if (data && data.Q1 && data.Q2 && data.Q3 && data.Q4) {
           _pinnedLoaded = true;
@@ -2333,7 +2336,10 @@
       if (evtSource) evtSource.close();
 
       try {
-        const r = await fetch('/api/pinned');
+        // no-store, not just because the server now says so: a response
+        // already sitting in the phone's cache from before that header
+        // existed would still be served from it.
+        const r = await fetch('/api/pinned', { cache: 'no-store' });
         _quadsCache = await r.json();
         _pinnedLoaded = true;
       } catch {
@@ -2341,7 +2347,7 @@
         // observe server state at least once.
       }
 
-      fetch('/api/sessions')
+      fetch('/api/sessions', { cache: 'no-store' })
         .then(r => r.json())
         .then(render)
         .catch(() => {});
@@ -2387,7 +2393,7 @@
     setInterval(() => {
       // Only worth a request when the stream is not already feeding us.
       if (sseOpen && (Date.now() - lastDataAt) < POLL_MS) return;
-      fetch('/api/sessions')
+      fetch('/api/sessions', { cache: 'no-store' })
         .then(r => r.json())
         .then(render)
         .catch(() => {});
@@ -2406,7 +2412,7 @@
      * VSCode while the browser has it right. */
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) return;
-      fetch('/api/sessions').then(r => r.json()).then(render).catch(() => {});
+      fetch('/api/sessions', { cache: 'no-store' }).then(r => r.json()).then(render).catch(() => {});
     });
 
     function pollTicketLinks() {
@@ -2663,7 +2669,7 @@
       if (_vscodeApi) {
         _vscodeApi.postMessage({ type: 'deleteSession', session: name, force: !!force });
         closeDeleteModal();
-        fetch('/api/sessions').then(r => r.json()).then(render).catch(() => {});
+        fetch('/api/sessions', { cache: 'no-store' }).then(r => r.json()).then(render).catch(() => {});
         return;
       }
       try {
@@ -2677,7 +2683,7 @@
           if (data.removed_worktree) parts.push('워크트리 제거됨');
           if (data.branch_deleted) parts.push('브랜치 삭제됨');
           closeDeleteModal();
-          fetch('/api/sessions').then(r => r.json()).then(render).catch(() => {});
+          fetch('/api/sessions', { cache: 'no-store' }).then(r => r.json()).then(render).catch(() => {});
         } else if (res.status === 409 || data.status === 'blocked') {
           renderBlockedModal(name, data.check || {});
         } else {

@@ -927,7 +927,7 @@ if os.path.isdir(static_dir):
 
 @app.middleware("http")
 async def _revalidate_static(request: Request, call_next):
-    """Make the browser check /static with us before reusing its copy.
+    """Stop the browser reusing a copy of anything that moves.
 
     StaticFiles sends an ETag and Last-Modified but no Cache-Control, and a
     response with neither Cache-Control nor Expires is heuristically cached:
@@ -940,6 +940,21 @@ async def _revalidate_static(request: Request, call_next):
     response = await call_next(request)
     if request.url.path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-cache"
+    elif request.url.path.startswith("/api/"):
+        # Live state, and none of it carried a Cache-Control, an ETag or an
+        # Expires. A response with no freshness information at all is
+        # heuristically cacheable -- the browser invents a lifetime and serves
+        # the old body without asking -- which is the same trap this function
+        # was written for, one directory over.
+        #
+        # On a phone that showed up as the importance of a session reading
+        # wrong, and as a change to it lasting a few seconds and then coming
+        # back: the board re-reads /api/pinned every ten seconds and adopts
+        # what it gets, so a cached body undid the write that had just
+        # succeeded. no-store rather than no-cache because there is nothing
+        # here worth revalidating -- every one of these answers is a snapshot
+        # of something that has probably already changed.
+        response.headers["Cache-Control"] = "no-store"
     return response
 
 
