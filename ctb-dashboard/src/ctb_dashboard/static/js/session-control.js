@@ -155,6 +155,7 @@
     down: 'M12 5v14M5 12l7 7 7-7',
     left: 'M19 12H5M12 5l-7 7 7 7',
     right: 'M5 12h14M12 5l7 7-7 7',
+    first: 'M5 5v14M20 12H9M14 7l-5 5 5 5',
     backspace: 'M8 5h12v14H8L3 12zM11 9l5 6M16 9l-5 6',
     tab: 'M4 12h13M12 7l5 5-5 5M20 6v12',
     enter: 'M20 5v7a2 2 0 0 1-2 2H5M9 10l-4 4 4 4',
@@ -389,6 +390,53 @@
       'scrollbar-width:none',
     ].join(';');
     makePannable(strip);
+
+    /* Back to the first chip, pinned to the rail's right edge.
+     *
+     * The rail holds every session -- ninety of them on this machine -- in
+     * the grid's order, and opening one scrolls it to the middle. Getting
+     * back to the top of that order meant flinging the rail for as long as it
+     * took, on a phone with a finger. Sticky rather than a sibling of the
+     * rail: the chips scroll underneath it, so the button holds its place
+     * without a wrapper element that every display:none on the rail would
+     * then have to know about. */
+    var railHome = document.createElement('button');
+    railHome.type = 'button';
+    railHome.appendChild(icon('first', 15));
+    railHome.title = '맨 처음 세션으로';
+    railHome.setAttribute('aria-label', '세션 목록 맨 처음으로');
+    railHome.className = 'con-rail-home';
+    railHome.style.cssText = [
+      'position:sticky', 'right:0', 'flex-shrink:0', 'z-index:2',
+      'display:none', 'align-items:center', 'justify-content:center',
+      /* 44px: the chips pass under it and a shorter fade cut their names off
+       * mid-word against a hard edge, and it is also the smallest a thumb
+       * should be asked to find. */
+      'width:46px', 'align-self:stretch', 'cursor:pointer',
+      'border:none', 'border-radius:7px',
+      /* The chips pass under it, so it needs its own ground: opaque under the
+       * icon, with the fade confined to a narrow strip at the leading edge so
+       * a chip's name dissolves rather than ending at a line -- and never
+       * shows THROUGH the icon, which a fade spread across the whole button
+       * let it do. The padding keeps the icon centred in the opaque part. */
+      'background:linear-gradient(to right,transparent 0,var(--con-sheet) 14px)',
+      'padding:0 0 0 14px',
+      'color:var(--con-muted)', 'transition:color 0.15s ease',
+    ].join(';');
+    railHome.addEventListener('mouseenter', function () {
+      railHome.style.color = 'var(--con-text)';
+    });
+    railHome.addEventListener('mouseleave', function () {
+      railHome.style.color = 'var(--con-muted)';
+    });
+    railHome.addEventListener('click', function () {
+      try {
+        strip.scrollTo({ left: 0, behavior: 'smooth' });
+      } catch (e) {
+        strip.scrollLeft = 0;     /* older WebKit: no options object */
+      }
+    });
+    strip.addEventListener('scroll', function () { paintRailHome(false); });
 
     var header = document.createElement('div');
     header.style.cssText =
@@ -886,7 +934,7 @@
     document.body.appendChild(root);
 
     el = { keys: keys, keysMore: more, clip: clip, picker: picker, endPill: endPill, prevPill: prevPill,
-           root: root, strip: strip, title: title, status: status, tail: tail, mic: mic,
+           root: root, strip: strip, railHome: railHome, title: title, status: status, tail: tail, mic: mic,
            frozen: frozen, input: input,
            send: send, silent: silent, quad: quad, quadNum: quadNum };
 
@@ -912,6 +960,7 @@
         fitPending = 0;
         fitKeys();
         updateEndPill();
+        paintRailHome(true);   /* a narrower window can start the rail scrolling */
       });
     });
     window.addEventListener('orientationchange', function () {
@@ -1747,9 +1796,34 @@
     return chip;
   }
 
+  /* Shown only when the rail has somewhere to go back to: with a handful of
+   * sessions everything is already on screen and the button would be a
+   * control that does nothing. Dimmed rather than removed once the rail IS at
+   * the start, so it does not appear and disappear under the finger that is
+   * scrolling. */
+  var railOverflows = false;
+
+  function paintRailHome(measure) {
+    var btn = el.railHome;
+    if (!btn || !el.strip) return;
+    /* scrollWidth forces a layout, and this is called from a scroll handler
+     * that fires the length of a fling. Whether the rail overflows can only
+     * change when its contents or its width do, so it is measured there and
+     * only scrollLeft -- which the scroll event already made current -- is
+     * read on the way past. */
+    if (measure) railOverflows = el.strip.scrollWidth - el.strip.clientWidth > 8;
+    if (!railOverflows) { btn.style.display = 'none'; return; }
+    btn.style.display = 'flex';
+    var home = el.strip.scrollLeft <= 8;
+    btn.style.opacity = home ? '0.3' : '1';
+    btn.style.pointerEvents = home ? 'none' : 'auto';
+  }
+
   function appendChip(item, index) {
     el.strip.style.display = 'flex';
-    el.strip.appendChild(makeChip(item, index));
+    /* Before the button, which is always the rail's last child. */
+    el.strip.insertBefore(makeChip(item, index), el.railHome || null);
+    paintRailHome(true);
   }
 
   function renderStrip() {
@@ -1806,11 +1880,15 @@
       return;
     }
 
+    /* textContent = '' above took the button with the chips. */
+    if (el.railHome) el.strip.appendChild(el.railHome);
+
     if (current) {
       /* Keep the open session in view without yanking the page around it. */
       el.strip.scrollLeft = Math.max(0,
         current.offsetLeft - el.strip.clientWidth / 2 + current.offsetWidth / 2);
     }
+    paintRailHome(true);
   }
 
   /* --- number shortcuts -------------------------------------------------- */
@@ -5649,6 +5727,7 @@
     _syncSurfaces: syncSurfaces,
     _markChipGone: markChipGone,
     _renderTail: renderTail,
+    _railHome: function () { return el.railHome; },
     _trimTail: trimTail,
     _growTail: growTail,
     _sessionGone: sessionGone,
