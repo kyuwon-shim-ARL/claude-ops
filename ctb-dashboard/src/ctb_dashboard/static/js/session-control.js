@@ -166,6 +166,7 @@
     dot: 'M12 12m-2.5 0a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0',
     pin: 'M9 3h6M12 3v7M12 10l-4 5h8l-4-5zM12 15v6',
     textSearch: 'M4 6h10M4 10h6M4 14h4M14.5 12.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM21 22l-3.2-3.2',
+    clip: 'M15 7l-6.5 6.5a2.5 2.5 0 0 0 3.5 3.5L19 10a4.5 4.5 0 0 0-6.4-6.4L5.5 10.7a6.5 6.5 0 0 0 9.2 9.2L20 14.6',
     mic: 'M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM6 11a6 6 0 0 0 12 0M12 17v4M9 21h6',
   };
   function icon(name, size) {
@@ -293,7 +294,7 @@
       /* Icon only on a phone: with the word it was a third row by itself. */
       '#ctb-console .con-key-label{display:none}',
       /* The input row: two 40px keys, the rest is the box. */
-      '#ctb-console .con-mic,#ctb-console .con-send{min-width:40px!important;width:40px;padding:0!important;justify-content:center}',
+      '#ctb-console .con-mic,#ctb-console .con-clip,#ctb-console .con-send{min-width:40px!important;width:40px;padding:0!important;justify-content:center}',
       '}',
       /* A key that changed the input box: the box line pulses once so the
        * eye lands on what the key did, not only on the status text. */
@@ -765,7 +766,34 @@
     mic.style.touchAction = 'manipulation';
     bindMic(mic);
 
+    /* Files. On a phone this is the whole feature -- there is no drag there --
+     * and on a desktop it is the fallback for people who would rather pick
+     * than throw. Hidden in the VSCode webview, whose proxy forwards GET only. */
+    var picker = buildFilePicker();
+    var clip = document.createElement('button');
+    clip.type = 'button';
+    clip.appendChild(icon('clip', 18));
+    clip.title = '파일 올리기 — 프로젝트의 .ctb-uploads 폴더로, 경로는 입력창에 초안으로만';
+    clip.setAttribute('aria-label', '파일 올리기');
+    styleBtn(clip, '');
+    clip.classList.add('con-clip');   /* after styleBtn -- it rewrites className */
+    clip.style.minWidth = '44px';
+    clip.style.touchAction = 'manipulation';
+    /* The webview's proxy forwards GET only, so an upload there would fail
+     * with a network error rather than a message. */
+    if (IS_VSCODE) clip.style.display = 'none';
+    clip.addEventListener('click', function () {
+      if (!state.session) return;
+      /* Remembered on the element: the sheet can take seconds on a phone, and
+       * the change event must upload to the session that was open when the
+       * finger tapped, not whatever is open when it closes. */
+      picker.setAttribute('data-for', state.session);
+      picker.click();
+    });
+
     row.appendChild(input);
+    row.appendChild(picker);
+    row.appendChild(clip);
     row.appendChild(mic);
     row.appendChild(send);
 
@@ -854,9 +882,10 @@
     root.appendChild(keys);
     root.appendChild(row);
     keepCaret(root, input);
+    bindDrop(root);
     document.body.appendChild(root);
 
-    el = { keys: keys, keysMore: more, endPill: endPill, prevPill: prevPill,
+    el = { keys: keys, keysMore: more, clip: clip, picker: picker, endPill: endPill, prevPill: prevPill,
            root: root, strip: strip, title: title, status: status, tail: tail, mic: mic,
            frozen: frozen, input: input,
            send: send, silent: silent, quad: quad, quadNum: quadNum };
@@ -4863,6 +4892,203 @@
     btn.addEventListener('pointerup', up);
     btn.addEventListener('pointercancel', up);
     btn.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  }
+
+  /* --- files: something for the session to work on ---------------------- */
+
+  /* One request per file, raw body, filename in the query.
+   *
+   * Not FormData: the server takes the body by hand so that the control token
+   * is checked before a byte is read, and ctbControl.send cannot carry it
+   * anyway -- it hard-codes Content-Type: application/json, which would
+   * destroy a multipart boundary. The token is attached here instead, with
+   * the same 403 re-prompt ctbControl performs.
+   *
+   * The session is passed in, never read from state: the picker takes a beat
+   * on a phone, and a switch while it is open would otherwise drop another
+   * project's path into the box in front of you.
+   */
+  function uploadOne(session, file) {
+    var url = window.ctbControl.api(
+      '/api/sessions/' + encodeURIComponent(session) +
+      '/upload?filename=' + encodeURIComponent(file.name || 'upload'));
+    /* iOS suspends a backgrounded PWA mid-request: without this the spinner
+     * stays up forever on a phone that was put in a pocket. */
+    var ctl = ('AbortController' in window) ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 120000);
+    var opts = {
+      method: 'POST',
+      body: file,
+      headers: { 'X-CTB-Secret': window.ctbControl.token() || '' },
+    };
+    if (ctl) opts.signal = ctl.signal;
+    return fetch(url, opts).then(function (res) {
+      if (res.status === 403 || res.status === 503) {
+        if (!window.ctbControl.recover(res)) return res;
+        var retry = {
+          method: 'POST', body: file,
+          headers: { 'X-CTB-Secret': window.ctbControl.token() || '' },
+        };
+        if (ctl) retry.signal = ctl.signal;
+        return fetch(url, retry);
+      }
+      return res;
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (body) {
+        return { status: res.status, body: body };
+      });
+    }).finally(function () { clearTimeout(timer); });
+  }
+
+  /* Files go in one at a time rather than all at once: a phone on a hotel
+   * network uploading eight photos in parallel is how you get eight timeouts
+   * instead of three files. */
+  function uploadFiles(session, files) {
+    var list = Array.prototype.slice.call(files || []);
+    if (!list.length || !session) return;
+    var done = [], failed = [];
+    var say = function (text, color) {
+      if (state.session === session) setStatus(text, color);
+    };
+    say('업로드 중… (0/' + list.length + ')', 'var(--con-muted)');
+
+    var chain = Promise.resolve();
+    list.forEach(function (file, i) {
+      chain = chain.then(function () {
+        return uploadOne(session, file).then(function (r) {
+          if (r.status === 200 && r.body.path) done.push(r.body);
+          else failed.push((file.name || '파일') + ': ' +
+                           (r.body.detail || ('HTTP ' + r.status)));
+          say('업로드 중… (' + (i + 1) + '/' + list.length + ')', 'var(--con-muted)');
+        }).catch(function (e) {
+          failed.push((file.name || '파일') + ': ' +
+                      (e && e.name === 'AbortError' ? '시간 초과' : '전송 실패'));
+        });
+      });
+    });
+
+    chain.then(function () {
+      if (done.length) {
+        /* The path is the point: the user tells the session what to do with
+         * the file in words, so the name has to be in the box, not in a
+         * notification that scrolls away. Draft only -- nothing is sent. */
+        uploadDraft(session, done.map(function (d) { return d.path; }).join(' '));
+      }
+      if (failed.length) {
+        say((done.length ? done.length + '개 업로드 · ' : '') +
+            failed.length + '개 실패 · ' + failed[0].slice(0, 70), 'var(--con-err)');
+      } else if (done.length) {
+        say(done.length + '개 업로드됨 · 경로를 입력창에 넣었습니다', 'var(--con-ok)');
+      }
+    });
+  }
+
+  /* Same insertion the transcriber uses, minus the focus: a drop is a mouse
+   * gesture and stealing the caret mid-drag is disorienting.
+   *
+   * Written to the session the upload was FOR, which is not always the one on
+   * screen -- a phone upload takes seconds and the user reads something else
+   * meanwhile. It used to check `state.session === session` and, when they
+   * differed, drop the path on the floor: the file was on disk and its path
+   * was nowhere, with no way to get it back but uploading again. The draft
+   * store is the session's own, so writing it there is what makes the path
+   * still be waiting when they come back. */
+  function uploadDraft(session, text) {
+    var open = state.session === session;
+    var current = open && el.input ? el.input.value : (state.drafts[session] || '');
+    if (current && !/\s$/.test(current)) text = ' ' + text;
+    var value = current + text + ' ';
+    state.drafts[session] = value;
+    saveDrafts();
+    if (!open || !el.input) return;
+    var box = el.input;
+    box.value = value;
+    box.classList.remove('con-flash');
+    void box.offsetWidth;
+    box.classList.add('con-flash');
+  }
+
+  function buildFilePicker() {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    /* No accept filter: on iOS that is what makes the sheet offer the camera,
+     * the photo library AND Files rather than one of them. */
+    input.style.cssText = 'position:absolute;width:1px;height:1px;opacity:0;pointer-events:none';
+    input.addEventListener('change', function () {
+      uploadFiles(input.getAttribute('data-for') || state.session, input.files);
+      input.value = '';   /* so picking the same file twice fires again */
+    });
+    return input;
+  }
+
+  /* The whole sheet is the drop target, not a small zone: on a desktop the
+   * gesture is "throw it at the console", and a 200px rectangle to aim at is
+   * a worse version of the button. */
+  /* A file dropped anywhere else replaces the page with that file -- the
+   * dashboard simply disappears, and on a phone-sized PWA there is no back
+   * button to bring it back. The console's own handlers run first and stop
+   * propagation by preventing default themselves. */
+  function guardStrayDrops() {
+    var swallow = function (e) {
+      var dt = e.dataTransfer;
+      var types = (dt && dt.types) || [];
+      for (var i = 0; i < types.length; i++) {
+        if (types[i] === 'Files') { e.preventDefault(); return; }
+      }
+    };
+    window.addEventListener('dragover', swallow);
+    window.addEventListener('drop', swallow);
+  }
+  guardStrayDrops();
+
+  function bindDrop(root) {
+    var depth = 0;
+    var overlay = document.createElement('div');
+    overlay.style.cssText = [
+      'position:absolute', 'inset:0', 'z-index:70', 'display:none',
+      'align-items:center', 'justify-content:center', 'pointer-events:none',
+      'font-size:15px', 'font-weight:700', 'letter-spacing:0.01em',
+      'background:rgba(99,102,241,0.14)', 'color:var(--con-text)',
+      'border:2px dashed rgba(129,140,248,0.9)', 'border-radius:12px',
+      'backdrop-filter:blur(2px)', '-webkit-backdrop-filter:blur(2px)',
+    ].join(';');
+    overlay.textContent = '놓으면 업로드';
+    root.appendChild(overlay);
+
+    var hasFiles = function (e) {
+      var dt = e.dataTransfer;
+      if (!dt) return false;
+      var types = dt.types || [];
+      for (var i = 0; i < types.length; i++) if (types[i] === 'Files') return true;
+      return false;
+    };
+    /* dragenter/leave fire for every child element the cursor crosses, so a
+     * plain leave-hides-it would flicker the overlay off over every button.
+     * Counting the pairs is what makes it stable. */
+    root.addEventListener('dragenter', function (e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth++;
+      if (state.session) overlay.style.display = 'flex';
+    });
+    root.addEventListener('dragover', function (e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    });
+    root.addEventListener('dragleave', function (e) {
+      if (!hasFiles(e)) return;
+      depth = Math.max(0, depth - 1);
+      if (!depth) overlay.style.display = 'none';
+    });
+    root.addEventListener('drop', function (e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth = 0;
+      overlay.style.display = 'none';
+      uploadFiles(state.session, e.dataTransfer.files);
+    });
   }
 
   /* --- actions ---------------------------------------------------------- */

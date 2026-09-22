@@ -33,6 +33,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
+from starlette.requests import ClientDisconnect
 from starlette.middleware.sessions import SessionMiddleware
 
 from .state_detector import SessionStateAnalyzer, SessionState
@@ -41,6 +42,21 @@ from .sessions import get_all_claude_sessions, get_session_path, get_sessions_ac
 from .context_usage import load_context_by_tmux_session
 from .session_delete import check_delete_safety, delete_session
 from . import session_restore as _restore
+from .session_upload import (
+    MAX_CONCURRENT as _UPLOAD_CONCURRENCY,
+    MAX_FILE_BYTES as _UPLOAD_MAX,
+    RECEIVE_TIMEOUT as _UPLOAD_TIMEOUT,
+    UPLOAD_DIRNAME as _UPLOAD_DIRNAME,
+    UploadError,
+    _create_exclusive as _upload_create,
+    open_upload_dir as _upload_open_dir,
+    project_for as _upload_project,
+    release as _upload_release,
+    reserve as _upload_reserve,
+    safe_name as _upload_safe_name,
+    unlink_if_same as _upload_unlink,
+    write_all as _upload_write,
+)
 from .session_create import (
     CreateError,
     claude_command,
@@ -1292,7 +1308,9 @@ async def session_prompt(name: str, req: PromptRequest, request: Request):
     claude_running = False
     if is_shell(cmd):
         claude_running = await loop.run_in_executor(None, pane_has_claude, name)
-    can_send, reason, message = classify_readiness(state, before, cmd, claude_running)
+    can_send, reason, message = classify_readiness(
+        state, before, cmd, claude_running, req.text
+    )
     if not can_send:
         _audit("prompt", name, client, False, reason)
         return Response(
@@ -1413,6 +1431,174 @@ async def session_interrupt(name: str, request: Request):
 
 class DeleteRequest(BaseModel):
     force: bool = False
+
+
+# --- file upload: something for the session to work on -------------------------
+
+# Its own budget. An upload is one request that can carry 25 MB, so letting it
+# share the control limiter would mean a photo burst from a phone eating the
+# allowance that stops a session doing damage.
+_upload_limiter = _RateLimiter(
+    max_events=int(os.environ.get("CTB_UPLOAD_RATE_MAX", "60")),
+    window=float(os.environ.get("CTB_UPLOAD_RATE_WINDOW", "60")),
+)
+
+
+# A counter, not a semaphore. Nobody waits: over the cap the answer is "busy,
+# try again", which is what a phone should be told anyway. That also sidesteps
+# the semaphore's cancellation corner -- a permit granted to an acquire that is
+# being cancelled can be lost, and a lost permit lowers the cap permanently.
+# The event loop is single-threaded, so this needs no lock.
+_upload_inflight = 0
+
+
+@app.post("/api/sessions/{name}/upload", dependencies=[Depends(require_control_token)])
+async def session_upload(name: str, request: Request, filename: str = ""):
+    """One file, raw in the body, into the session project's upload folder.
+
+    Raw body rather than multipart, for one reason that matters: FastAPI parses
+    a declared multipart form BEFORE the route's dependencies run, so the
+    control token would be checked only after an unauthenticated caller had
+    already spooled their payload to disk. Reading the stream by hand here
+    happens after the token, after the rate limit, and after the session is
+    known -- and the ceiling below counts bytes actually received, which is the
+    only number a caller cannot lie about.
+    """
+    client = request.client.host if request.client else None
+    if not _SESSION_NAME_RE.match(name) or ":" in name:
+        # ':' is legal in the shared session-name pattern but is also tmux
+        # target syntax -- 'sess:1.0' names another pane, whose directory is
+        # not the one the user is looking at.
+        _audit("upload", name, client, False, "invalid_name")
+        raise HTTPException(status_code=422, detail="Invalid session name")
+
+    if not _upload_limiter.allow():
+        _audit("upload", name, client, False, "rate_limited")
+        raise HTTPException(status_code=429, detail="Too many uploads")
+
+    # The rate limiter counts starts; this counts the ones still running, which
+    # is what actually bounds the descriptors held open by slow senders.
+    global _upload_inflight
+    if _upload_inflight >= _UPLOAD_CONCURRENCY:
+        _audit("upload", name, client, False, "busy")
+        raise HTTPException(
+            status_code=503, detail="다른 업로드가 진행 중입니다. 잠시 후 다시 시도하세요."
+        )
+    _upload_inflight += 1
+    try:
+        return await _do_upload(name, request, filename, client)
+    finally:
+        _upload_inflight -= 1
+
+
+async def _do_upload(name: str, request: Request, filename: str, client):
+    loop = asyncio.get_running_loop()
+    # The two calls that genuinely block are tmux subprocesses, and both happen
+    # before anything is held. Everything after this point is local-filesystem
+    # syscalls run inline, on purpose -- see below.
+    if not await loop.run_in_executor(None, session_exists, name):
+        _audit("upload", name, client, False, "no_session")
+        raise HTTPException(status_code=404, detail="Session not found")
+    session_path = await loop.run_in_executor(None, get_session_path, name)
+
+    safe = _upload_safe_name(filename)
+
+    # From here to the end there is exactly one await that holds resources --
+    # the body read -- and every resource is owned by a `finally` before it.
+    #
+    # The filesystem work is deliberately NOT in an executor. Cancelling
+    # run_in_executor does not stop the worker thread, which opens two holes
+    # that no amount of bookkeeping closes: a descriptor created by a worker
+    # whose await is never resumed is leaked with nothing holding it, and a
+    # cleanup that runs while the worker is still going closes descriptors out
+    # from under it. These are os.open/os.write/os.unlink on a local disk,
+    # measured in microseconds; the thread was never buying anything.
+    try:
+        root, project = _upload_project(session_path)
+        dir_fd = _upload_open_dir(root, project)
+    except UploadError as e:
+        _audit("upload", name, client, False, e.code)
+        raise HTTPException(status_code=e.status, detail=e.message)
+
+    try:
+        try:
+            budget, key = _upload_reserve(dir_fd, _UPLOAD_MAX)
+        except UploadError as e:
+            _audit("upload", name, client, False, e.code)
+            raise HTTPException(status_code=e.status, detail=e.message)
+
+        try:
+            try:
+                fd, stored = _upload_create(dir_fd, safe)
+            except UploadError as e:
+                _audit("upload", name, client, False, e.code)
+                raise HTTPException(status_code=e.status, detail=e.message)
+
+            written = 0
+            kept = False
+            failure = None
+
+            async def read_body():
+                nonlocal written, kept, failure
+                async for chunk in request.stream():
+                    if not chunk:
+                        continue
+                    written += len(chunk)
+                    if written > budget:
+                        failure = ("too_large", 413,
+                                   f"파일이 너무 큽니다 (한도 {budget // (1024 * 1024)}MB)")
+                        return
+                    _upload_write(fd, chunk)
+                if written == 0:
+                    failure = ("empty", 400, "빈 파일입니다")
+                else:
+                    kept = True
+
+            try:
+                # Around the whole read, not inside the loop. A deadline
+                # checked per chunk never fires for the classic slowloris,
+                # which sends the headers and then nothing at all: the
+                # `async for` is parked awaiting a first chunk that never
+                # comes, and the check sits on the far side of that await
+                # holding two descriptors.
+                await asyncio.wait_for(read_body(), _UPLOAD_TIMEOUT)
+            except asyncio.TimeoutError:
+                failure = ("timeout", 408, "업로드가 너무 오래 걸립니다")
+            except ClientDisconnect:
+                failure = ("disconnected", 499, "전송이 끊겼습니다")
+            except UploadError as e:
+                failure = (e.code, e.status, e.message)
+            finally:
+                # Anything that is not a complete file is removed, whatever
+                # ended it -- a return above, a disconnect, ENOSPC, the receive
+                # deadline, or the cancellation that arrives as BaseException
+                # and would walk straight past an `except`. A partial file is
+                # worse than no file: the user hands its path to Claude and
+                # gets a confident answer about half of one.
+                try:
+                    if not kept:
+                        _upload_unlink(dir_fd, stored, fd)
+                finally:
+                    os.close(fd)
+
+            if failure is not None:
+                code, status, message = failure
+                _audit("upload", name, client, False, code)
+                raise HTTPException(status_code=status, detail=message)
+        finally:
+            _upload_release(key, budget)
+    finally:
+        os.close(dir_fd)
+
+    path = str(root / project / _UPLOAD_DIRNAME / stored)
+    _audit("upload", name, client, True, f"{written}B")
+    return {
+        "session": name,
+        "name": stored,
+        "path": path,
+        "dir": str(root / project / _UPLOAD_DIRNAME),
+        "bytes": written,
+    }
 
 
 @app.get("/api/sessions/{name}/delete-check")

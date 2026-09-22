@@ -100,6 +100,7 @@ def open_board(theme=None):
         page.ctb_held = []
         page.ctb_sessions = [dict(x) for x in SESSIONS]
         page.ctb_gone = set()
+        page.ctb_uploads = []
 
         def set_state(name, state):
             """Change a session's state and make the board fetch it now.
@@ -200,6 +201,34 @@ def open_board(theme=None):
                 page.ctb_keys.append(json.loads(r.request.post_data or "{}"))
                 return r.fulfill(status=200, content_type="application/json",
                                  body='{"ok":true}')
+            if path.startswith("/api/sessions/") and path.endswith("/upload"):
+                # What the page actually sent: the session in the path, the
+                # name in the query, the bytes in the body. A test that only
+                # counted requests would not notice an upload aimed at the
+                # wrong session.
+                who = path.split("/")[3]
+                qname = ""
+                for part in url.split("?", 1)[-1].split("&"):
+                    if part.startswith("filename="):
+                        from urllib.parse import unquote
+                        qname = unquote(part[9:])
+                page.ctb_uploads.append({
+                    "session": who,
+                    "filename": qname,
+                    "body": r.request.post_data or "",
+                    "token": r.request.headers.get("x-ctb-secret", ""),
+                    "content_type": r.request.headers.get("content-type", ""),
+                })
+                if getattr(page, "ctb_upload_fail", None):
+                    return r.fulfill(status=page.ctb_upload_fail,
+                                     content_type="application/json",
+                                     body='{"detail":"너무 큽니다"}')
+                return r.fulfill(status=200, content_type="application/json",
+                                 body=json.dumps({
+                                     "session": who, "name": qname,
+                                     "path": "/home/someone/projects/demo/.ctb-uploads/" + qname,
+                                     "dir": "/home/someone/projects/demo/.ctb-uploads",
+                                     "bytes": len(r.request.post_data or "")}))
             if path.startswith("/api/sessions/") and path.endswith("/log"):
                 who = path.split("/")[3]
                 if who in page.ctb_gone:
