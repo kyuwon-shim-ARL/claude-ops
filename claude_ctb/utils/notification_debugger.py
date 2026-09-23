@@ -62,6 +62,21 @@ class NotificationDebugger:
         # debug write, which is silent by construction: the only record of the
         # notification debugger failing is the log it was meant to replace.
         self._lock = threading.RLock()
+
+        # How often the file on disk may be rewritten, and when it last was.
+        #
+        # The whole document goes out on every state change: three hundred
+        # kilobytes today, and it grows toward a few megabytes as the history
+        # fills (a hundred entries a session, and the machine runs ninety).
+        # Ninety threads rewriting that on every transition is a great deal of
+        # I/O for a debug aid nobody reads in real time.
+        #
+        # Nothing is lost by waiting -- the data stays in memory and the next
+        # save writes all of it -- except the last few seconds if the process
+        # is killed outright, which is the one case where this file was never
+        # going to be the record anyway.
+        self.save_interval = float(os.environ.get("CTB_DEBUG_SAVE_INTERVAL", "10"))
+        self._last_saved = 0.0
         
         self.state_analyzer = SessionStateAnalyzer()
         
@@ -78,8 +93,40 @@ class NotificationDebugger:
         # Debug session file
         self.session_file = self.debug_dir / f"debug_session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         
+        self._prune_old_sessions()
+
         logger.info(f"📝 Notification debugger initialized: {self.debug_dir}")
     
+    # A file per process start, and nothing ever removed one. The bridge is
+    # restarted often enough that the directory only grows; it is a debug aid
+    # in /tmp, so the useful horizon is "the last few runs", not "since
+    # September".
+    KEEP_SESSIONS = 20
+
+    def _prune_old_sessions(self) -> None:
+        """Keep the newest few debug session files, drop the rest."""
+        try:
+            files = sorted(
+                (f for f in self.debug_dir.glob("debug_session_*.json") if f.is_file()),
+                key=lambda f: f.stat().st_mtime,
+                reverse=True,
+            )
+            for stale in files[self.KEEP_SESSIONS:]:
+                try:
+                    stale.unlink()
+                except OSError:
+                    pass
+            # Temporary files from a writer that died mid-save. Named with the
+            # writing thread's id, so a live one belongs to a thread in THIS
+            # process and there are none of those yet at construction time.
+            for tmp in self.debug_dir.glob("debug_session_*.tmp"):
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+        except OSError as e:
+            logger.warning(f"debug session prune failed: {e}")
+
     def log_state_change(self, session_name: str, 
                         previous_state: Optional[SessionState],
                         current_state: SessionState,
@@ -439,6 +486,8 @@ class NotificationDebugger:
     def _save_debug_session(self) -> None:
         """Save debug session to file.
 
+        Rate-limited: see save_interval. Call flush() to force one out.
+
         The copy is taken under the lock and serialised outside it: holding it
         across the write would put ninety monitor threads in a queue behind
         one file, and what the race needs is only that nothing changes shape
@@ -451,6 +500,12 @@ class NotificationDebugger:
         id: a single shared one only moved the race, with each thread renaming
         the file out from under the next and failing with ENOENT.
         """
+        now = time.monotonic()
+        with self._lock:
+            if (now - self._last_saved) < self.save_interval:
+                return
+            self._last_saved = now
+
         try:
             with self._lock:
                 data = {
@@ -478,6 +533,12 @@ class NotificationDebugger:
         except Exception as e:
             logger.error(f"Failed to save debug session: {e}")
     
+    def flush(self) -> None:
+        """Write now, whatever the interval says."""
+        with self._lock:
+            self._last_saved = 0.0
+        self._save_debug_session()
+
     def load_debug_session(self, session_file: str) -> bool:
         """
         Load a previous debug session
