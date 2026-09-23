@@ -7,6 +7,7 @@ Helps identify missed notifications, false positives, and state transition issue
 
 import os
 import json
+import threading
 import time
 import hashlib
 import logging
@@ -50,6 +51,17 @@ class NotificationDebugger:
         """
         self.debug_dir = Path(debug_dir)
         self.debug_dir.mkdir(parents=True, exist_ok=True)
+
+        # One debugger, ninety monitor threads.
+        #
+        # get_debugger() hands the same instance to every per-session monitor
+        # thread, and each of them mutates the dicts below and then serialises
+        # all of them to disk. A thread adding a session while another was
+        # part-way through json.dump raised "dictionary changed size during
+        # iteration" -- 126 times since the 2nd of September, each one a lost
+        # debug write, which is silent by construction: the only record of the
+        # notification debugger failing is the log it was meant to replace.
+        self._lock = threading.RLock()
         
         self.state_analyzer = SessionStateAnalyzer()
         
@@ -86,8 +98,9 @@ class NotificationDebugger:
         timestamp = datetime.now()
         
         # Initialize history for new session
-        if session_name not in self.state_history:
-            self.state_history[session_name] = []
+        with self._lock:
+            if session_name not in self.state_history:
+                self.state_history[session_name] = []
         
         # Capture screen context
         screen_context = self._capture_screen_context(session_name)
@@ -106,11 +119,12 @@ class NotificationDebugger:
         }
         
         # Add to history
-        self.state_history[session_name].append(entry)
-        
-        # Trim history if too large
-        if len(self.state_history[session_name]) > self.max_history_size:
-            self.state_history[session_name].pop(0)
+        with self._lock:
+            self.state_history[session_name].append(entry)
+
+            # Trim history if too large
+            if len(self.state_history[session_name]) > self.max_history_size:
+                self.state_history[session_name].pop(0)
         
         # Verbose logging
         if self.enable_verbose:
@@ -146,7 +160,8 @@ class NotificationDebugger:
             'context': context or {}
         }
         
-        self.notification_log.append(entry)
+        with self._lock:
+            self.notification_log.append(entry)
         
         # Log based on event type
         if event_type == NotificationEvent.SENT:
@@ -382,7 +397,9 @@ class NotificationDebugger:
         report.append("")
         
         # Session selection
-        sessions = [session_name] if session_name else list(self.state_history.keys())
+        with self._lock:
+            sessions = ([session_name] if session_name
+                        else list(self.state_history.keys()))
         
         for session in sessions:
             report.append(f"\n## Session: {session}")
@@ -420,18 +437,44 @@ class NotificationDebugger:
         return "\n".join(report)
     
     def _save_debug_session(self) -> None:
-        """Save debug session to file"""
+        """Save debug session to file.
+
+        The copy is taken under the lock and serialised outside it: holding it
+        across the write would put ninety monitor threads in a queue behind
+        one file, and what the race needs is only that nothing changes shape
+        while it is being read. The lists are copied too -- a shallow copy of
+        the outer dict still hands json.dump the live lists inside it.
+
+        Written through a temporary file and renamed, so a reader never sees
+        half a document and two threads saving at once cannot interleave their
+        output into one file. The temporary name carries the writing thread's
+        id: a single shared one only moved the race, with each thread renaming
+        the file out from under the next and failing with ENOENT.
+        """
         try:
-            data = {
-                'timestamp': datetime.now().isoformat(),
-                'state_history': self.state_history,
-                'notification_log': self.notification_log,
-                'performance_metrics': self.performance_metrics
-            }
-            
-            with open(self.session_file, 'w') as f:
+            with self._lock:
+                data = {
+                    'timestamp': datetime.now().isoformat(),
+                    'state_history': {k: list(v) for k, v in self.state_history.items()},
+                    'notification_log': list(self.notification_log),
+                    'performance_metrics': {k: list(v) for k, v in
+                                            self.performance_metrics.items()},
+                }
+
+            tmp = self.session_file.with_suffix(
+                '.json.%d.tmp' % threading.get_ident())
+            with open(tmp, 'w') as f:
                 json.dump(data, f, indent=2)
-                
+            try:
+                os.replace(tmp, self.session_file)
+            except OSError:
+                # Leave nothing behind if the rename is what failed.
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
+
         except Exception as e:
             logger.error(f"Failed to save debug session: {e}")
     
@@ -449,9 +492,10 @@ class NotificationDebugger:
             with open(session_file, 'r') as f:
                 data = json.load(f)
             
-            self.state_history = data.get('state_history', {})
-            self.notification_log = data.get('notification_log', [])
-            self.performance_metrics = data.get('performance_metrics', {})
+            with self._lock:
+                self.state_history = data.get('state_history', {})
+                self.notification_log = data.get('notification_log', [])
+                self.performance_metrics = data.get('performance_metrics', {})
             
             logger.info(f"📂 Loaded debug session from {session_file}")
             return True
@@ -462,13 +506,14 @@ class NotificationDebugger:
     
     def clear_session_data(self, session_name: str) -> None:
         """Clear debug data for a specific session"""
-        if session_name in self.state_history:
-            del self.state_history[session_name]
-        
-        self.notification_log = [
-            n for n in self.notification_log 
-            if n['session'] != session_name
-        ]
+        with self._lock:
+            if session_name in self.state_history:
+                del self.state_history[session_name]
+
+            self.notification_log = [
+                n for n in self.notification_log
+                if n['session'] != session_name
+            ]
         
         logger.info(f"🧹 Cleared debug data for session: {session_name}")
 
