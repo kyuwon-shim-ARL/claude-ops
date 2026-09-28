@@ -93,8 +93,7 @@ class SessionActionHandlers:
             # -e: 전체 히스토리 끝에서부터
             # -S: 시작 위치 지정 (음수는 끝에서부터)
             result = subprocess.run(
-                f"tmux capture-pane -t {session_name} -p -e -S -{log_length}",
-                shell=True,
+                ['tmux', 'capture-pane', '-t', str(session_name), '-p', '-e', '-S', f"-{log_length}"], 
                 capture_output=True,
                 text=True,
                 timeout=10
@@ -158,8 +157,7 @@ class SessionActionHandlers:
             
             # tmux로 ESC 키 전송
             result = subprocess.run(
-                f"tmux send-keys -t {session_name} Escape",
-                shell=True,
+                ['tmux', 'send-keys', '-t', str(session_name), 'Escape'], 
                 capture_output=True,
                 text=True,
                 timeout=5
@@ -207,8 +205,7 @@ class SessionActionHandlers:
             
             # tmux로 Ctrl+C 키 전송
             result = subprocess.run(
-                f"tmux send-keys -t {session_name} C-c",
-                shell=True,
+                ['tmux', 'send-keys', '-t', str(session_name), 'C-c'], 
                 capture_output=True,
                 text=True,
                 timeout=5
@@ -243,8 +240,7 @@ class SessionActionHandlers:
         """세션 존재 여부 확인"""
         try:
             result = subprocess.run(
-                f"tmux has-session -t {session_name}",
-                shell=True,
+                ['tmux', 'has-session', '-t', str(session_name)], 
                 capture_output=True,
                 text=True,
                 timeout=5

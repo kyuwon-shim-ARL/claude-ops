@@ -29,6 +29,27 @@ from .dangerous_commands import (
 
 logger = logging.getLogger(__name__)
 
+def _tmux(*args: str) -> int:
+    """Run tmux with an argument list. -> its exit status, 0 on success.
+
+    Every tmux call in this file used to be os.system(f"tmux ..."), a shell
+    command line with the session name and -- in one place -- the user's own
+    message pasted into it. A message containing a single quote, or a
+    session name lifted from a replied-to message, ran as shell: all three
+    paths were reproduced creating a file. As an argument list there is no
+    shell, and a quote, `$(...)` or `;` is only a character.
+
+    The return value keeps os.system's shape (0 is success) so every
+    `== 0` check around these calls reads the same.
+    """
+    try:
+        return subprocess.run(["tmux", *args], capture_output=True,
+                              timeout=10).returncode
+    except (OSError, subprocess.TimeoutExpired) as e:
+        logger.warning("tmux %s failed: %s", args[:1], e)
+        return 1
+
+
 
 class TelegramBridge:
     """Claude Telegram Bot with claude-dev-kit prompt integration"""
@@ -74,7 +95,7 @@ class TelegramBridge:
     
     def check_claude_session(self) -> tuple[bool, str]:
         """Check Claude tmux session status"""
-        result = os.system(f"tmux has-session -t {self.config.session_name}")
+        result = _tmux('has-session', '-t', self.config.session_name)
         if result != 0:
             return False, "tmux 세션이 존재하지 않습니다"
         return True, "세션이 활성 상태입니다"
@@ -125,9 +146,9 @@ class TelegramBridge:
         session_ok, message = self.check_claude_session()
         if not session_ok:
             logger.info("Claude 세션을 자동 생성합니다...")
-            os.system(f"tmux new-session -d -s {self.config.session_name}")
-            os.system(f"tmux send-keys -t {self.config.session_name} -l 'claude --dangerously-skip-permissions'")
-            os.system(f"tmux send-keys -t {self.config.session_name} Enter")
+            _tmux('new-session', '-d', '-s', self.config.session_name)
+            _tmux('send-keys', '-t', self.config.session_name, '-l', 'claude --dangerously-skip-permissions')
+            _tmux('send-keys', '-t', self.config.session_name, 'Enter')
             return "🆕 Claude 세션을 새로 시작했습니다"
         return None
     
@@ -201,7 +222,7 @@ class TelegramBridge:
         if target_session:
             logger.info(f"📍 Reply 기반 세션 감지: {target_session}")
             # Check if target session exists
-            session_exists = os.system(f"tmux has-session -t {target_session}") == 0
+            session_exists = _tmux('has-session', '-t', target_session) == 0
             if session_exists:
                 return target_session, True
             else:
@@ -277,7 +298,7 @@ class TelegramBridge:
                     logger.info(f"📍 Reply 기반 세션 타겟팅: {target_session}")
 
                     # Check if target session exists
-                    session_exists = os.system(f"tmux has-session -t {target_session}") == 0
+                    session_exists = _tmux('has-session', '-t', target_session) == 0
                     if not session_exists:
                         await update.message.reply_text(
                             f"❌ 대상 세션 `{target_session}`이 존재하지 않습니다.\n"
@@ -294,7 +315,7 @@ class TelegramBridge:
             logger.info(f"🎯 기본 활성 세션 사용: {target_session}")
         
         # Ensure target session exists
-        session_exists = os.system(f"tmux has-session -t {target_session}") == 0
+        session_exists = _tmux('has-session', '-t', target_session) == 0
         if not session_exists:
             logger.info(f"세션 {target_session}을 자동 생성합니다...")
             
@@ -305,9 +326,9 @@ class TelegramBridge:
                 target_directory = os.path.join(home_dir, "projects", project_name)
                 os.makedirs(target_directory, exist_ok=True)
                 
-                os.system(f"cd {target_directory} && tmux new-session -d -s {target_session}")
-                os.system(f"tmux send-keys -t {target_session} -l 'claude --dangerously-skip-permissions'")
-                os.system(f"tmux send-keys -t {target_session} Enter")
+                _tmux('new-session', '-d', '-s', target_session, '-c', target_directory)
+                _tmux('send-keys', '-t', target_session, '-l', 'claude --dangerously-skip-permissions')
+                _tmux('send-keys', '-t', target_session, 'Enter')
 
                 await update.message.reply_text(f"🆕 {target_session} 세션을 새로 시작했습니다")
             else:
@@ -315,8 +336,8 @@ class TelegramBridge:
                 return
         
         try:
-            result1 = os.system(f"tmux send-keys -t {target_session} -l '{user_input}'")
-            result2 = os.system(f"tmux send-keys -t {target_session} Enter")
+            result1 = _tmux('send-keys', '-t', target_session, '-l', user_input)
+            result2 = _tmux('send-keys', '-t', target_session, 'Enter')
             result = result1 or result2
             
             if result == 0:
@@ -339,7 +360,7 @@ class TelegramBridge:
             await update.message.reply_text("❌ 인증되지 않은 사용자입니다.")
             return
 
-        result = os.system(f"tmux has-session -t {self.config.session_name}")
+        result = _tmux('has-session', '-t', self.config.session_name)
         session_status = "✅ 활성" if result == 0 else "❌ 비활성"
 
         # T050: Get monitoring session status
@@ -598,7 +619,7 @@ class TelegramBridge:
             reply_session = self.extract_session_from_message(original_text)
             if reply_session:
                 # Check if target session exists
-                session_exists = os.system(f"tmux has-session -t {reply_session}") == 0
+                session_exists = _tmux('has-session', '-t', reply_session) == 0
                 if session_exists:
                     target_session = reply_session
                     logger.info(f"📍 Reply 기반 로그 조회: {target_session}")
@@ -625,8 +646,7 @@ class TelegramBridge:
             
             # Use tmux capture-pane with -S to specify start line (negative for history)
             result = subprocess.run(
-                f"tmux capture-pane -t {target_session} -p -S -{line_count}", 
-                shell=True, 
+                ['tmux', 'capture-pane', '-t', str(target_session), '-p', '-S', f"-{line_count}"], 
                 capture_output=True, 
                 text=True
             )
@@ -739,7 +759,7 @@ class TelegramBridge:
             reply_session = self.extract_session_from_message(original_text)
             if reply_session:
                 # Check if target session exists
-                session_exists = os.system(f"tmux has-session -t {reply_session}") == 0
+                session_exists = _tmux('has-session', '-t', reply_session) == 0
                 if session_exists:
                     target_session = reply_session
                     logger.info(f"📍 Reply 기반 로그 조회: {target_session}")
@@ -752,8 +772,7 @@ class TelegramBridge:
 
             # Use tmux capture-pane with -S to specify start line (negative for history)
             result = subprocess.run(
-                f"tmux capture-pane -t {target_session} -p -S -{line_count}",
-                shell=True,
+                ['tmux', 'capture-pane', '-t', str(target_session), '-p', '-S', f"-{line_count}"], 
                 capture_output=True,
                 text=True
             )
@@ -851,7 +870,7 @@ class TelegramBridge:
             return
         
         try:
-            result = os.system(f"tmux send-keys -t {self.config.session_name} Escape")
+            result = _tmux('send-keys', '-t', self.config.session_name, 'Escape')
             
             if result == 0:
                 logger.info("ESC 키 전송 완료")
@@ -877,14 +896,14 @@ class TelegramBridge:
             original_text = update.message.reply_to_message.text
             reply_session = self.extract_session_from_message(original_text)
             if reply_session:
-                session_exists = os.system(f"tmux has-session -t {reply_session}") == 0
+                session_exists = _tmux('has-session', '-t', reply_session) == 0
                 if session_exists:
                     target_session = reply_session
                     logger.info(f"📍 Reply 기반 erase: {target_session}")
         
         try:
             # Send Ctrl+C to clear current input
-            result = os.system(f"tmux send-keys -t {target_session} C-c")
+            result = _tmux('send-keys', '-t', target_session, 'C-c')
             
             if result == 0:
                 logger.info(f"Ctrl+C 키 전송 완료: {target_session}")
@@ -911,14 +930,14 @@ class TelegramBridge:
             original_text = update.message.reply_to_message.text
             reply_session = self.extract_session_from_message(original_text)
             if reply_session:
-                session_exists = os.system(f"tmux has-session -t {reply_session} 2>/dev/null") == 0
+                session_exists = _tmux('has-session', '-t', reply_session) == 0
                 if session_exists:
                     target_session = reply_session
                     logger.info(f"📍 Reply 기반 enter: {target_session}")
 
         try:
             # Send Enter key
-            result = os.system(f"tmux send-keys -t {target_session} Enter")
+            result = _tmux('send-keys', '-t', target_session, 'Enter')
 
             if result == 0:
                 logger.info(f"Enter 키 전송 완료: {target_session}")
@@ -945,14 +964,14 @@ class TelegramBridge:
             original_text = update.message.reply_to_message.text
             reply_session = self.extract_session_from_message(original_text)
             if reply_session:
-                session_exists = os.system(f"tmux has-session -t {reply_session} 2>/dev/null") == 0
+                session_exists = _tmux('has-session', '-t', reply_session) == 0
                 if session_exists:
                     target_session = reply_session
                     logger.info(f"📍 Reply 기반 tab: {target_session}")
 
         try:
             # Send Tab key
-            result = os.system(f"tmux send-keys -t {target_session} Tab")
+            result = _tmux('send-keys', '-t', target_session, 'Tab')
 
             if result == 0:
                 logger.info(f"Tab 키 전송 완료: {target_session}")
@@ -979,14 +998,14 @@ class TelegramBridge:
             original_text = update.message.reply_to_message.text
             reply_session = self.extract_session_from_message(original_text)
             if reply_session:
-                session_exists = os.system(f"tmux has-session -t {reply_session} 2>/dev/null") == 0
+                session_exists = _tmux('has-session', '-t', reply_session) == 0
                 if session_exists:
                     target_session = reply_session
                     logger.info(f"📍 Reply 기반 left: {target_session}")
 
         try:
             # Send Left arrow key
-            result = os.system(f"tmux send-keys -t {target_session} Left")
+            result = _tmux('send-keys', '-t', target_session, 'Left')
 
             if result == 0:
                 logger.info(f"Left 키 전송 완료: {target_session}")
@@ -1013,14 +1032,14 @@ class TelegramBridge:
             original_text = update.message.reply_to_message.text
             reply_session = self.extract_session_from_message(original_text)
             if reply_session:
-                session_exists = os.system(f"tmux has-session -t {reply_session} 2>/dev/null") == 0
+                session_exists = _tmux('has-session', '-t', reply_session) == 0
                 if session_exists:
                     target_session = reply_session
                     logger.info(f"📍 Reply 기반 right: {target_session}")
 
         try:
             # Send Right arrow key
-            result = os.system(f"tmux send-keys -t {target_session} Right")
+            result = _tmux('send-keys', '-t', target_session, 'Right')
 
             if result == 0:
                 logger.info(f"Right 키 전송 완료: {target_session}")
@@ -1047,14 +1066,14 @@ class TelegramBridge:
             original_text = update.message.reply_to_message.text
             reply_session = self.extract_session_from_message(original_text)
             if reply_session:
-                session_exists = os.system(f"tmux has-session -t {reply_session} 2>/dev/null") == 0
+                session_exists = _tmux('has-session', '-t', reply_session) == 0
                 if session_exists:
                     target_session = reply_session
                     logger.info(f"📍 Reply 기반 up: {target_session}")
 
         try:
             # Send Up arrow key
-            result = os.system(f"tmux send-keys -t {target_session} Up")
+            result = _tmux('send-keys', '-t', target_session, 'Up')
 
             if result == 0:
                 logger.info(f"Up 키 전송 완료: {target_session}")
@@ -1081,14 +1100,14 @@ class TelegramBridge:
             original_text = update.message.reply_to_message.text
             reply_session = self.extract_session_from_message(original_text)
             if reply_session:
-                session_exists = os.system(f"tmux has-session -t {reply_session} 2>/dev/null") == 0
+                session_exists = _tmux('has-session', '-t', reply_session) == 0
                 if session_exists:
                     target_session = reply_session
                     logger.info(f"📍 Reply 기반 down: {target_session}")
 
         try:
             # Send Down arrow key
-            result = os.system(f"tmux send-keys -t {target_session} Down")
+            result = _tmux('send-keys', '-t', target_session, 'Down')
 
             if result == 0:
                 logger.info(f"Down 키 전송 완료: {target_session}")
@@ -1115,13 +1134,13 @@ class TelegramBridge:
             original_text = update.message.reply_to_message.text
             reply_session = self.extract_session_from_message(original_text)
             if reply_session:
-                session_exists = os.system(f"tmux has-session -t {reply_session}") == 0
+                session_exists = _tmux('has-session', '-t', reply_session) == 0
                 if session_exists:
                     target_session = reply_session
                     logger.info(f"📍 Reply 기반 restart: {target_session}")
         
         # Check if target session exists
-        session_exists = os.system(f"tmux has-session -t {target_session}") == 0
+        session_exists = _tmux('has-session', '-t', target_session) == 0
         if not session_exists:
             await update.message.reply_text(
                 f"❌ 세션 `{target_session}`을 찾을 수 없습니다.\n"
@@ -1141,18 +1160,18 @@ class TelegramBridge:
             
             # Step 1: Gracefully exit Claude Code
             logger.info(f"Gracefully exiting Claude Code in session: {target_session}")
-            exit_result = os.system(f"tmux send-keys -t {target_session} 'exit' Enter")
+            exit_result = _tmux('send-keys', '-t', target_session, 'exit', 'Enter')
             
             if exit_result != 0:
                 logger.warning(f"Exit command failed, trying Ctrl+C: {target_session}")
-                os.system(f"tmux send-keys -t {target_session} C-c")
+                _tmux('send-keys', '-t', target_session, 'C-c')
             
             # Step 2: Wait for Claude Code to fully exit
             await asyncio.sleep(3)
             
             # Step 3: Resume with conversation continuity
             logger.info(f"Resuming Claude Code with --continue: {target_session}")
-            resume_result = os.system(f"tmux send-keys -t {target_session} 'claude --continue --dangerously-skip-permissions' Enter")
+            resume_result = _tmux('send-keys', '-t', target_session, 'claude --continue --dangerously-skip-permissions', 'Enter')
 
             if resume_result == 0:
                 # Wait a moment for Claude to start
@@ -1171,7 +1190,7 @@ class TelegramBridge:
             else:
                 # Fallback to regular restart
                 logger.warning(f"Resume failed, falling back to regular restart: {target_session}")
-                fallback_result = os.system(f"tmux send-keys -t {target_session} 'claude --dangerously-skip-permissions' Enter")
+                fallback_result = _tmux('send-keys', '-t', target_session, 'claude --dangerously-skip-permissions', 'Enter')
 
                 if fallback_result == 0:
                     await progress_msg.edit_text(
@@ -1208,11 +1227,11 @@ class TelegramBridge:
             original_text = update.message.reply_to_message.text
             reply_session = self.extract_session_from_message(original_text)
             if reply_session:
-                session_exists = os.system(f"tmux has-session -t {reply_session} 2>/dev/null") == 0
+                session_exists = _tmux('has-session', '-t', reply_session) == 0
                 if session_exists:
                     target_session = reply_session
 
-        session_exists = os.system(f"tmux has-session -t {target_session} 2>/dev/null") == 0
+        session_exists = _tmux('has-session', '-t', target_session) == 0
         if not session_exists:
             await update.message.reply_text(f"❌ 세션 `{target_session}`을 찾을 수 없습니다.")
             return
@@ -1225,15 +1244,15 @@ class TelegramBridge:
             )
 
             # Step 1: Exit current Claude
-            os.system(f"tmux send-keys -t {target_session} Escape")
+            _tmux('send-keys', '-t', target_session, 'Escape')
             await asyncio.sleep(0.5)
-            os.system(f"tmux send-keys -t {target_session} '/exit' Enter")
+            _tmux('send-keys', '-t', target_session, '/exit', 'Enter')
 
             # Step 2: Wait for exit
             await asyncio.sleep(4)
 
             # Step 3: Start fresh Claude (no --continue)
-            result = os.system(f"tmux send-keys -t {target_session} 'claude --dangerously-skip-permissions' Enter")
+            result = _tmux('send-keys', '-t', target_session, 'claude --dangerously-skip-permissions', 'Enter')
 
             if result == 0:
                 await asyncio.sleep(2)
@@ -1262,11 +1281,11 @@ class TelegramBridge:
             original_text = update.message.reply_to_message.text
             reply_session = self.extract_session_from_message(original_text)
             if reply_session:
-                session_exists = os.system(f"tmux has-session -t {reply_session} 2>/dev/null") == 0
+                session_exists = _tmux('has-session', '-t', reply_session) == 0
                 if session_exists:
                     target_session = reply_session
 
-        session_exists = os.system(f"tmux has-session -t {target_session} 2>/dev/null") == 0
+        session_exists = _tmux('has-session', '-t', target_session) == 0
         if not session_exists:
             await update.message.reply_text(f"❌ 세션 `{target_session}`을 찾을 수 없습니다.")
             return
@@ -1284,8 +1303,7 @@ class TelegramBridge:
 
             # Step 1: Capture current screen context (last 100 lines)
             capture_result = subprocess.run(
-                f"tmux capture-pane -t {target_session} -p -S -100",
-                shell=True, capture_output=True, text=True
+                ['tmux', 'capture-pane', '-t', str(target_session), '-p', '-S', '-100'], capture_output=True, text=True
             )
             captured_context = ""
             if capture_result.returncode == 0 and capture_result.stdout.strip():
@@ -1296,15 +1314,15 @@ class TelegramBridge:
                 captured_context = '\n'.join(meaningful[-30:])
 
             # Step 2: Exit current Claude
-            os.system(f"tmux send-keys -t {target_session} Escape")
+            _tmux('send-keys', '-t', target_session, 'Escape')
             await asyncio.sleep(0.5)
-            os.system(f"tmux send-keys -t {target_session} '/exit' Enter")
+            _tmux('send-keys', '-t', target_session, '/exit', 'Enter')
 
             # Step 3: Wait for exit
             await asyncio.sleep(4)
 
             # Step 4: Start fresh Claude
-            os.system(f"tmux send-keys -t {target_session} 'claude --dangerously-skip-permissions' Enter")
+            _tmux('send-keys', '-t', target_session, 'claude --dangerously-skip-permissions', 'Enter')
             await asyncio.sleep(5)  # Wait for Claude to fully initialize
 
             # Step 5: Build and send /sciomc command with context
@@ -1322,9 +1340,9 @@ class TelegramBridge:
             if len(full_command) > 500:
                 full_command = full_command[:497] + "..."
 
-            os.system(f"tmux send-keys -t {target_session} -l {repr(full_command)}")
+            _tmux('send-keys', '-t', target_session, '-l', full_command)
             await asyncio.sleep(0.3)
-            os.system(f"tmux send-keys -t {target_session} Enter")
+            _tmux('send-keys', '-t', target_session, 'Enter')
 
             await progress_msg.edit_text(
                 f"✅ `{session_display}` 핸드오프 완료!\n\n"
@@ -1350,11 +1368,11 @@ class TelegramBridge:
             original_text = update.message.reply_to_message.text
             reply_session = self.extract_session_from_message(original_text)
             if reply_session:
-                session_exists = os.system(f"tmux has-session -t {reply_session} 2>/dev/null") == 0
+                session_exists = _tmux('has-session', '-t', reply_session) == 0
                 if session_exists:
                     target_session = reply_session
 
-        session_exists = os.system(f"tmux has-session -t {target_session} 2>/dev/null") == 0
+        session_exists = _tmux('has-session', '-t', target_session) == 0
         if not session_exists:
             await update.message.reply_text(f"❌ 세션 `{target_session}`을 찾을 수 없습니다.")
             return
@@ -1368,8 +1386,7 @@ class TelegramBridge:
 
             # Run tmux-fix-claude on the specific session
             result = subprocess.run(
-                f"tmux-fix-claude {target_session}",
-                shell=True, capture_output=True, text=True, timeout=30
+                ['tmux-fix-claude', str(target_session)], capture_output=True, text=True, timeout=30
             )
 
             output = result.stdout.strip() if result.stdout else ""
@@ -1407,7 +1424,7 @@ class TelegramBridge:
             original_text = update.message.reply_to_message.text
             reply_session = self.extract_session_from_message(original_text)
             if reply_session:
-                session_exists = os.system(f"tmux has-session -t {reply_session}") == 0
+                session_exists = _tmux('has-session', '-t', reply_session) == 0
                 if session_exists:
                     target_session = reply_session
                     logger.info(f"📍 Reply 기반 터미널 복구: {target_session}")
@@ -1419,7 +1436,7 @@ class TelegramBridge:
                 force_respawn = True
         
         # Check if target session exists
-        session_exists = os.system(f"tmux has-session -t {target_session}") == 0
+        session_exists = _tmux('has-session', '-t', target_session) == 0
         if not session_exists:
             await update.message.reply_text(
                 f"❌ 세션 `{target_session}`을 찾을 수 없습니다.\n"
@@ -1513,14 +1530,14 @@ class TelegramBridge:
             original_text = update.message.reply_to_message.text
             reply_session = self.extract_session_from_message(original_text)
             if reply_session:
-                session_exists = os.system(f"tmux has-session -t {reply_session}") == 0
+                session_exists = _tmux('has-session', '-t', reply_session) == 0
                 if session_exists:
                     target_session = reply_session
                     logger.info(f"📍 Reply 기반 clear: {target_session}")
         
         try:
             # Send Ctrl+L to clear screen
-            result = os.system(f"tmux send-keys -t {target_session} C-l")
+            result = _tmux('send-keys', '-t', target_session, 'C-l')
             
             if result == 0:
                 logger.info(f"Ctrl+L 키 전송 완료: {target_session}")
@@ -1626,7 +1643,7 @@ class TelegramBridge:
         """Switch to specified session with common logic"""
         try:
             # Check if target session exists
-            session_exists = os.system(f"tmux has-session -t {target_session}") == 0
+            session_exists = _tmux('has-session', '-t', target_session) == 0
             if not session_exists:
                 await update.message.reply_text(f"❌ 세션 `{target_session}`이 존재하지 않습니다.")
                 return
@@ -1645,8 +1662,7 @@ class TelegramBridge:
                 # Get last 100 lines of log from the new session (will display 50)
                 import subprocess
                 result = subprocess.run(
-                    f"tmux capture-pane -t {target_session} -p -S -100",
-                    shell=True,
+                    ['tmux', 'capture-pane', '-t', str(target_session), '-p', '-S', '-100'], 
                     capture_output=True,
                     text=True
                 )
@@ -1757,7 +1773,7 @@ class TelegramBridge:
                 text_to_send = ' '.join(context.args[1:])
                 
                 # Check if session exists
-                session_exists = os.system(f"tmux has-session -t {target_session}") == 0
+                session_exists = _tmux('has-session', '-t', target_session) == 0
                 if not session_exists:
                     await update.message.reply_text(
                         f"❌ 세션 `{target_session}`이 존재하지 않습니다.\n"
@@ -2435,7 +2451,7 @@ class TelegramBridge:
 
     async def _status_callback(self, query, context):
         """Status check callback"""
-        result = os.system(f"tmux has-session -t {self.config.session_name}")
+        result = _tmux('has-session', '-t', self.config.session_name)
         session_status = "✅ 활성" if result == 0 else "❌ 비활성"
         
         status_message = f"""
@@ -2462,8 +2478,7 @@ class TelegramBridge:
             
             # Simple tmux capture - just current screen
             result = subprocess.run(
-                f"tmux capture-pane -t {target_session} -p", 
-                shell=True, 
+                ['tmux', 'capture-pane', '-t', str(target_session), '-p'], 
                 capture_output=True, 
                 text=True
             )
@@ -2494,7 +2509,7 @@ class TelegramBridge:
     async def _stop_callback(self, query, context):
         """Stop work callback"""
         try:
-            result = os.system(f"tmux send-keys -t {self.config.session_name} Escape")
+            result = _tmux('send-keys', '-t', self.config.session_name, 'Escape')
             
             if result == 0:
                 logger.info("ESC 키 전송 완료")
@@ -2786,8 +2801,7 @@ class TelegramBridge:
                 # Get last 30 lines of log from the new session
                 import subprocess
                 result = subprocess.run(
-                    f"tmux capture-pane -t {session_name} -p -S -30",
-                    shell=True,
+                    ['tmux', 'capture-pane', '-t', str(session_name), '-p', '-S', '-30'], 
                     capture_output=True,
                     text=True
                 )
@@ -2852,9 +2866,9 @@ class TelegramBridge:
             if not session_ok:
                 logger.info("사용자 요청으로 Claude 세션을 시작합니다...")
                 # Start tmux session in the configured working directory
-                os.system(f"cd {self.config.working_directory} && tmux new-session -d -s {self.config.session_name}")
-                os.system(f"tmux send-keys -t {self.config.session_name} -l 'claude --dangerously-skip-permissions'")
-                os.system(f"tmux send-keys -t {self.config.session_name} Enter")
+                _tmux('new-session', '-d', '-s', self.config.session_name, '-c', self.config.working_directory)
+                _tmux('send-keys', '-t', self.config.session_name, '-l', 'claude --dangerously-skip-permissions')
+                _tmux('send-keys', '-t', self.config.session_name, 'Enter')
 
                 # Initialize session for compatibility
                 await self._initialize_new_session_callback(self.config.session_name, query)
@@ -2988,8 +3002,7 @@ class TelegramBridge:
             
             # Capture current screen to analyze state
             result = subprocess.run(
-                f"tmux capture-pane -t {session_name} -p",
-                shell=True,
+                ['tmux', 'capture-pane', '-t', str(session_name), '-p'], 
                 capture_output=True,
                 text=True,
                 timeout=5
@@ -3008,13 +3021,13 @@ class TelegramBridge:
             if has_example_text:
                 logger.info(f"Detected example text in {session_name}, clearing with Ctrl+C")
                 # Clear example text with Ctrl+C
-                os.system(f"tmux send-keys -t {session_name} C-c")
+                _tmux('send-keys', '-t', session_name, 'C-c')
                 time.sleep(1)
             
             # Send /init to establish proper message cycle
             logger.info(f"Sending /init to {session_name} for proper initialization")
-            os.system(f"tmux send-keys -t {session_name} '/init'")
-            os.system(f"tmux send-keys -t {session_name} Enter")
+            _tmux('send-keys', '-t', session_name, '/init')
+            _tmux('send-keys', '-t', session_name, 'Enter')
             
             # Send initialization notification
             init_msg = "🎆 세션 초기화 완료\n\n"
@@ -3039,8 +3052,7 @@ class TelegramBridge:
             
             # Capture current screen to analyze state
             result = subprocess.run(
-                f"tmux capture-pane -t {session_name} -p",
-                shell=True,
+                ['tmux', 'capture-pane', '-t', str(session_name), '-p'], 
                 capture_output=True,
                 text=True,
                 timeout=5
@@ -3059,13 +3071,13 @@ class TelegramBridge:
             if has_example_text:
                 logger.info(f"Detected example text in {session_name}, clearing with Ctrl+C")
                 # Clear example text with Ctrl+C
-                os.system(f"tmux send-keys -t {session_name} C-c")
+                _tmux('send-keys', '-t', session_name, 'C-c')
                 time.sleep(1)
             
             # Send /init to establish proper message cycle
             logger.info(f"Sending /init to {session_name} for proper initialization")
-            os.system(f"tmux send-keys -t {session_name} '/init'")
-            os.system(f"tmux send-keys -t {session_name} Enter")
+            _tmux('send-keys', '-t', session_name, '/init')
+            _tmux('send-keys', '-t', session_name, 'Enter')
             
             return True
             
@@ -3431,7 +3443,7 @@ class TelegramBridge:
         """Show action menu for specific session"""
         try:
             # Check if session exists
-            session_exists = os.system(f"tmux has-session -t {session_name}") == 0
+            session_exists = _tmux('has-session', '-t', session_name) == 0
             if not session_exists:
                 await query.edit_message_text(
                     f"❌ **세션 없음**\n\n"
@@ -3512,7 +3524,7 @@ class TelegramBridge:
             import subprocess
             
             # Check if session exists
-            session_exists = os.system(f"tmux has-session -t {session_name}") == 0
+            session_exists = _tmux('has-session', '-t', session_name) == 0
             if not session_exists:
                 logger.warning(f"세션 '{session_name}' 존재하지 않음")
                 await query.edit_message_text(
@@ -3622,7 +3634,7 @@ class TelegramBridge:
         """Switch main session"""
         try:
             # Check if session exists
-            session_exists = os.system(f"tmux has-session -t {session_name}") == 0
+            session_exists = _tmux('has-session', '-t', session_name) == 0
             if not session_exists:
                 await query.edit_message_text(
                     f"❌ 세션 없음\n\n"
@@ -3688,7 +3700,7 @@ class TelegramBridge:
         """Send stop (ESC) to specific session"""
         try:
             # Check if session exists
-            session_exists = os.system(f"tmux has-session -t {session_name}") == 0
+            session_exists = _tmux('has-session', '-t', session_name) == 0
             if not session_exists:
                 await query.edit_message_text(
                     f"❌ **세션 없음**\n\n"
@@ -3698,7 +3710,7 @@ class TelegramBridge:
                 return
             
             # Send ESC key
-            result = os.system(f"tmux send-keys -t {session_name} Escape")
+            result = _tmux('send-keys', '-t', session_name, 'Escape')
             
             if result == 0:
                 display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
@@ -3727,7 +3739,7 @@ class TelegramBridge:
         """Send pause (ESC) to specific session"""
         try:
             # Check if session exists
-            session_exists = os.system(f"tmux has-session -t {session_name}") == 0
+            session_exists = _tmux('has-session', '-t', session_name) == 0
             if not session_exists:
                 await query.edit_message_text(
                     f"❌ **세션 없음**\n\n"
@@ -3737,7 +3749,7 @@ class TelegramBridge:
                 return
             
             # Send ESC key
-            result = os.system(f"tmux send-keys -t {session_name} Escape")
+            result = _tmux('send-keys', '-t', session_name, 'Escape')
             
             if result == 0:
                 display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
@@ -3770,7 +3782,7 @@ class TelegramBridge:
         """Send erase (Ctrl+C) to specific session"""
         try:
             # Check if session exists
-            session_exists = os.system(f"tmux has-session -t {session_name}") == 0
+            session_exists = _tmux('has-session', '-t', session_name) == 0
             if not session_exists:
                 await query.edit_message_text(
                     f"❌ **세션 없음**\n\n"
@@ -3780,7 +3792,7 @@ class TelegramBridge:
                 return
             
             # Send Ctrl+C key
-            result = os.system(f"tmux send-keys -t {session_name} C-c")
+            result = _tmux('send-keys', '-t', session_name, 'C-c')
             
             if result == 0:
                 display_name = session_name.replace('claude_', '') if session_name.startswith('claude_') else session_name
@@ -3820,8 +3832,7 @@ class TelegramBridge:
             
             # Use tmux capture-pane with -S to specify start line (negative for history)
             result = subprocess.run(
-                f"tmux capture-pane -t {session_name} -p -S -{line_count}", 
-                shell=True, 
+                ['tmux', 'capture-pane', '-t', str(session_name), '-p', '-S', f"-{line_count}"], 
                 capture_output=True, 
                 text=True
             )
@@ -3894,7 +3905,7 @@ class TelegramBridge:
         """Get recent log content from session with retry logic"""
         try:
             # Check if session exists
-            session_exists = os.system(f"tmux has-session -t {session_name}") == 0
+            session_exists = _tmux('has-session', '-t', session_name) == 0
             if not session_exists:
                 return "세션이 존재하지 않습니다."
             
@@ -3903,8 +3914,7 @@ class TelegramBridge:
             for attempt in range(max_retries):
                 # Use tmux capture-pane without -e to avoid ANSI escape codes
                 result = subprocess.run(
-                    f"tmux capture-pane -t {session_name} -p -S -{line_count}", 
-                    shell=True, 
+                    ['tmux', 'capture-pane', '-t', str(session_name), '-p', '-S', f"-{line_count}"], 
                     capture_output=True, 
                     text=True,
                     timeout=5  # Increased timeout for better reliability
@@ -3952,15 +3962,17 @@ class TelegramBridge:
                         logger.error(f"Failed to capture session {session_name} after {max_retries} attempts: {result.stderr}")
                         
                         # Fallback: try basic info
+                        # Filtered here rather than by piping to grep: the
+                        # session name used to be spliced into a shell line.
                         info_result = subprocess.run(
-                            f"tmux list-sessions | grep {session_name}",
-                            shell=True,
+                            ["tmux", "list-sessions"],
                             capture_output=True,
                             text=True
                         )
-                        
-                        if info_result.returncode == 0:
-                            return f"세션 정보: {info_result.stdout.strip()}\n(화면 캡처 실패 - 세션이 다른 터미널에 연결되어 있을 수 있습니다)"
+                        matching = [line for line in info_result.stdout.splitlines()
+                                    if session_name in line]
+                        if info_result.returncode == 0 and matching:
+                            return f"세션 정보: {chr(10).join(matching)}\n(화면 캡처 실패 - 세션이 다른 터미널에 연결되어 있을 수 있습니다)"
                         
                         return "로그를 가져올 수 없습니다."
                 
@@ -3976,7 +3988,7 @@ class TelegramBridge:
         """Send text to specific Claude session with improved reliability"""
         try:
             # Ensure target session exists
-            session_exists = os.system(f"tmux has-session -t {target_session}") == 0
+            session_exists = _tmux('has-session', '-t', target_session) == 0
             if not session_exists:
                 logger.error(f"Target session {target_session} does not exist")
                 return False

@@ -139,8 +139,7 @@ class InlineMonitoringSystem:
         
         try:
             result = subprocess.run(
-                f"tmux capture-pane -t {session_name} -p",
-                shell=True,
+                ['tmux', 'capture-pane', '-t', str(session_name), '-p'], 
                 capture_output=True,
                 text=True,
                 timeout=5
@@ -278,7 +277,7 @@ class InlineMonitoringSystem:
     
     def session_exists(self, session_name: str) -> bool:
         """세션 존재 여부 확인"""
-        result = os.system(f"tmux has-session -t {session_name} 2>/dev/null")
+        result = subprocess.run(['tmux', 'has-session', '-t', str(session_name)], capture_output=True).returncode
         return result == 0
     
     def start_session_thread(self, session_name: str) -> bool:
