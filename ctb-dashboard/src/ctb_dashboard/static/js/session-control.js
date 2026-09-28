@@ -610,7 +610,7 @@
       b.title = spec[2];
       b.setAttribute('aria-label', spec[2] + ' 키 전송');
       styleBtn(b, 'key');
-      b.addEventListener('click', function () { sendKey(spec[1]); });
+      b.addEventListener('click', function () { sendKey(spec[1], null, 'pad'); });
       b.setAttribute('data-prio', String(spec[3]));
       keys.appendChild(b);
     });
@@ -750,7 +750,7 @@
          * pressed to get their bearings. The physical press ends at keyup;
          * until then this box has not been typed into. */
         if (recoveredEnter) return;
-        submit();
+        submit('keydown');
       }
     });
     input.addEventListener('keyup', function (e) {
@@ -766,7 +766,7 @@
       shiftHeld = false;
       if (!breaksLine || held) return;
       e.preventDefault();
-      submit();
+      submit('beforeinput:' + e.inputType);
     });
     input.addEventListener('input', function () {
       if (!state.session) return;
@@ -797,7 +797,7 @@
     send.style.display = 'inline-flex';
     send.style.alignItems = 'center';
     send.style.gap = '6px';
-    send.addEventListener('click', submit);
+    send.addEventListener('click', function () { submit('button'); });
 
     /* Push-to-talk. Hidden until /api/stt/config says there is a key, and
      * never in the VSCode webview, whose proxy forwards only GET. What comes
@@ -5179,7 +5179,26 @@
     });
   }
 
-  function submit() {
+  /* How long after a text send an Enter on an empty box is taken to be the
+   * same gesture echoing, not a new one.
+   *
+   * The audit log shows the shape on both phone and desktop, every day since
+   * at least 2026-09-20: a prompt, then within two seconds a bare Enter from
+   * the same client -- 40 to 60 percent of sends. On the phone it arrives
+   * without the user pressing anything. The box is empty by then because the
+   * send cleared it, so the empty-box rule below turns the echo into an Enter
+   * typed into the session.
+   *
+   * Which event carries the echo is not settled -- iOS's Hangul keyboard
+   * commits and breaks lines in its own order, and it cannot be driven from
+   * here. What IS settled is that an empty Enter this soon after a send has
+   * nothing to do: its one use was pushing text that stuck in the session's
+   * box, and the server now confirms the text left and re-sends the Enter
+   * itself. `via` goes to the audit log so the source can be named next time
+   * rather than guessed. */
+  var ECHO_ENTER_MS = 1500;
+
+  function submit(via) {
     if (state.busy || !state.session) return;
     unhold();
     endWalk();
@@ -5198,7 +5217,11 @@
         delete state.drafts[state.session];
         saveDrafts();
       }
-      sendKey('Enter');
+      if (state.sentAt && Date.now() - state.sentAt < ECHO_ENTER_MS) {
+        setStatus('빈 Enter 무시 · 방금 보낸 직후', 'var(--con-muted)');
+        return;
+      }
+      sendKey('Enter', null, 'empty:' + (via || '?'));
       return;
     }
     /* The response can land after a switch; everything it touches is keyed to
@@ -5229,6 +5252,7 @@
       })
       .then(function (r) {
         if (r.status === 200) {
+          state.sentAt = Date.now();
           delete state.drafts[sent];
           saveDrafts();
           if (state.session === sent) el.input.value = '';
@@ -5266,7 +5290,7 @@
   /* `label` is what the status line calls the send. A shortcut names the
    * chord that was pressed -- "Shift+Tab 전송됨" -- because a key that does
    * nothing visible in the pane leaves no other sign that it was taken. */
-  function sendKey(key, label) {
+  function sendKey(key, label, via) {
     if (!state.session) return;
     /* A hold is for reading; sending is the end of reading. Leaving the pane
      * frozen would hide the very thing the key was pressed to cause. */
@@ -5276,7 +5300,7 @@
     var what = label || ('키 ' + key);
     var before = { text: state.pending ? state.pending.text : '', ghost: state.ghost };
     setStatus(what + ' 전송…', 'var(--con-muted)');
-    post('/key', { key: key })
+    post('/key', via ? { key: key, via: String(via).slice(0, 40) } : { key: key })
       .then(function (res) {
         if (!res.ok) {
           setStatus(what + ' 전송 실패 (' + res.status + ')', 'var(--con-err)');

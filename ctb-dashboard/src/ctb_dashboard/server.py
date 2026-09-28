@@ -1378,6 +1378,10 @@ async def session_prompt(name: str, req: PromptRequest, request: Request):
 
 class KeyRequest(BaseModel):
     key: str
+    # Which gesture sent it -- 'pad', 'empty:keydown', 'empty:beforeinput:…'.
+    # Recorded only: a phone was sending Enters nobody pressed, and the audit
+    # line is how the event behind them gets named.
+    via: str | None = None
 
 
 @app.post("/api/sessions/{name}/key", dependencies=[Depends(require_control_token)])
@@ -1424,7 +1428,8 @@ async def session_key(name: str, req: KeyRequest, request: Request):
     except RuntimeError as e:
         _audit("key", name, client, False, "tmux_failed")
         raise HTTPException(status_code=502, detail=str(e))
-    _audit("key", name, client, True, req.key)
+    via = (req.via or "")[:40]
+    _audit("key", name, client, True, f"{req.key}|{via}" if via else req.key)
     return {"session": name, "status": "sent", "key": req.key}
 
 
