@@ -1344,7 +1344,7 @@ async def session_prompt(name: str, req: PromptRequest, request: Request):
         )
 
     try:
-        await loop.run_in_executor(None, send_prompt, name, req.text)
+        submitted = await loop.run_in_executor(None, send_prompt, name, req.text)
     except ValueError as e:
         _audit("prompt", name, client, False, "invalid_text")
         raise HTTPException(status_code=422, detail=str(e))
@@ -1361,12 +1361,18 @@ async def session_prompt(name: str, req: PromptRequest, request: Request):
     confirmed = bool(after) and after != before
     if not confirmed:
         logger.warning("prompt to %s produced no screen change", name)
-    _audit("prompt", name, client, True, None if confirmed else "unconfirmed")
+    # submitted is the stronger fact: the text left the input box. A screen
+    # that changed only because the text appeared in the box is not a send.
+    reason = None if submitted is not False else "left_in_box"
+    if reason is None and not confirmed:
+        reason = "unconfirmed"
+    _audit("prompt", name, client, True, reason)
     return {
         "session": name,
         "status": "sent",
         "state": state.value,
         "confirmed": confirmed,
+        "submitted": submitted is not False,
     }
 
 

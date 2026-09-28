@@ -5234,7 +5234,12 @@
           if (state.session === sent) el.input.value = '';
           // confirmed:false means tmux accepted it but the pane did not change.
           // Say so instead of implying it landed.
-          if (r.body.confirmed === false) {
+          /* The text reached the session's box but would not leave it. Said
+           * plainly, with the way out: the dashboard's box is empty now, so
+           * the next Enter here is a bare Enter into the session. */
+          if (r.body.submitted === false) {
+            say('입력창에 남음 · Enter 한 번 더', 'var(--con-warn)');
+          } else if (r.body.confirmed === false) {
             say('전송됨 · 화면 변화 없음', 'var(--con-warn)');
           } else {
             say('전송됨', 'var(--con-ok)');

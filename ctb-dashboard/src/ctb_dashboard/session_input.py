@@ -16,6 +16,7 @@ Two send paths, because tmux send-keys treats a newline as an Enter keystroke:
 
 import logging
 import subprocess
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -182,10 +183,13 @@ def _send_lead_char(name: str, char: str) -> None:
     _tmux(["tmux", "send-keys", "-t", name, "-l", char])
 
 
-def send_prompt(name: str, text: str) -> None:
+def send_prompt(name: str, text: str) -> bool:
     """Type `text` into the session and submit it.
 
-    Raises ValueError for unusable input and RuntimeError if tmux refuses.
+    -> True once the text has left the input box, False if it is still
+    sitting there after every Enter (the caller should say so rather than
+    report a send). Raises ValueError for unusable input and RuntimeError if
+    tmux refuses.
     """
     body = _validate(text)
     # Normalise line endings so CRLF from a browser textarea does not read as
@@ -201,16 +205,22 @@ def send_prompt(name: str, text: str) -> None:
         opened_a_box = True
 
     try:
-        # A body starting with '-' would be read by tmux as a flag ("command
-        # send-keys: invalid flag --"), and send-keys has no '--' terminator.
-        # The paste path carries text as data, so it does not care.
-        if "\n" not in body and not body.startswith("-"):
-            _tmux(["tmux", "send-keys", "-t", name, body, "Enter"])
-            return
-
+        # Text first, as a bracketed paste; Enter only once it has landed.
+        #
+        # This used to be one call -- `send-keys <text> Enter` -- which puts
+        # the text and the Enter into the pane as a single burst. Claude Code
+        # reads a burst as a paste, and a paste's Enter is part of the paste,
+        # not a keypress: the text lands in the box and sits there. Measured on
+        # fresh sessions: a 43-character prompt went through, 163 and 413
+        # characters stayed in the box, 1013 became "[Pasted text #1]" and
+        # stayed. The mode character below was split off for exactly this
+        # reason; the Enter never was.
+        #
+        # The paste path also carries newlines and a leading '-' as data, so
+        # there is one path now instead of two.
         _tmux(["tmux", "load-buffer", "-b", _BUFFER_NAME, "-"], stdin_text=body)
         _tmux(["tmux", "paste-buffer", "-b", _BUFFER_NAME, "-t", name, "-p", "-d"])
-        _tmux(["tmux", "send-keys", "-t", name, "Enter"])
+        return _submit_when_landed(name, body)
     except (RuntimeError, subprocess.TimeoutExpired):
         # The mode character already landed, so the session is sitting in an
         # open shell (or memory) box with nothing in it. Leaving it that way is
@@ -224,6 +234,69 @@ def send_prompt(name: str, text: str) -> None:
             except Exception:
                 logger.warning("could not close the mode box on %s after a failed send", name)
         raise
+
+
+# How long to wait for pasted text to show in the box, and how many Enters to
+# spend getting it out. The Enter is re-sent only while OUR text is still in
+# the box -- never merely because the box is non-empty, since Claude Code puts
+# a dim suggestion there after a submit and an Enter on that is not ours to
+# send.
+_LAND_TIMEOUT = 2.0
+_LAND_POLL = 0.1
+_ENTER_TRIES = 3
+_ENTER_SETTLE = 0.6
+
+
+def _box_text(name: str) -> str | None:
+    """What sits between the input box's two rules, spaces removed.
+
+    Spaces go because the box wraps a long line at its own width, and a
+    needle taken from the text must still be found across the wrap.
+    """
+    try:
+        out = subprocess.run(["tmux", "capture-pane", "-p", "-t", name],
+                             capture_output=True, text=True, timeout=_TMUX_TIMEOUT)
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if out.returncode != 0:
+        return None
+    lines = out.stdout.split("\n")
+    rules = [i for i, line in enumerate(lines) if line.startswith("\u2500\u2500\u2500\u2500\u2500")]
+    if len(rules) < 2:
+        return None
+    inside = "".join(lines[rules[-2] + 1:rules[-1]])
+    return "".join(ch for ch in inside.replace("\u276f", "") if not ch.isspace())
+
+
+def _still_ours(box: str | None, needle: str) -> bool:
+    """Is the text we pasted still waiting in the box?
+
+    A long paste is shown collapsed, as "[Pasted text #1 +N lines]", so the
+    words themselves are not on screen; that marker counts as ours too.
+    """
+    if not box:
+        return False
+    return (needle and needle in box) or "[Pastedtext" in box
+
+
+def _submit_when_landed(name: str, body: str) -> bool:
+    needle = "".join(ch for ch in body if not ch.isspace())[-12:]
+    deadline = time.monotonic() + _LAND_TIMEOUT
+    while time.monotonic() < deadline:
+        if _still_ours(_box_text(name), needle):
+            break
+        time.sleep(_LAND_POLL)
+    # Sent even if the text was never seen: a pane that cannot be read is not
+    # a reason to leave the prompt unsubmitted, and this is what the old path
+    # did in every case.
+    for _ in range(_ENTER_TRIES):
+        _tmux(["tmux", "send-keys", "-t", name, "Enter"])
+        time.sleep(_ENTER_SETTLE)
+        if not _still_ours(_box_text(name), needle):
+            return True
+    logger.warning("prompt to %s is still in the input box after %d Enters",
+                   name, _ENTER_TRIES)
+    return False
 
 
 def send_interrupt(name: str) -> None:
