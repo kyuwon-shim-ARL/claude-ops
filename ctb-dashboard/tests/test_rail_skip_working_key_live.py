@@ -1,9 +1,9 @@
-"""Ctrl/Cmd+Backslash jumps the console to the next session that is not
-`working` -- the state the rail now dims instead of lighting up, and the one
-state the user does not have to act on. It reuses stepSession's walk (see
-Ctrl+[ / Ctrl+] in test_tail_scroll_settle_js.py) with a predicate instead of
-the urgentOnly flag, filtered against the *live* catalogue so a session that
-goes busy mid-walk drops out immediately rather than a poll later.
+"""Ctrl/Cmd+Backslash jumps the console to the LEFTMOST session on the rail
+that is not `working` -- the state the rail dims, and the one state the user
+does not have to act on. It does not walk: stepping on through the idle ones
+is what Ctrl+] already does, so pressing it again stays put. Filtered against
+the *live* catalogue so a session that goes busy drops out immediately rather
+than a poll later.
 
 Driven in a real browser against the shipped dashboard fixture (live_board),
 because the behaviour under test is a document-level keydown listener wired
@@ -54,43 +54,44 @@ def five():
         live_board.SESSIONS = saved
 
 
-def test_it_skips_a_working_session(five):
+def rail_order(page):
+    return page.evaluate(
+        "() => Array.from(document.querySelectorAll("
+        "'#ctb-console [data-switch-session]')).map(c => c.getAttribute('data-switch-session'))")
+
+
+def leftmost_idle(page):
+    return next(n for n in rail_order(page) if state_of(page, n) != "working")
+
+
+def test_it_goes_to_the_leftmost_idle_session(five):
     open_console(five, "claude_alpha")
     five.keyboard.press("Control+\\")
     five.wait_for_timeout(100)
-    landed = current(five)
-    assert landed != "claude_alpha"
-    assert state_of(five, landed) != "working"
+    assert current(five) == leftmost_idle(five)
 
 
-def test_shift_walks_backwards(five):
+def test_pressing_again_does_not_walk_on(five):
+    """Walking on through the idle ones is Ctrl+]'s job, not this key's."""
     open_console(five, "claude_alpha")
     five.keyboard.press("Control+\\")
     five.wait_for_timeout(100)
-    forward = current(five)
-    five.keyboard.press("Control+Shift+\\")
+    first = current(five)
+    five.keyboard.press("Control+\\")
     five.wait_for_timeout(100)
-    back = current(five)
-    # Walking one step off `forward` in the other direction, over the same
-    # predicate, lands back one step off where it started -- not necessarily
-    # claude_alpha itself, since claude_alpha is working and gets skipped
-    # both ways, but never `forward` again.
-    assert back != forward
+    assert current(five) == first
 
 
-def test_it_wraps_around(five):
-    """Stepping forward through every non-working session returns to the
-    first one landed on, without ever landing on the working session."""
+def test_from_further_right_it_comes_back_to_the_leftmost(five):
     open_console(five, "claude_alpha")
-    seen = []
-    for _ in range(6):
-        five.keyboard.press("Control+\\")
-        five.wait_for_timeout(80)
-        seen.append(current(five))
-    assert "claude_alpha" not in seen
-    # four non-working sessions: the walk must have repeated by the 6th press
-    assert len(set(seen)) <= 4
-    assert seen[-1] in seen[:-1] or len(set(seen)) < len(seen)
+    target = leftmost_idle(five)
+    # The second idle one, not the last: from the last, a forward walk wraps
+    # round to the leftmost anyway and would pass this by accident.
+    second_idle = [n for n in rail_order(five) if state_of(five, n) != "working"][1]
+    open_console(five, second_idle)
+    five.keyboard.press("Control+\\")
+    five.wait_for_timeout(100)
+    assert current(five) == target
 
 
 def test_the_korean_layout_key_works_too(five):
@@ -101,17 +102,14 @@ def test_the_korean_layout_key_works_too(five):
         "() => document.dispatchEvent(new KeyboardEvent('keydown', "
         "{code:'Backslash', key:'\\u20a9', ctrlKey:true, bubbles:true, cancelable:true}))")
     five.wait_for_timeout(100)
-    assert current(five) != "claude_alpha"
+    assert current(five) == leftmost_idle(five)
 
 
-def test_a_session_that_goes_busy_mid_walk_is_skipped(five):
+def test_a_leftmost_session_that_goes_busy_is_passed_over(five):
     """The rail's own order can be a beat stale; the filter has to read the
     live catalogue, not the snapshot the walk list carries."""
     open_console(five, "claude_alpha")
-    five.keyboard.press("Control+\\")
-    five.wait_for_timeout(100)
-    first = current(five)
-    # That session starts working right under the walk.
+    first = leftmost_idle(five)
     five.ctb_set_state(first, "working")
     five.keyboard.press("Control+\\")
     five.wait_for_timeout(100)

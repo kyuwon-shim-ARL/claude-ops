@@ -1,9 +1,9 @@
 """A left-edge mirror of the Ctrl/Cmd+Backslash shortcut (see
 test_rail_skip_working_key_live.py): a button pinned to the rail's LEFT
-edge that jumps to the next session that is not `working`, for a finger
+edge that jumps to the leftmost session that is not `working`, for a finger
 that has no keyboard to press Ctrl+\\ on.
 
-It shares the shortcut's walk (jumpToNextIdle(dir)) rather than duplicating
+It shares the shortcut's jump (jumpToFirstIdle()) rather than duplicating
 it, and mirrors railHome (test_rail_home_live.py) visually: same size,
 sticky to its own edge, opaque ground with a fade on the side the chips
 pass under, first child of the rail rather than last, and dimmed instead of
@@ -20,7 +20,7 @@ import live_board
 from live_board import _session, board, open_board  # noqa: F401  (board fixture)
 
 CONSOLE = "#ctb-console"
-BTN = "#ctb-console button[aria-label='작업중이 아닌 다음 세션으로 이동']"
+BTN = "#ctb-console button[aria-label='작업중이 아닌 가장 앞 세션으로 이동']"
 RAIL = "#ctb-console .con-rail"
 
 
@@ -69,7 +69,7 @@ def test_it_is_the_rail_s_first_child(five):
     open_console(five, "claude_alpha")
     assert five.eval_on_selector(
         RAIL, "el => el.firstElementChild.getAttribute('aria-label')"
-    ) == "작업중이 아닌 다음 세션으로 이동"
+    ) == "작업중이 아닌 가장 앞 세션으로 이동"
 
 
 def test_it_has_no_switch_session_attribute(five):
@@ -93,7 +93,7 @@ def test_it_survives_a_rail_rebuild(five):
     five.wait_for_timeout(300)
     assert five.eval_on_selector(
         RAIL, "el => el.firstElementChild.getAttribute('aria-label')"
-    ) == "작업중이 아닌 다음 세션으로 이동", "the button is no longer the rail's first child"
+    ) == "작업중이 아닌 가장 앞 세션으로 이동", "the button is no longer the rail's first child"
 
 
 def test_it_is_dimmed_when_no_candidate_exists(five):
@@ -102,6 +102,15 @@ def test_it_is_dimmed_when_no_candidate_exists(five):
     open_console(five, "claude_alpha_wt_topic")
     five.wait_for_timeout(300)
     assert visible(five), "it disappeared instead of dimming"
+    assert not enabled(five)
+
+
+def test_it_is_dimmed_when_already_on_the_leftmost_idle_session(five):
+    open_console(five, "claude_alpha")
+    five.click(BTN)
+    five.wait_for_timeout(300)
+    assert current(five) != "claude_alpha"
+    assert visible(five)
     assert not enabled(five)
 
 

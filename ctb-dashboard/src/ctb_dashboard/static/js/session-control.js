@@ -453,9 +453,9 @@
     });
     strip.addEventListener('scroll', function () { paintRailHome(false); });
 
-    /* On to the next session worth looking at, pinned to the rail's LEFT
+    /* To the leftmost session worth looking at, pinned to the rail's LEFT
      * edge -- the mirror of railHome above, and the button form of Ctrl/Cmd+
-     * Backslash (see jumpToNextIdle) for a finger with no keyboard to press
+     * Backslash (see jumpToFirstIdle) for a finger with no keyboard to press
      * it on.
      *
      * Unlike railHome this one is useful with five sessions or fifty: it does
@@ -467,8 +467,8 @@
     var railSkip = document.createElement('button');
     railSkip.type = 'button';
     railSkip.appendChild(icon('right', 15));
-    railSkip.title = '다음 유휴 세션으로 (' + (IS_MAC ? '⌘' : 'Ctrl') + '+\\)';
-    railSkip.setAttribute('aria-label', '작업중이 아닌 다음 세션으로 이동');
+    railSkip.title = '가장 앞 유휴 세션으로 (' + (IS_MAC ? '⌘' : 'Ctrl') + '+\\)';
+    railSkip.setAttribute('aria-label', '작업중이 아닌 가장 앞 세션으로 이동');
     railSkip.className = 'con-rail-skip';
     railSkip.style.cssText = [
       'position:sticky', 'left:0', 'flex-shrink:0', 'z-index:2',
@@ -490,7 +490,7 @@
     railSkip.addEventListener('mouseleave', function () {
       railSkip.style.color = 'var(--con-muted)';
     });
-    railSkip.addEventListener('click', function () { jumpToNextIdle(1); });
+    railSkip.addEventListener('click', jumpToFirstIdle);
 
     var header = document.createElement('div');
     header.style.cssText =
@@ -1913,15 +1913,16 @@
   }
 
   /* railSkip's own paint: shown whenever the rail is, dimmed rather than
-   * removed when the walk it fires (jumpToNextIdle) has nowhere to go --
-   * stepSession itself says so by returning null, so this asks it the same
-   * question rather than keeping a second copy of "is anything idle". */
+   * removed when the jump it fires (jumpToFirstIdle) has nowhere to go --
+   * no idle chip at all, or the console already on it. Asks firstIdle the
+   * same question rather than keeping a second copy of "is anything idle". */
   function paintRailSkip() {
     var btn = el.railSkip;
     if (!btn || !el.strip) return;
     if (el.strip.style.display === 'none') { btn.style.display = 'none'; return; }
     btn.style.display = 'flex';
-    var candidate = !!stepSession(1, notWorkingPredicate());
+    var first = firstIdle();
+    var candidate = !!first && first.name !== state.session;
     btn.style.opacity = candidate ? '1' : '.3';
     btn.style.pointerEvents = candidate ? 'auto' : 'none';
   }
@@ -2353,19 +2354,7 @@
     show(item.name, true);
   });
 
-  /* The walk behind Ctrl/Cmd+Backslash and its rail-button mirror
-   * (con-rail-skip, built alongside railHome): steps the rail the same way
-   * [ and ] do, but past every chip that is `working` -- the one state the
-   * user does not have to act on, now that the rail dims it instead of
-   * lighting it green. dir < 0 walks backwards, same as Shift on the
-   * bracket keys.
-   *
-   * The rail's own order can be a beat stale (syncStrip patches chips in
-   * place rather than resorting), so the filter reads live state from the
-   * catalogue rather than trusting the item the walk list is carrying -- a
-   * session that was just sent a prompt has to drop out of the candidates
-   * the moment it goes busy, not a poll later. */
-  /* Shared by jumpToNextIdle and railSkip's own dimming (paintRailSkip):
+  /* Shared by jumpToFirstIdle and railSkip's own dimming (paintRailSkip):
    * reads live state from the catalogue rather than trusting the item the
    * walk list is carrying, so a session that just went busy drops out of
    * the candidates immediately, not a poll later. */
@@ -2378,13 +2367,32 @@
     };
   }
 
-  function jumpToNextIdle(dir) {
-    var item = stepSession(dir, notWorkingPredicate());
-    if (!item || (hintOrder && !inCatalog(item.name))) {
-      setStatus('다른 유휴 세션 없음', 'var(--con-muted)');
+  /* The leftmost chip on the rail that is not `working` -- the one state the
+   * user does not have to act on. Not a walk: stepping on through the idle
+   * ones is what [ and ] already do, so this always lands on the same chip
+   * until its state changes. Same list [ and ] walk, so "leftmost" is the
+   * rail's own order. */
+  function firstIdle() {
+    var list = hintOrder || sessionOrder();
+    var ok = notWorkingPredicate();
+    for (var i = 0; i < list.length; i++) {
+      if (ok(list[i]) && (!hintOrder || inCatalog(list[i].name))) return list[i];
+    }
+    return null;
+  }
+
+  /* Behind Ctrl/Cmd+Backslash and its rail-button mirror (con-rail-skip,
+   * built alongside railHome). */
+  function jumpToFirstIdle() {
+    var item = firstIdle();
+    if (!item) {
+      setStatus('유휴 세션 없음', 'var(--con-muted)');
       return;
     }
-    if (item.name === state.session) return;
+    if (item.name === state.session) {
+      setStatus('이미 가장 앞 유휴 세션', 'var(--con-muted)');
+      return;
+    }
     if (!state.session && IS_VSCODE && window.ctbFocusSession
         && window.ctbFocusSession(item.name)) return;
     show(item.name, true);
@@ -2399,7 +2407,7 @@
     if (e.isComposing || e.keyCode === 229) return;
     if (!accelHeld(e)) return;
     e.preventDefault();
-    jumpToNextIdle(e.shiftKey ? -1 : 1);
+    jumpToFirstIdle();
   });
 
   /* Ctrl/Cmd+Q closes the open session the way the trash does, and as fast as
