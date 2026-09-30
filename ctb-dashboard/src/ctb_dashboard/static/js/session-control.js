@@ -453,6 +453,45 @@
     });
     strip.addEventListener('scroll', function () { paintRailHome(false); });
 
+    /* On to the next session worth looking at, pinned to the rail's LEFT
+     * edge -- the mirror of railHome above, and the button form of Ctrl/Cmd+
+     * Backslash (see jumpToNextIdle) for a finger with no keyboard to press
+     * it on.
+     *
+     * Unlike railHome this one is useful with five sessions or fifty: it does
+     * not depend on the rail overflowing, only on there being somewhere to
+     * jump to, so it stays visible whenever the rail does and dims instead
+     * when no candidate exists. Sticky to the rail's own left edge, first
+     * child rather than last, with its opaque ground and fade mirrored to
+     * its right side so a chip's name dissolves under it on its way past. */
+    var railSkip = document.createElement('button');
+    railSkip.type = 'button';
+    railSkip.appendChild(icon('right', 15));
+    railSkip.title = '다음 유휴 세션으로 (' + (IS_MAC ? '⌘' : 'Ctrl') + '+\\)';
+    railSkip.setAttribute('aria-label', '작업중이 아닌 다음 세션으로 이동');
+    railSkip.className = 'con-rail-skip';
+    railSkip.style.cssText = [
+      'position:sticky', 'left:0', 'flex-shrink:0', 'z-index:2',
+      'display:none', 'align-items:center', 'justify-content:center',
+      /* Its own snap point: without it, chip 0 is the first thing the rail's
+       * x-proximity snap will settle on, and chip 0's start now sits 46px in
+       * (behind this button), which pulled railHome's "back to the start"
+       * scroll away from 0. Snapping to THIS button's start keeps 0 valid. */
+      'scroll-snap-align:start',
+      'width:46px', 'align-self:stretch', 'cursor:pointer',
+      'border:none', 'border-radius:7px',
+      'background:linear-gradient(to left,transparent 0,var(--con-sheet) 14px)',
+      'padding:0 14px 0 0',
+      'color:var(--con-muted)', 'transition:color 0.15s ease',
+    ].join(';');
+    railSkip.addEventListener('mouseenter', function () {
+      railSkip.style.color = 'var(--con-text)';
+    });
+    railSkip.addEventListener('mouseleave', function () {
+      railSkip.style.color = 'var(--con-muted)';
+    });
+    railSkip.addEventListener('click', function () { jumpToNextIdle(1); });
+
     var header = document.createElement('div');
     header.style.cssText =
       'display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-shrink:0;';
@@ -949,7 +988,7 @@
     document.body.appendChild(root);
 
     el = { keys: keys, keysMore: more, clip: clip, picker: picker, endPill: endPill, prevPill: prevPill,
-           root: root, strip: strip, railHome: railHome, title: title, status: status, tail: tail, mic: mic,
+           root: root, strip: strip, railHome: railHome, railSkip: railSkip, title: title, status: status, tail: tail, mic: mic,
            frozen: frozen, input: input,
            send: send, silent: silent, quad: quad, quadNum: quadNum };
 
@@ -1873,13 +1912,32 @@
     paintRunDividers();
   }
 
+  /* railSkip's own paint: shown whenever the rail is, dimmed rather than
+   * removed when the walk it fires (jumpToNextIdle) has nowhere to go --
+   * stepSession itself says so by returning null, so this asks it the same
+   * question rather than keeping a second copy of "is anything idle". */
+  function paintRailSkip() {
+    var btn = el.railSkip;
+    if (!btn || !el.strip) return;
+    if (el.strip.style.display === 'none') { btn.style.display = 'none'; return; }
+    btn.style.display = 'flex';
+    var candidate = !!stepSession(1, notWorkingPredicate());
+    btn.style.opacity = candidate ? '1' : '.3';
+    btn.style.pointerEvents = candidate ? 'auto' : 'none';
+  }
+
   /* Marks every place on the rail where a busy (working) chip sits next to a
    * non-busy one. Walked fresh from the DOM every time rather than tracked
    * incrementally: syncStrip patches state in place and deliberately never
    * re-sorts the rail, so a busy/idle boundary can appear or drift anywhere
    * in the middle of it, not just at the build-time edges. Cheapest correct
-   * approach is to throw the old dividers away and re-walk. */
+   * approach is to throw the old dividers away and re-walk.
+   *
+   * Called from the same three spots syncStrip/renderStrip/appendChip always
+   * called it from, so railSkip's dimmed state rides along and tracks live
+   * state without a fourth call site to remember. */
   function paintRunDividers() {
+    paintRailSkip();
     if (!el.strip) return;
     var olds = el.strip.querySelectorAll('[data-ctb-divider]');
     for (var i = 0; i < olds.length; i++) {
@@ -1943,6 +2001,9 @@
       return;
     }
     el.strip.style.display = 'flex';
+    /* textContent = '' above took the button with the chips; the rail is
+     * empty right here, so appending it now makes it the first child. */
+    if (el.railSkip) el.strip.appendChild(el.railSkip);
 
     var current = null;
     list.forEach(function (item, index) {
@@ -2292,31 +2353,33 @@
     show(item.name, true);
   });
 
-  /* Ctrl/Cmd+Backslash walks the rail the same way [ and ] do, but past
-   * every chip that is `working` -- the one state the user does not have to
-   * act on, now that the rail dims it instead of lighting it green. Shift
-   * walks backwards, same as the bracket keys.
+  /* The walk behind Ctrl/Cmd+Backslash and its rail-button mirror
+   * (con-rail-skip, built alongside railHome): steps the rail the same way
+   * [ and ] do, but past every chip that is `working` -- the one state the
+   * user does not have to act on, now that the rail dims it instead of
+   * lighting it green. dir < 0 walks backwards, same as Shift on the
+   * bracket keys.
    *
    * The rail's own order can be a beat stale (syncStrip patches chips in
    * place rather than resorting), so the filter reads live state from the
    * catalogue rather than trusting the item the walk list is carrying -- a
    * session that was just sent a prompt has to drop out of the candidates
-   * the moment it goes busy, not a poll later. Korean layouts print the key
-   * as ₩, so it is picked up by `code`, with `key` as a fallback for a
-   * layout this does not know about. */
-  document.addEventListener('keydown', function (e) {
-    if (keysTaken()) return;
-    if (e.code !== 'Backslash' && e.key !== '\\' && e.key !== '|') return;
-    if (e.isComposing || e.keyCode === 229) return;
-    if (!accelHeld(e)) return;
-    e.preventDefault();
+   * the moment it goes busy, not a poll later. */
+  /* Shared by jumpToNextIdle and railSkip's own dimming (paintRailSkip):
+   * reads live state from the catalogue rather than trusting the item the
+   * walk list is carrying, so a session that just went busy drops out of
+   * the candidates immediately, not a poll later. */
+  function notWorkingPredicate() {
     var map = catalogMap();
-    var notWorking = function (it) {
+    return function (it) {
       var live = map[it.name];
       var st = live ? live.state : it.state;
       return st !== 'working';
     };
-    var item = stepSession(e.shiftKey ? -1 : 1, notWorking);
+  }
+
+  function jumpToNextIdle(dir) {
+    var item = stepSession(dir, notWorkingPredicate());
     if (!item || (hintOrder && !inCatalog(item.name))) {
       setStatus('다른 유휴 세션 없음', 'var(--con-muted)');
       return;
@@ -2325,6 +2388,18 @@
     if (!state.session && IS_VSCODE && window.ctbFocusSession
         && window.ctbFocusSession(item.name)) return;
     show(item.name, true);
+  }
+
+  /* Ctrl/Cmd+Backslash. Korean layouts print the key as ₩, so it is picked
+   * up by `code`, with `key` as a fallback for a layout this does not
+   * know about. */
+  document.addEventListener('keydown', function (e) {
+    if (keysTaken()) return;
+    if (e.code !== 'Backslash' && e.key !== '\\' && e.key !== '|') return;
+    if (e.isComposing || e.keyCode === 229) return;
+    if (!accelHeld(e)) return;
+    e.preventDefault();
+    jumpToNextIdle(e.shiftKey ? -1 : 1);
   });
 
   /* Ctrl/Cmd+Q closes the open session the way the trash does, and as fast as
