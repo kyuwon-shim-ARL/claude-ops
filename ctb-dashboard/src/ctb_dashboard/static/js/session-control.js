@@ -240,6 +240,21 @@
       '#ctb-console .con-chip[aria-current="true"][data-quad="Q2"]{background:var(--con-btn);box-shadow:inset 0 0 0 1.5px rgba(240,165,0,0.5),0 1px 2px rgba(16,24,40,0.10)}',
       '#ctb-console .con-chip[aria-current="true"][data-quad="Q3"]{background:var(--con-btn);box-shadow:inset 0 0 0 1.5px rgba(96,165,250,0.5),0 1px 2px rgba(16,24,40,0.10)}',
       '#ctb-console .con-chip[aria-current="true"][data-quad="Q4"]{background:var(--con-btn);box-shadow:inset 0 0 0 1.5px rgba(139,133,160,0.45),0 1px 2px rgba(16,24,40,0.10)}',
+      /* A session that is working needs nothing from you, so it recedes --
+       * the rail's loudness now tracks what you have to act on, not what the
+       * machine is doing. The chip you are actually looking at stays full
+       * strength even while its own session is working. */
+      '#ctb-console .con-chip[data-busy]{opacity:.45}',
+      '#ctb-console .con-chip[data-busy][aria-current="true"]{opacity:1}',
+      /* Marks where the rail switches between busy and not: a thin rule, with
+       * a chip count on the side that needs a look. Decoration only -- it
+       * carries no session and nothing binds a shortcut to it. */
+      '#ctb-console .con-run-divider{display:flex;align-items:center;gap:4px;flex:0 0 auto;',
+      'pointer-events:none;padding:0 2px}',
+      '#ctb-console .con-run-divider-line{width:1.5px;height:20px;background:var(--con-muted);',
+      'opacity:.4;display:inline-block}',
+      '#ctb-console .con-run-divider-label{font-size:9px;font-weight:600;color:var(--con-muted);',
+      'white-space:nowrap;letter-spacing:-.01em}',
       '#ctb-console .ctb-sctx{font-family:\'JetBrains Mono\',monospace;font-size:10px;' +
       'font-variant-numeric:tabular-nums;min-width:4ch;text-align:right;flex-shrink:0}',
       /* The importance key wears the same four hues, but louder than a chip
@@ -1209,9 +1224,14 @@
   /* Mirrors QUAD_LABELS in index.html. */
   var QUAD_LABELS = { Q1: '긴급+중요', Q2: '중요', Q3: '긴급', Q4: '일반' };
 
+  /* idle is the state you have to catch and roll -- the sky blue gives it a
+   * colour worth noticing, where grey used to make the sessions needing
+   * nothing (working) and the ones needing you (idle) look the same kind of
+   * quiet. A dead session (markChipGone) is painted grey directly, not
+   * through this table, so it does not borrow idle's blue. */
   var STATE_DOT = {
     working: '#34d399', stuck_after_agent: '#f97316', waiting: '#fbbf24',
-    error: '#ef4444', context_limit: '#f43f5e', idle: '#6b7280',
+    error: '#ef4444', context_limit: '#f43f5e', idle: '#38bdf8',
   };
 
   /* The word for each state. "대기" was doing double duty for idle and for
@@ -1222,11 +1242,14 @@
     error: '오류', context_limit: '한도', idle: '유휴', unknown: '상태미상',
   };
 
-  /* Which states are a session doing something, or wanting something. Those
-   * breathe; the settled ones sit still, so motion on the rail means
-   * "something is going on here" rather than "there is a list here". */
+  /* Which states are worth breathing for. working used to be in this set,
+   * but breathing means "look here", and a working session is the one thing
+   * on the rail that does not need a look -- it also mutes the chip via
+   * data-busy (see makeChip/syncStrip), so leaving it out here just stops
+   * the dot animating. The 작업중 word keeps full strength anyway (see
+   * paintStateLabel): the rail's quiet comes from the chip's opacity. */
   var STATE_LIVE = {
-    working: true, waiting: true, stuck_after_agent: true,
+    waiting: true, stuck_after_agent: true,
     error: true, context_limit: true,
   };
 
@@ -1344,7 +1367,14 @@
      * placeholder grey, which measures 3.8:1 on the light sheet and 2.1:1 on
      * a selected row -- a word nobody can read is not a state signal, it is
      * decoration with a font. */
-    lab.style.color = STATE_LIVE[st] ? 'var(--con-text)' : 'var(--con-muted)';
+    /* working dropped out of STATE_LIVE (it no longer breathes -- see that
+     * table), but its word still takes full strength here rather than
+     * falling into the muted branch with it: var(--con-muted) measures
+     * under 4.5:1 against a selected palette row in the dark theme, and the
+     * palette has no chip-level dimming to lean on the way the rail's
+     * data-busy opacity does. The rail's recede-while-working comes from
+     * that opacity, not from this colour. */
+    lab.style.color = (STATE_LIVE[st] || st === 'working') ? 'var(--con-text)' : 'var(--con-muted)';
     lab.style.opacity = '1';
   }
 
@@ -1697,6 +1727,9 @@
       if (lab) paintStateLabel(lab, item.state);
       if (ctxSlot) paintCtxSlot(ctxSlot, item.context_percent);
       paintChipName(chip, item);
+      chip.setAttribute('data-chip-state', item.state);
+      if (item.state === 'working') chip.setAttribute('data-busy', '');
+      else chip.removeAttribute('data-busy');
       var quad = chip.getAttribute('data-quad');
       var ctxW = ctxWord(item.context_percent);
       chip.title = quad ? name + ' · ' + (QUAD_LABELS[quad] || quad) : name;
@@ -1718,6 +1751,11 @@
     for (var j = 0; j < railList.length; j++) {
       if (!seen[railList[j].name]) appendChip(railList[j], j);
     }
+    /* States were patched in place above and the rail is deliberately not
+     * re-sorted, so a busy/idle boundary can appear or move anywhere in the
+     * middle of it -- recomputed from the actual DOM order every time,
+     * rather than only at build time. */
+    paintRunDividers();
   }
 
   /* The rail's version of 종료됨. The open session keeps its chip when it
@@ -1728,10 +1766,14 @@
   function markChipGone(chip) {
     chip.setAttribute('data-gone', '');
     chip.style.opacity = '0.55';
+    chip.removeAttribute('data-busy');
+    chip.setAttribute('data-chip-state', 'gone');
     var dot = chip.querySelector('.ctb-sdot');
     var lab = chip.querySelector('.ctb-slabel');
     var ctxSlot = chip.querySelector('.ctb-sctx');
-    if (dot) paintDot(dot, 'idle');
+    /* Painted directly, not through STATE_DOT.idle -- idle is sky blue now,
+     * and a dead session is not idle, it is gone. */
+    if (dot) { dot.style.background = '#6b7280'; dot.removeAttribute('data-live'); }
     if (lab) {
       lab.textContent = '\uc885\ub8cc\ub428';
       lab.style.color = 'var(--con-muted)';
@@ -1762,6 +1804,10 @@
      * row on short names and forced a scroll to reach the fourth session.
      * Capped so one long name cannot take the whole bar. */
     chip.className = 'con-chip';
+    chip.setAttribute('data-chip-state', item.state);
+    /* Recedes the chip via CSS (see .con-chip[data-busy]) -- working needs no
+     * attention, so it is the one state the rail now dims instead of lights. */
+    if (item.state === 'working') chip.setAttribute('data-busy', '');
     var quad = window.ctbQuadOf && window.ctbQuadOf[item.name];
     if (quad) chip.setAttribute('data-quad', quad);
     chip.title = quad ? item.name + ' · ' + (QUAD_LABELS[quad] || quad) : item.name;
@@ -1824,6 +1870,61 @@
     /* Before the button, which is always the rail's last child. */
     el.strip.insertBefore(makeChip(item, index), el.railHome || null);
     paintRailHome(true);
+    paintRunDividers();
+  }
+
+  /* Marks every place on the rail where a busy (working) chip sits next to a
+   * non-busy one. Walked fresh from the DOM every time rather than tracked
+   * incrementally: syncStrip patches state in place and deliberately never
+   * re-sorts the rail, so a busy/idle boundary can appear or drift anywhere
+   * in the middle of it, not just at the build-time edges. Cheapest correct
+   * approach is to throw the old dividers away and re-walk. */
+  function paintRunDividers() {
+    if (!el.strip) return;
+    var olds = el.strip.querySelectorAll('[data-ctb-divider]');
+    for (var i = 0; i < olds.length; i++) {
+      if (olds[i].parentNode) olds[i].parentNode.removeChild(olds[i]);
+    }
+    var chips = el.strip.querySelectorAll('[data-switch-session]');
+    for (var j = 1; j < chips.length; j++) {
+      var prevBusy = chips[j - 1].hasAttribute('data-busy');
+      var curBusy = chips[j].hasAttribute('data-busy');
+      if (prevBusy === curBusy) continue;
+      var label = null;
+      if (!curBusy) {
+        /* The run this divider opens: how many chips before the next busy
+         * one (or the end), and whether every one of them is idle -- 유휴 --
+         * or a mix with something that still wants you -- 대기. */
+        var runLen = 0, allIdle = true;
+        for (var k = j; k < chips.length; k++) {
+          if (chips[k].hasAttribute('data-busy')) break;
+          runLen++;
+          if (chips[k].getAttribute('data-chip-state') !== 'idle') allIdle = false;
+        }
+        label = (allIdle ? '유휴' : '대기') + ' ' + runLen;
+      }
+      el.strip.insertBefore(makeRunDivider(label), chips[j]);
+    }
+  }
+
+  function makeRunDivider(label) {
+    var wrap = document.createElement('span');
+    wrap.setAttribute('data-ctb-divider', '');
+    /* No session, so no shortcut, no focus stop, no accessible row --
+     * numbering (slotOfName), keyboard switching and every
+     * querySelectorAll('[data-switch-session]') all pass straight over it. */
+    wrap.setAttribute('aria-hidden', 'true');
+    wrap.className = 'con-run-divider';
+    var line = document.createElement('span');
+    line.className = 'con-run-divider-line';
+    wrap.appendChild(line);
+    if (label) {
+      var lab = document.createElement('span');
+      lab.className = 'con-run-divider-label';
+      lab.textContent = label;
+      wrap.appendChild(lab);
+    }
+    return wrap;
   }
 
   function renderStrip() {
@@ -1880,6 +1981,7 @@
       return;
     }
 
+    paintRunDividers();
     /* textContent = '' above took the button with the chips. */
     if (el.railHome) el.strip.appendChild(el.railHome);
 
@@ -5755,6 +5857,7 @@
     _renderStrip: renderStrip,
     _syncSurfaces: syncSurfaces,
     _markChipGone: markChipGone,
+    _paintRunDividers: paintRunDividers,
     _renderTail: renderTail,
     _railHome: function () { return el.railHome; },
     _trimTail: trimTail,

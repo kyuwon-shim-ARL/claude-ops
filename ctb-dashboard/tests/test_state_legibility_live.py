@@ -68,7 +68,12 @@ def test_the_palette_says_the_state_too(board):
 
 
 def test_live_states_are_marked_for_motion_and_settled_ones_are_not(board):
-    """`data-live` is the hook the breathing animation hangs off."""
+    """`data-live` is the hook the breathing animation hangs off.
+
+    working dropped out of the live set: breathing means "look here", and a
+    working session is the one thing on the rail that needs no look. It
+    recedes instead, via data-busy (see the rail busy/divider tests).
+    """
     open_console(board)
     live = board.eval_on_selector_all(
         CHIP + " .ctb-sdot",
@@ -76,7 +81,7 @@ def test_live_states_are_marked_for_motion_and_settled_ones_are_not(board):
     names = board.eval_on_selector_all(
         CHIP, "c => c.map(x => x.dataset.switchSession)")
     by_name = dict(zip(names, live))
-    assert by_name["claude_alpha"] is True      # working
+    assert by_name["claude_alpha"] is False     # working: no longer breathes
     assert by_name["claude_beta"] is True       # waiting on you
     assert by_name["claude_gamma"] is False     # idle sits still
 
