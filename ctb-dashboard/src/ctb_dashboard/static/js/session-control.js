@@ -2207,7 +2207,12 @@
     var n = list.length;
     if (!n) return null;
     var quadOf = window.ctbQuadOf || {};
-    var ok = function (it) { return !urgentOnly || quadOf[it.name] === 'Q1'; };
+    /* urgentOnly is normally the Shift-held boolean the bracket walk passes,
+     * but a caller that wants a different filter -- "not working", say --
+     * hands in a predicate instead. Same parameter, so every other walk (the
+     * digit hints, the frozen-order rule) stays shared code. */
+    var ok = typeof urgentOnly === 'function' ? urgentOnly
+      : function (it) { return !urgentOnly || quadOf[it.name] === 'Q1'; };
     var here = -1;
     for (var i = 0; i < n; i++) {
       if (list[i].name === state.session) { here = i; break; }
@@ -2282,6 +2287,41 @@
     if (item.name === state.session) return;
     /* Closed console in the VSCode webview: the same rule the digits follow --
      * bring that session's terminal up, since the console there is read-only. */
+    if (!state.session && IS_VSCODE && window.ctbFocusSession
+        && window.ctbFocusSession(item.name)) return;
+    show(item.name, true);
+  });
+
+  /* Ctrl/Cmd+Backslash walks the rail the same way [ and ] do, but past
+   * every chip that is `working` -- the one state the user does not have to
+   * act on, now that the rail dims it instead of lighting it green. Shift
+   * walks backwards, same as the bracket keys.
+   *
+   * The rail's own order can be a beat stale (syncStrip patches chips in
+   * place rather than resorting), so the filter reads live state from the
+   * catalogue rather than trusting the item the walk list is carrying -- a
+   * session that was just sent a prompt has to drop out of the candidates
+   * the moment it goes busy, not a poll later. Korean layouts print the key
+   * as ₩, so it is picked up by `code`, with `key` as a fallback for a
+   * layout this does not know about. */
+  document.addEventListener('keydown', function (e) {
+    if (keysTaken()) return;
+    if (e.code !== 'Backslash' && e.key !== '\\' && e.key !== '|') return;
+    if (e.isComposing || e.keyCode === 229) return;
+    if (!accelHeld(e)) return;
+    e.preventDefault();
+    var map = catalogMap();
+    var notWorking = function (it) {
+      var live = map[it.name];
+      var st = live ? live.state : it.state;
+      return st !== 'working';
+    };
+    var item = stepSession(e.shiftKey ? -1 : 1, notWorking);
+    if (!item || (hintOrder && !inCatalog(item.name))) {
+      setStatus('다른 유휴 세션 없음', 'var(--con-muted)');
+      return;
+    }
+    if (item.name === state.session) return;
     if (!state.session && IS_VSCODE && window.ctbFocusSession
         && window.ctbFocusSession(item.name)) return;
     show(item.name, true);
