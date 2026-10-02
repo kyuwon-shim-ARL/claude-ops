@@ -1,5 +1,7 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+# >=77 for the plain-string `license = "MIT"` (PEP 639); that also covers the
+# recursive "**" package-data globs (static/js, static/vendor, ...), >=62.3.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -46,7 +48,14 @@ ctb-dashboard = "ctb_dashboard.server:run_server"
 where = ["src"]
 
 [tool.setuptools.package-data]
-ctb_dashboard = ["static/*"]
+# "static/*" only matched top-level files, so a wheel shipped no JS, vendor
+# assets, or templates. ".omc/" dirs under static/ and templates/ are
+# oh-my-claudecode runtime session state (gitignored, live sessions write
+# there) and must never end up in a wheel -- excluded below.
+ctb_dashboard = ["static/**/*", "templates/**/*"]
+
+[tool.setuptools.exclude-package-data]
+ctb_dashboard = ["**/.omc/**"]
 
 [dependency-groups]
 # Without pytest here, `uv run pytest` falls through to whatever pytest is on

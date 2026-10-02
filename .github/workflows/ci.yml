@@ -65,6 +65,18 @@ jobs:
       - uses: astral-sh/setup-uv@v4
       - run: uv run python scripts/detect_mock_usage.py
 
+  ctb-dashboard-portability:
+    name: ctb-dashboard-portability
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v4
+      - working-directory: ctb-dashboard
+        run: uv run pytest tests/test_portability.py -q
+
   secret-scan:
     name: secret-scan
     runs-on: ubuntu-latest

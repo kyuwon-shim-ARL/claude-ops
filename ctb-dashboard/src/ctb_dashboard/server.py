@@ -81,14 +81,26 @@ from .control_audit import RateLimiter as _RateLimiter
 from .control_audit import limiter as _rate_limiter, record as _audit
 
 import sys as _sys
-_PSTATUS_DIR = "/home/kyuwon/projects/project-status"
+# project-status is a sibling project on this machine, not a dependency of
+# this package -- it's optional. On another machine (or without it checked
+# out) the PI review gate just has nothing to show, it doesn't crash import.
+_PSTATUS_DIR = os.path.expanduser(os.environ.get("CTB_PSTATUS_DIR", "~/projects/project-status"))
 if _PSTATUS_DIR not in _sys.path:
     _sys.path.insert(0, _PSTATUS_DIR)
 # Only scanner is needed now: the PI review gate reads plans and reports from
 # the projects tree. The Projects tab that used to mount this package's router,
 # static files and scan loop is gone.
-from scanner import PROJECTS_ROOT as _SCANNER_PROJECTS_ROOT  # noqa: E402
-from scanner import find_rpt_artifact as _find_rpt_artifact  # noqa: E402
+try:
+    from scanner import PROJECTS_ROOT as _SCANNER_PROJECTS_ROOT  # noqa: E402
+    from scanner import find_rpt_artifact as _find_rpt_artifact  # noqa: E402
+except ImportError:
+    logging.getLogger(__name__).info(
+        "project-status scanner not found at %s; PI review gate's rpt lookup disabled", _PSTATUS_DIR
+    )
+    _SCANNER_PROJECTS_ROOT = os.path.expanduser(os.environ.get("CTB_PROJECTS_ROOT") or "~/projects")
+
+    def _find_rpt_artifact(project_path):  # noqa: ANN001
+        return None
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +110,9 @@ POLL_INTERVAL = 2  # seconds between state refreshes
 # hard-binding to an interface that is not up yet at boot would loop forever.
 # LAN exposure is closed by the firewall rules in deploy/firewall-8420.sh.
 BIND_HOST = os.environ.get("CTB_BIND_HOST") or "0.0.0.0"
-BIND_PORT = 8420
+# Phones and the VSCode extension have 8420 baked in; move it only on a machine
+# where that port is already someone else's.
+BIND_PORT = int(os.environ.get("CTB_BIND_PORT") or 8420)
 
 
 def _resolve_control_secret() -> str:
@@ -144,7 +158,7 @@ _REVIEW_OVERLAY_DIR = os.path.expanduser(
     os.environ.get("CTB_REVIEW_OVERLAY_DIR", "~/.claude-ops")
 )
 _REVIEW_LOCK_TIMEOUT = int(os.environ.get("CTB_REVIEW_OVERLAY_LOCK_TIMEOUT", "10"))
-_CTB_PROJECTS_ROOT = os.environ.get("CTB_PROJECTS_ROOT", _SCANNER_PROJECTS_ROOT)
+_CTB_PROJECTS_ROOT = os.path.expanduser(os.environ.get("CTB_PROJECTS_ROOT") or _SCANNER_PROJECTS_ROOT)
 _CTB_DEFAULT_REVIEWER_ID = os.environ.get("CTB_DEFAULT_REVIEWER_ID", "")
 
 _REVIEW_ALLOWED_TAGS = frozenset({
@@ -2515,24 +2529,51 @@ async def review_gate(
     return response
 
 
+def _cmdline(pid: int) -> str:
+    """The process's command line, or "" if it cannot be read."""
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            return f.read().replace(b"\0", b" ").decode(errors="replace")
+    except OSError:
+        import subprocess
+        try:
+            return subprocess.run(["ps", "-o", "args=", "-p", str(pid)],
+                                  capture_output=True, text=True, timeout=5).stdout
+        except Exception:
+            return ""
+
+
 def _kill_previous_on_port(port: int):
-    """Kill any previous process occupying the port to avoid EADDRINUSE."""
+    """Take the port back from a previous dashboard to avoid EADDRINUSE.
+
+    Only a LISTENING process that is itself ctb-dashboard. Plain
+    `lsof -ti :PORT` also lists every client connected to the port -- a
+    browser, or tailscaled proxying `tailscale serve` here -- and those were
+    SIGKILLed too. Anything else holding the port is left alone: uvicorn then
+    fails with EADDRINUSE, which says what is wrong instead of killing it.
+    """
     import subprocess
     try:
         result = subprocess.run(
-            ["lsof", "-ti", f":{port}"],
+            ["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
             capture_output=True, text=True, timeout=5,
         )
-        pids = result.stdout.strip().split('\n')
-        my_pid = os.getpid()
-        for pid_str in pids:
-            if pid_str and pid_str.isdigit():
-                pid = int(pid_str)
-                if pid != my_pid:
-                    os.kill(pid, 9)
-                    logger.info(f"Killed previous dashboard process (PID {pid}) on port {port}")
     except Exception:
-        pass  # lsof not found or no process
+        return  # lsof not found
+    my_pid = os.getpid()
+    for pid_str in result.stdout.split():
+        if not pid_str.isdigit() or int(pid_str) == my_pid:
+            continue
+        pid = int(pid_str)
+        cmd = _cmdline(pid)
+        if "ctb-dashboard" not in cmd and "ctb_dashboard" not in cmd:
+            logger.warning(f"Port {port} is held by PID {pid} ({cmd.strip() or 'unknown'}); not a dashboard, leaving it")
+            continue
+        try:
+            os.kill(pid, 9)
+            logger.info(f"Killed previous dashboard process (PID {pid}) on port {port}")
+        except OSError:
+            pass
 
 
 def _address_assignable(host: str) -> bool:

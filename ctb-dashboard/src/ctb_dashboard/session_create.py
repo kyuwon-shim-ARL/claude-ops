@@ -40,7 +40,7 @@ WORKTREE_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$")
 _GIT_TIMEOUT = 30
 _TMUX_TIMEOUT = 10
 
-_DEFAULT_ROOT = "/home/kyuwon/projects"
+_DEFAULT_ROOT = "~/projects"
 
 
 class CreateError(Exception):
