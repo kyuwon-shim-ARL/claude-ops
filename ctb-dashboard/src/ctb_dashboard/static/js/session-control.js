@@ -12,6 +12,9 @@
 (function () {
   'use strict';
 
+  /* How long a request landed on by the walk glows (see paintLanded). */
+  var LANDED_MS = 1800;
+
   /* The VSCode webview is a different origin: the extension hands it this
    * page's markup as a string, so a relative '/api/...' resolves against
    * vscode-webview:// and never reaches the server. The extension sets
@@ -36,6 +39,119 @@
                 drafts: {}, boxTouched: null, ghost: false, hash: '', cache: {},
                 pinned: true, skipped: 0 };
   var el = {};
+
+  /* --- shortcut inventory -------------------------------------------------
+   *
+   * One table, purely for display (tooltips, the hint `<kbd>`s, the "?"
+   * help panel) and for a future remapping feature. It does NOT drive the
+   * handlers below -- every one of them still owns its own exact keydown
+   * check, unchanged. Keeping the two apart means this table can be wrong
+   * about a label without ever breaking what a key actually does.
+   *
+   * `keys` is normal data for keysLabel() to compose (mod/shift/alt + key,
+   * Mac-aware). A few shortcuts do not fit that shape -- a held modifier, a
+   * digit range, a chord that is always literally "Ctrl" even on a Mac, or
+   * two different ways to reach the same thing -- and those carry `display`
+   * instead, a function of IS_MAC that still builds its string instead of
+   * hardcoding one, so every label lives in exactly one place. */
+  var SHORTCUTS = [
+    { id: 'session-hint', group: '세션 이동',
+      desc: '누르고 있으면 세션 번호 힌트 표시',
+      display: function (mac) { return (mac ? 'Cmd/Option' : 'Ctrl/Alt') + ' 길게'; } },
+    { id: 'session-digit', group: '세션 이동',
+      desc: '힌트에 뜨 번호로 해당 세션으로 전환',
+      display: function (mac) { return (mac ? 'Cmd' : 'Ctrl') + '+1~9'; } },
+    { id: 'rail-prev', group: '세션 이동',
+      desc: '레일의 이전 세션으로 (Shift: 긴급만)',
+      keys: { mod: true, key: '[' } },
+    { id: 'rail-next', group: '세션 이동',
+      desc: '레일의 다음 세션으로 (Shift: 긴급만)',
+      keys: { mod: true, key: ']' } },
+    { id: 'rail-idle', group: '세션 이동',
+      desc: '가장 왼쪽의 유휴 세션으로 이동',
+      keys: { mod: true, key: '\\' } },
+    { id: 'session-switch-back', group: '세션 이동',
+      desc: '직전 세션으로 전환 (PWA/VSCode)',
+      /* A browser tab keeps Ctrl/Cmd+Tab for its own tab switching and the
+       * page never sees it -- see the handler's own comment. The label says
+       * so instead of promising a chord that does nothing in a plain tab. */
+      keys: { mod: true, key: 'Tab' } },
+    { id: 'session-search', group: '세션 이동',
+      desc: '세션 검색 팔레트 열기',
+      keys: { mod: true, key: 'F' } },
+    { id: 'session-close', group: '세션 이동',
+      desc: '현재 세션 닫기',
+      /* Not Cmd/Ctrl+Q: that quits the browser on a Mac, and Ctrl+Q / Ctrl+Shift+Q
+       * quit Firefox / Chrome on Linux before the page sees them -- the
+       * handler's own comment is why Alt is bound alongside the accelerator.
+       * The label shows only the chord that is actually safe to press. */
+      display: function (mac) { return (mac ? 'Option' : 'Alt') + '+Q'; } },
+    { id: 'session-restore', group: '세션 이동',
+      desc: '마지막으로 닫은 세션 복원',
+      display: function (mac) { return (mac ? 'Option' : 'Alt') + '+Shift+Q'; } },
+    { id: 'page-up', group: '출력 탐색',
+      desc: '출력을 한 화면 위로',
+      keys: { mod: true, shift: true, key: '↑' } },
+    { id: 'page-down', group: '출력 탐색',
+      desc: '출력을 한 화면 아래로',
+      keys: { mod: true, shift: true, key: '↓' } },
+    { id: 'prev-prompt', group: '출력 탐색',
+      desc: '이전 요청으로 이동',
+      keys: { mod: true, key: ';' } },
+    { id: 'goto-end', group: '출력 탐색',
+      desc: '끝으로 이동 (실시간 추적 재개)',
+      keys: { mod: true, key: '\'' } },
+    { id: 'find-in-output', group: '출력 탐색',
+      desc: '출력 내용 검색',
+      keys: { mod: true, shift: true, key: 'F' } },
+    { id: 'send-tab', group: '입력',
+      desc: '세션에 Tab 전송',
+      keys: { shift: true, key: 'Tab' } },
+    { id: 'send-escape', group: '입력',
+      desc: '세션에 Escape 전송',
+      keys: { shift: true, key: 'Escape' } },
+    { id: 'arm-send', group: '입력',
+      desc: '키 하나 보내기 모드 (y/n/숫자/화살표/Tab/Enter/Esc/Backspace/Space)',
+      keys: { mod: true, key: '.' } },
+    { id: 'kill-line', group: '입력',
+      desc: '입력창 또는 세션의 현재 줄 지우기',
+      display: function () { return 'Ctrl+U'; } },
+    { id: 'resume-focus', group: '입력',
+      desc: '출력 영역에서 Enter → 입력창으로 포커스 이동',
+      keys: { key: 'Enter' } },
+    { id: 'new-session', group: '기타',
+      desc: '새 세션 만들기',
+      /* Bare N only works from the board -- typing it into the console's own
+       * prompt box is just a letter, and shortcutBlocked() in
+       * session-create.js refuses it while any console is open. The chord
+       * still works over an open console, but only in a PWA/VSCode webview;
+       * Chrome and Firefox keep Ctrl+N for their own "new window". */
+      display: function (mac) {
+        return 'N (보드에서) / ' + (mac ? 'Cmd' : 'Ctrl') + '+N (PWA/VSCode)';
+      } },
+    { id: 'help-panel', group: '기타',
+      desc: '단축키 도움말 열기/닫기',
+      keys: { key: '?' } },
+  ];
+
+  var SHORTCUT_BY_ID = {};
+  SHORTCUTS.forEach(function (s) { SHORTCUT_BY_ID[s.id] = s; });
+
+  /* Mac-aware label for one entry's `keys` (or its own `display`, for the
+   * handful that do not fit the mod/shift/alt+key shape). Plain words, not
+   * glyphs -- the file's own status-line chords already read "Cmd+." / "Ctrl+."
+   * (see armSend below), so tooltips and the help panel match that. */
+  function keysLabel(entry) {
+    if (!entry) return '';
+    if (entry.display) return entry.display(IS_MAC);
+    var k = entry.keys || {};
+    var parts = [];
+    if (k.mod) parts.push(IS_MAC ? 'Cmd' : 'Ctrl');
+    if (k.shift) parts.push('Shift');
+    if (k.alt) parts.push(IS_MAC ? 'Option' : 'Alt');
+    if (k.key) parts.push(k.key);
+    return parts.join('+');
+  }
 
   /* --- markup ------------------------------------------------------------ */
 
@@ -317,6 +433,17 @@
       '@keyframes con-flash{0%{background:rgba(16,185,129,0.35)}100%{background:transparent}}',
       '#ctb-console .con-flash{animation:con-flash 1.2s ease-out}',
       '@media(prefers-reduced-motion:reduce){#ctb-console .con-flash{animation:none}}',
+      /* The 이전 요청 / 끝으로 pills float over the output, and at full strength
+       * they pulled the eye off the text they sit on. Faint until a pointer
+       * or a keyboard reaches them; full while pressed. */
+      '#ctb-console .con-pill{opacity:.35;transition:opacity .15s ease}',
+      '#ctb-console .con-pill:hover,#ctb-console .con-pill:active,#ctb-console .con-pill:focus-visible{opacity:1}',
+      /* The request a walk landed on glows in the pill's own colour and fades,
+       * so the eye finds it among the rows the jump just brought in. */
+      '@keyframes con-landed{0%,35%{background:rgba(129,140,248,0.38);box-shadow:inset 3px 0 0 var(--con-accent,rgb(129,140,248))}'
+        + '100%{background:transparent;box-shadow:inset 3px 0 0 transparent}}',
+      '#ctb-console .con-landed{animation:con-landed ' + LANDED_MS + 'ms ease-out both}',
+      '@media(prefers-reduced-motion:reduce){#ctb-console .con-landed{animation:none;background:rgba(129,140,248,0.25)}}',
       /* State, told the same way on both surfaces -- the rail at the top of
        * the console and the search palette over it. The board says a session
        * is alive by breathing its dot; these do the same, and both say it in
@@ -354,6 +481,18 @@
       '#ctb-console .con-input::placeholder{color:var(--con-dim)}',
       '@media(prefers-reduced-motion:reduce){#ctb-console .con-btn,#ctb-console .con-chip,#ctb-console .con-input{transition:none}',
       '#ctb-console .con-btn:active,#ctb-console .con-chip:active{transform:none}}',
+      /* Hidden by default -- a phone has no key to show -- and revealed only
+       * where the device actually has a hovering, precise pointer: the same
+       * test a mouse/trackpad passes and a touch screen fails, regardless of
+       * how wide the viewport happens to be. The plain rule has to come
+       * BEFORE the @media override: same specificity, so whichever is later
+       * in the sheet wins, and reversing the order would hide the hint on
+       * every device, media query included. */
+      '#ctb-console .con-hint-kbd{display:none}',
+      '@media (hover: hover) and (pointer: fine){#ctb-console .con-hint-kbd{',
+      'display:inline-block;margin-left:6px;padding:1px 6px;border-radius:5px;',
+      'font:600 10px/1.6 ui-monospace,"SF Mono",Menlo,monospace;',
+      'color:rgba(255,255,255,0.85);background:rgba(255,255,255,0.18);}}',
     ].join('');
     var style = document.createElement('style');
     style.id = 'ctb-console-style';
@@ -577,7 +716,7 @@
     var findText = document.createElement('button');
     findText.type = 'button';
     findText.appendChild(icon('textSearch'));
-    findText.title = '\ucd9c\ub825 \ub0b4\uc6a9 \uac80\uc0c9 (Ctrl/Cmd+Shift+F)';
+    findText.title = '\ucd9c\ub825 \ub0b4\uc6a9 \uac80\uc0c9 (' + keysLabel(SHORTCUT_BY_ID['find-in-output']) + ')';
     findText.setAttribute('aria-label', '\ucd9c\ub825 \ub0b4\uc6a9 \uac80\uc0c9');
     styleBtn(findText, 'icon');
     findText.addEventListener('click', function () { openFind(); });
@@ -589,6 +728,20 @@
     copy.setAttribute('aria-label', '\ud654\uba74 \ub0b4\uc6a9 \ubcf5\uc0ac');
     styleBtn(copy, 'icon');
     copy.addEventListener('click', copyTail);
+
+    /* No glyph of its own in ICONS -- the mark that means "help" everywhere
+     * already is the character itself, so a plain "?" is drawn rather than
+     * adding an SVG path just for this one button. */
+    var helpBtn = document.createElement('button');
+    helpBtn.type = 'button';
+    helpBtn.textContent = '?';
+    helpBtn.title = '단축키 도움말 (' + keysLabel(SHORTCUT_BY_ID['help-panel']) + ')';
+    helpBtn.setAttribute('aria-label', '단축키 도움말');
+    styleBtn(helpBtn, 'icon');
+    helpBtn.style.fontWeight = '700';
+    helpBtn.addEventListener('click', function () {
+      if (helpOpen()) closeHelp(); else openHelp();
+    });
 
     var close = document.createElement('button');
     close.type = 'button';
@@ -603,6 +756,7 @@
     header.appendChild(find);
     header.appendChild(findText);
     header.appendChild(copy);
+    header.appendChild(helpBtn);
     header.appendChild(close);
 
     var tail = document.createElement('pre');
@@ -927,9 +1081,12 @@
      * its own status line once already for exactly that reason. */
     var endPill = document.createElement('button');
     endPill.type = 'button';
+    endPill.className = 'con-pill';
     endPill.appendChild(icon('down', 14));
     endPill.appendChild(document.createTextNode('\ub05d\uc73c\ub85c'));
     endPill.setAttribute('aria-label', '\ub9e8 \uc544\ub798\ub85c \uac00\uae30');
+    endPill.title = '\ub05d\uc73c\ub85c (' + keysLabel(SHORTCUT_BY_ID['goto-end']) + ')';
+    endPill.appendChild(hintKbd(SHORTCUT_BY_ID['goto-end']));
     endPill.style.cssText = [
       'display:none', 'position:absolute', 'left:50%', 'bottom:14px',
       'transform:translateX(-50%)', 'z-index:3',
@@ -953,9 +1110,12 @@
      * the full width of the top, so centre would have collided with both. */
     var prevPill = document.createElement('button');
     prevPill.type = 'button';
+    prevPill.className = 'con-pill';
     prevPill.appendChild(icon('up', 14));
     prevPill.appendChild(document.createTextNode('\uc774\uc804 \uc694\uccad'));
     prevPill.setAttribute('aria-label', '\uc774\uc804 \uc694\uccad\uc73c\ub85c \uac00\uae30');
+    prevPill.title = '\uc774\uc804 \uc694\uccad (' + keysLabel(SHORTCUT_BY_ID['prev-prompt']) + ')';
+    prevPill.appendChild(hintKbd(SHORTCUT_BY_ID['prev-prompt']));
     prevPill.style.cssText = [
       'display:none', 'position:absolute', 'left:50%', 'top:14px',
       'transform:translateX(-50%)', 'z-index:3',
@@ -1670,8 +1830,172 @@
   }
 
   function keysTaken() {
-    return searchOpen() || sheetOpen() || findOpen();
+    return searchOpen() || sheetOpen() || findOpen() || helpOpen();
   }
+
+  /* --- shortcut hints and the "?" help panel ------------------------------
+   *
+   * A small muted <kbd> next to a button that already has a chord -- visible
+   * only where a mouse/trackpad is the input (see the CSS guard below), since
+   * a touch screen has no key to show. Deliberately NOT added to the key pad
+   * (el.keys): fitKeys()/planKeys() measure those buttons' own widths to
+   * decide what folds into the overflow menu, and a hint would change a
+   * measured width without either function knowing about it. Everywhere
+   * else -- the prev/end pills here, the header buttons -- sits outside that
+   * measured row, so a hint there is free. */
+  function hintKbd(entry) {
+    var k = document.createElement('kbd');
+    k.className = 'con-hint-kbd';
+    k.setAttribute('aria-hidden', 'true');
+    k.textContent = keysLabel(entry);
+    return k;
+  }
+
+  /* Built once, on first use, the way the find bar and the search palette
+   * are: most sessions never open it, so there is no reason to pay for the
+   * DOM before the first press of "?". */
+  var help = { open: false, root: null, panel: null, closeBtn: null, lastFocus: null };
+
+  function buildHelpPanel() {
+    if (help.root) return;
+    injectStyle();
+    var overlay = document.createElement('div');
+    overlay.id = 'con-help-overlay';
+    overlay.style.cssText = [
+      'position:fixed', 'inset:0', 'z-index:100000', 'display:none',
+      'align-items:center', 'justify-content:center',
+      'background:var(--con-overlay,rgba(0,0,0,0.4))', 'padding:16px',
+    ].join(';');
+    overlay.addEventListener('mousedown', function (e) {
+      if (e.target === overlay) closeHelp();
+    });
+
+    var panel = document.createElement('div');
+    panel.id = 'con-help-panel';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-label', '단축키 도움말');
+    panel.style.cssText = [
+      'background:var(--con-sheet)', 'color:var(--con-text)',
+      'border-radius:16px', 'max-width:460px', 'width:100%', 'max-height:80vh',
+      'overflow:auto', 'padding:20px 22px', 'box-shadow:var(--con-shadow,0 18px 48px rgba(0,0,0,0.4))',
+    ].join(';');
+    panel.addEventListener('click', function (e) { e.stopPropagation(); });
+    /* A minimal focus trap: the close button is the panel's only focusable
+     * element, so Tab (forward or back) just stays on it instead of
+     * escaping to whatever is underneath -- the help panel is meant to own
+     * the keyboard the whole time it is up, the same as the find bar and the
+     * search palette already do. */
+    panel.addEventListener('keydown', function (e) {
+      if (e.key !== 'Tab') return;
+      e.preventDefault();
+      help.closeBtn.focus();
+    });
+
+    var h = document.createElement('h2');
+    h.textContent = '단축키 도움말';
+    h.style.cssText = 'margin:0 0 14px;font-size:16px;font-weight:700;';
+    panel.appendChild(h);
+
+    var groups = ['세션 이동', '출력 탐색', '입력', '기타'];
+    groups.forEach(function (g) {
+      var items = SHORTCUTS.filter(function (s) { return s.group === g; });
+      if (!items.length) return;
+      var gh = document.createElement('div');
+      gh.textContent = g;
+      gh.style.cssText = 'margin:16px 0 6px;font-size:11px;font-weight:700;'
+        + 'color:var(--con-muted);text-transform:uppercase;letter-spacing:0.04em;';
+      panel.appendChild(gh);
+      items.forEach(function (s) {
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;'
+          + 'gap:14px;padding:6px 0;font-size:13px;border-bottom:1px solid var(--con-line);';
+        var desc = document.createElement('span');
+        desc.textContent = s.desc;
+        var keys = document.createElement('kbd');
+        keys.textContent = keysLabel(s);
+        keys.style.cssText = 'flex-shrink:0;color:var(--con-muted);background:var(--con-well);'
+          + 'border-radius:6px;padding:2px 8px;font:600 12px/1.4 ui-monospace,"SF Mono",Menlo,monospace;'
+          + 'white-space:nowrap;';
+        row.appendChild(desc);
+        row.appendChild(keys);
+        panel.appendChild(row);
+      });
+    });
+
+    var closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.textContent = '닫기';
+    closeBtn.style.cssText = 'margin-top:16px;border:0;border-radius:10px;'
+      + 'background:var(--con-accent);color:#fff;padding:8px 16px;cursor:pointer;'
+      + 'font:600 13px/1 ui-sans-serif,system-ui,sans-serif;';
+    closeBtn.addEventListener('click', function () { closeHelp(); });
+    panel.appendChild(closeBtn);
+
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+    help.root = overlay;
+    help.panel = panel;
+    help.closeBtn = closeBtn;
+  }
+
+  function helpOpen() { return help.open; }
+
+  function openHelp() {
+    buildHelpPanel();
+    /* The armed Ctrl/Cmd+. listener captures on window and does not check
+     * keysTaken() -- it means to win against every other handler, the help
+     * panel included. Left armed, the very next key the reader presses to
+     * read the panel (y, n, a digit, an arrow, Escape...) would instead fire
+     * off to the tmux pane behind it. */
+    disarmSend(true);
+    help.lastFocus = document.activeElement;
+    help.root.style.display = 'flex';
+    help.open = true;
+    help.closeBtn.focus();
+  }
+
+  function closeHelp() {
+    if (!help.open) return;
+    help.open = false;
+    if (help.root) help.root.style.display = 'none';
+    if (help.lastFocus && typeof help.lastFocus.focus === 'function') {
+      try { help.lastFocus.focus(); } catch (e) { /* detached since */ }
+    }
+    help.lastFocus = null;
+  }
+
+  /* "?" opens it from anywhere that is not a place the reader is typing --
+   * Shift+/ is how a US layout actually produces "?", so both the character
+   * and the physical chord are checked the way the rest of this file checks
+   * `key` with a `code` fallback. Not inside keysTaken(): this IS one of the
+   * things that gate, and gating on itself would mean the second press, which
+   * is meant to close it, never arrives. */
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      if (!helpOpen()) return;
+      e.preventDefault();
+      /* stopImmediatePropagation, not stopPropagation: the console's own
+       * Escape listener is also bound on `document`, and only Immediate
+       * stops a later listener on the SAME node from running too -- without
+       * it this Escape would close the help panel AND the console under it. */
+      e.stopImmediatePropagation();
+      closeHelp();
+      return;
+    }
+    if (e.key !== '?' && !(e.key === '/' && e.shiftKey)) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.isComposing || e.keyCode === 229) return;
+    /* While the panel is open, '?' always closes it, even with the caret on
+     * its own close BUTTON -- which interactiveTarget() would otherwise read
+     * as "typing" and let the key through as nothing. There is nothing to
+     * type into inside this panel, so there is no competing meaning to
+     * protect the way there is for the prompt box below. */
+    if (helpOpen()) { e.preventDefault(); closeHelp(); return; }
+    if (interactiveTarget(e.target)) return;
+    e.preventDefault();
+    openHelp();
+  });
 
   /* The name a screen reader reads: who, which branch, and what it is doing.
    * The chip's visible text can be clipped to an ellipsis and its dot is
@@ -2408,6 +2732,21 @@
     if (!accelHeld(e)) return;
     e.preventDefault();
     jumpToFirstIdle();
+  });
+
+  /* Ctrl/Cmd+; and Ctrl/Cmd+' -- the "이전 요청" and "끝으로" pills, from the
+   * keyboard. Neighbours on the home row: back on the left, end on the right.
+   * Bound on `code` like Backslash, `key` as the fallback. */
+  document.addEventListener('keydown', function (e) {
+    if (!state.session || keysTaken()) return;
+    var back = e.code === 'Semicolon' || e.key === ';' || e.key === ':';
+    var end = e.code === 'Quote' || e.key === "'" || e.key === '"';
+    if (!back && !end) return;
+    if (e.isComposing || e.keyCode === 229) return;
+    if (!accelHeld(e)) return;
+    e.preventDefault();
+    if (back) gotoPrevPrompt();
+    else resumeLive();
   });
 
   /* Ctrl/Cmd+Q closes the open session the way the trash does, and as fast as
@@ -3208,8 +3547,9 @@
     /* Not keysTaken(): this handler deliberately claims the chord while its
      * own palette is up (see below), and standing down for searchOpen() here
      * handed the second press to the browser's find bar. Only the sheet in
-     * front of everything makes it let go. */
-    if (sheetOpen()) return;
+     * front of everything makes it let go. The help panel is the one other
+     * thing in front of everything, so it stands down the same way. */
+    if (sheetOpen() || helpOpen()) return;
     if (e.key !== 'f' && e.key !== 'F') return;
     if (!(IS_MAC ? e.metaKey : e.ctrlKey) || e.shiftKey || e.altKey) return;
     /* Claimed before the already-open check: letting the second press through
@@ -3864,6 +4204,7 @@
     });
     el.tail.appendChild(frag);
     paintPending();
+    paintLanded();
     if (findOpen()) runFind(fnd.q, fnd.at);
     updateEndPill();
   }
@@ -4484,6 +4825,45 @@
    * answer to that request -- fills the rest of the pane. */
   var PROMPT_HEAD = 56;
 
+  /* The glow on the request just landed on. Kept by ordinal from the end, like
+   * the walk, because a page of history prepended mid-glow renumbers every
+   * row; and by start time, so a repaint -- which rebuilds the rows -- picks
+   * the fade up where it was instead of dropping it or starting it over. */
+  var landed = null;
+
+  function flashLanded(ordinal) {
+    landed = { ordinal: ordinal, t0: Date.now() };
+    paintLanded();
+  }
+
+  function paintLanded() {
+    if (!el.tail) return;
+    var old = el.tail.querySelectorAll('.con-landed');
+    for (var k = 0; k < old.length; k++) {
+      old[k].classList.remove('con-landed');
+      old[k].style.animationDelay = '';
+    }
+    if (!landed || !state.lines) return;
+    var age = Date.now() - landed.t0;
+    if (age >= LANDED_MS) { landed = null; return; }
+    var at = submittedLines(state.lines);
+    var line = at[at.length - landed.ordinal];
+    if (line === undefined) return;
+    /* The request plus the rows it wrapped onto -- the same rule
+     * findLastSubmitted uses to rejoin it. */
+    var end = line;
+    while (end + 1 < state.lines.length && /^[\s\u00a0]{2,}\S/.test(state.lines[end + 1])) end++;
+    for (var i = line; i <= end; i++) {
+      var node = el.tail.querySelector('[data-line="' + i + '"]');
+      if (!node) continue;
+      node.style.animationDelay = age ? -age + 'ms' : '';
+      node.classList.add('con-landed');
+    }
+    /* Taken off when it ends, so the class means "glowing now". */
+    clearTimeout(paintLanded.timer);
+    paintLanded.timer = setTimeout(paintLanded, LANDED_MS - age + 20);
+  }
+
   /* scrollIntoView is not used: it walks up the ancestors and has scrolled the
    * sheet itself out of place. */
   function landOnPrompt(line) {
@@ -4500,6 +4880,7 @@
     /* The reader has left the end: the poll must stop dragging them back. */
     state.pinned = false;
     updateEndPill();
+    flashLanded(ordinal);
     return true;
   }
 
@@ -4854,7 +5235,7 @@
     if (!state.session) return;
     if (e.key !== 'f' && e.key !== 'F') return;
     if (!(IS_MAC ? e.metaKey : e.ctrlKey) || !e.shiftKey || e.altKey) return;
-    if (sheetOpen() || e.defaultPrevented) return;
+    if (sheetOpen() || helpOpen() || e.defaultPrevented) return;
     if (e.isComposing || e.keyCode === 229) return;
     e.preventDefault();
     if (findOpen()) { fnd.input.focus(); fnd.input.select(); return; }
@@ -5218,7 +5599,11 @@
     /* iOS suspends a backgrounded PWA mid-request: without this the spinner
      * stays up forever on a phone that was put in a pocket. */
     var ctl = ('AbortController' in window) ? new AbortController() : null;
-    var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 120000);
+    /* Scaled to the file, at ~250 KB/s, between 2 and 15 minutes: a flat 2
+     * minutes aborted a large zip that was still arriving. 15 minutes is the
+     * server's own receive deadline (CTB_UPLOAD_TIMEOUT in this deployment). */
+    var wait = Math.max(120000, Math.min(900000, (file.size || 0) / 250));
+    var timer = setTimeout(function () { if (ctl) ctl.abort(); }, wait);
     var opts = {
       method: 'POST',
       body: file,
@@ -5260,8 +5645,12 @@
       chain = chain.then(function () {
         return uploadOne(session, file).then(function (r) {
           if (r.status === 200 && r.body.path) done.push(r.body);
+          /* A refusal mid-body comes back with the connection closed under
+           * it, so the server's reason is often lost; 413 still means size. */
           else failed.push((file.name || '파일') + ': ' +
-                           (r.body.detail || ('HTTP ' + r.status)));
+                           (r.body.detail || (r.status === 413
+                             ? '파일이 너무 큽니다 (서버 업로드 한도 초과)'
+                             : 'HTTP ' + r.status)));
           say('업로드 중… (' + (i + 1) + '/' + list.length + ')', 'var(--con-muted)');
         }).catch(function (e) {
           failed.push((file.name || '파일') + ': ' +
@@ -5785,6 +6174,11 @@
     state.boxTouched = null;   /* the mark belongs to the box it was made in */
     /* The menu names one session; it must not survive a switch to another. */
     if (state.session !== name) closeQuadMenu();
+    /* The glow names a line by ordinal in THIS session's tail; a switch
+     * leaves `landed` pointing at an ordinal that means something else (or
+     * nothing) in the new one, and paintLanded() would light up whatever
+     * line happened to sit at that position instead. */
+    if (state.session !== name) landed = null;
     state.session = name;
     closeFind();
     /* The armed key was meant for the session that was open when it was
@@ -5988,6 +6382,7 @@
     _sessionGone: sessionGone,
     _sendKeyName: sendKeyName,
     _sendArmed: sendArmed,
+    _landed: function () { return landed; },
     _findMatches: findMatches,
     _openFind: openFind,
     _sttDraft: sttDraft,
@@ -6000,10 +6395,11 @@
      * request that is going to move the console when it lands: the session
      * palette, the importance menu, a clip being recorded or a mic still
      * being acquired, a close or restore in flight (both call show() on
-     * success, which switches session and takes the caret). Ctrl+N asks
-     * before drawing the new-session sheet over the top of any of them. */
+     * success, which switches session and takes the caret), or the "?" help
+     * panel. Ctrl+N asks before drawing the new-session sheet over the top
+     * of any of them. */
     busy: function () {
-      return searchOpen() || quadMenuOpen() || findOpen()
+      return searchOpen() || quadMenuOpen() || findOpen() || helpOpen()
         || !!stt.rec || stt.busy || closing;
     },
     _toggleQuadMenu: toggleQuadMenu,
