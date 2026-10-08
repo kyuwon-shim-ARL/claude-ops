@@ -247,23 +247,60 @@ def test_a_request_buried_under_output_still_gets_the_pill(board):
     board.wait_for_selector(PREV, state="visible")
 
 
-def test_with_no_request_in_the_window_the_pill_loads_the_page_above(board):
-    """With nowhere to land, the press goes up from where the reader is and
-    loads the next 400 lines above it -- not the top of the transcript, and no
-    landing. What was at the top of the pane stays there, with the new page
-    above it."""
+def test_with_no_request_in_the_window_one_press_loads_until_it_finds_one(board):
+    """One press, however many pages it takes: 400 lines at a time until a
+    request shows up, then the landing. The request at line 100 is three
+    pages above the 40-line window."""
     buried_request(board)
     board.wait_for_selector(PREV, state="visible")
-    before = logs(board)
     board.click(PREV)
-    board.wait_for_function("() => window.ctbConsole._state.lines.length === 440",
-                            timeout=4000)
+    board.wait_for_function("() => window.ctbConsole._state.walk === 1",
+                            timeout=8000)
     board.wait_for_timeout(300)
-    assert logs(board) > before
-    # The old window's first line (log line 960) is now row 400, at the top.
-    assert abs(where(board, 400)) < 30
+    assert board.evaluate("() => window.ctbConsole._state.lines.length") == 1000
+    assert 0 < where(board, 100) < 80, "landed on the buried request"
+
+
+def pill_text(board):
+    return board.eval_on_selector(PREV, "el => el.textContent")
+
+
+def test_the_pill_says_it_is_loading_while_it_looks(board):
+    """Several fetches go by before anything moves. Without a word on the
+    button itself, the press reads as having done nothing."""
+    buried_request(board)
+    board.wait_for_selector(PREV, state="visible")
+    board.ctb_hold_log = True                         # the next fetch waits
+    board.click(PREV)
+    board.wait_for_function("() => window.ctbConsole._state.growing === true",
+                            timeout=4000)
+    assert board.is_visible(PREV), "the button stays up while it works"
+    assert "불러오는 중" in pill_text(board)
+    assert board.get_attribute(PREV, "aria-busy") == "true"
+
+    board.ctb_hold_log = False
+    board.ctb_release_log()
+    board.wait_for_function("() => window.ctbConsole._state.walk === 1",
+                            timeout=8000)
+    board.wait_for_timeout(200)
+    assert "불러오는 중" not in pill_text(board)
+    assert board.get_attribute(PREV, "aria-busy") != "true"
+
+
+def test_a_pane_with_no_request_at_all_stops_at_the_end_of_history(board):
+    """Nothing to find: it loads to the end of the history, then stops -- the
+    loading word goes, and so does the button, which has nowhere left to go."""
+    board.ctb_log = "\n".join("line %03d output" % i for i in range(1000))
+    board.ctb_log_hash = "h-none"
+    board.ctb_log_window = True
+    open_console(board, "claude_beta")
+    board.wait_for_selector(PREV, state="visible")
+    board.click(PREV)
+    board.wait_for_function("() => window.ctbConsole._state.exhausted === true",
+                            timeout=10000)
+    board.wait_for_timeout(300)
+    assert board.is_hidden(PREV)
     assert board.evaluate("() => window.ctbConsole._state.walk") is None
-    assert board.is_visible(PREV), "still more above, so still offered"
 
 
 def test_the_prev_pill_walks_back_one_request_at_a_time(board):

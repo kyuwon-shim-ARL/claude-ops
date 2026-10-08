@@ -28,6 +28,9 @@
    * asks for more. tmux keeps 50k lines per pane, so the ceiling here is about
    * what is worth shipping and re-rendering, not what exists. */
   var TAIL_STEP = 400;
+  var PREV_LABEL = '\uc774\uc804 \uc694\uccad';
+  var PREV_LABEL_BUSY = '\uc774\uc804 \ub300\ud654 \ubd88\ub7ec\uc624\ub294 \uc911\u2026';
+  var PREV_LANDED = '\uc774\uc804 \uc694\uccad\uc73c\ub85c \uc774\ub3d9\ud588\uc2b5\ub2c8\ub2e4 \u00b7 \ub2e4\uc2dc \ub204\ub974\uba74 \uadf8 \uc804 \uc694\uccad';
   var MAX_TAIL_LINES = 5000;
   var POLL_MS = 2000;
 
@@ -412,6 +415,7 @@
       '@keyframes con-spin{to{transform:rotate(360deg)}}',
       '#ctb-console .con-mic[data-transcribing]{background:#f59e0b!important;color:#fff!important}',
       '#ctb-console .con-mic[data-transcribing] svg{animation:con-spin 1.4s linear infinite}',
+      '#ctb-console .con-pill[data-seeking] svg{animation:con-spin 1.4s linear infinite}',
       '@media(prefers-reduced-motion:reduce){#ctb-console .con-mic[data-transcribing] svg{animation:none}}',
       '#ctb-console .con-tray{background:var(--con-tray);border-radius:16px;padding:8px}',
       /* A phone screen is short, and the pane is what it is for. On narrow
@@ -1112,7 +1116,8 @@
     prevPill.type = 'button';
     prevPill.className = 'con-pill';
     prevPill.appendChild(icon('up', 14));
-    prevPill.appendChild(document.createTextNode('\uc774\uc804 \uc694\uccad'));
+    var prevLabel = document.createTextNode(PREV_LABEL);
+    prevPill.appendChild(prevLabel);
     prevPill.setAttribute('aria-label', '\uc774\uc804 \uc694\uccad\uc73c\ub85c \uac00\uae30');
     prevPill.title = '\uc774\uc804 \uc694\uccad (' + keysLabel(SHORTCUT_BY_ID['prev-prompt']) + ')';
     prevPill.appendChild(hintKbd(SHORTCUT_BY_ID['prev-prompt']));
@@ -1147,7 +1152,7 @@
     bindDrop(root);
     document.body.appendChild(root);
 
-    el = { keys: keys, keysMore: more, clip: clip, picker: picker, endPill: endPill, prevPill: prevPill,
+    el = { keys: keys, keysMore: more, clip: clip, picker: picker, endPill: endPill, prevPill: prevPill, prevLabel: prevLabel,
            root: root, strip: strip, railHome: railHome, railSkip: railSkip, title: title, status: status, tail: tail, mic: mic,
            frozen: frozen, input: input,
            send: send, silent: silent, quad: quad, quadNum: quadNum };
@@ -4556,7 +4561,7 @@
     getJSON('/api/sessions/' + encodeURIComponent(name) + '/log?lines=' + state.depth)
       .then(function (data) {
         if (!data || state.session !== name) { state.growing = false; return; }
-        if (data.__status) { state.growing = false; setStatus('불러오기 실패', 'var(--con-err)'); return; }
+        if (data.__status) { state.growing = false; updatePrevPill(); setStatus('불러오기 실패', 'var(--con-err)'); return; }
         /* Fetched at once so the lines are ready early, applied only once the
          * fling has stopped (see whenSettled). `growing` stays up until then:
          * a second request behind a fling still in flight would only queue a
@@ -4566,7 +4571,8 @@
           /* The freeze may have arrived while this was in flight: a find
            * opened after an automatic grow started must not have the pane
            * rebuilt underneath its matches. */
-          if (state.session !== name || held()) return;
+          if (state.session !== name) return;
+          if (held()) { updatePrevPill(); return; }
           if (findOpen() && !deliberate) return;
           state.cols = data.cols || 0;
           state.hash = data.hash || '';
@@ -4609,7 +4615,7 @@
           }
         });
       })
-      .catch(function () { state.growing = false; setStatus('불러오기 실패', 'var(--con-err)'); });
+      .catch(function () { state.growing = false; updatePrevPill(); setStatus('불러오기 실패', 'var(--con-err)'); });
   }
 
   function startPolling() {
@@ -4813,10 +4819,22 @@
 
   function updatePrevPill() {
     if (!el.prevPill) return;
-    /* The find bar owns the top of the pane while it is open, full width. */
+    var busy = seekBusy();
+    /* The find bar owns the top of the pane while it is open, full width.
+     * A seek in flight keeps the pill up: canDeepenForWalk says no while a
+     * grow is running, and the button vanishing mid-search read as failure. */
     var show = !!state.session && !findOpen()
-      && (prevPromptLine() >= 0 || canDeepenForWalk());
+      && (busy || prevPromptLine() >= 0 || canDeepenForWalk());
     el.prevPill.style.display = show ? 'inline-flex' : 'none';
+    var label = busy ? PREV_LABEL_BUSY : PREV_LABEL;
+    if (el.prevLabel.nodeValue !== label) el.prevLabel.nodeValue = label;
+    if (busy) {
+      el.prevPill.setAttribute('data-seeking', '');
+      el.prevPill.setAttribute('aria-busy', 'true');
+    } else {
+      el.prevPill.removeAttribute('data-seeking');
+      el.prevPill.removeAttribute('aria-busy');
+    }
   }
 
   /* Clear of the pill itself. Landing the prompt flush at the top edge puts it
@@ -4897,29 +4915,64 @@
     walkAsk += 1;
   }
 
+  /* A press with no turn in the window loads page after page until one
+   * appears, then lands on it. `seekAsk` is the press that started it; the
+   * seek is live while that press is still the latest (walkAsk -- anything
+   * that takes the pane over bumps it) and a page is on its way. */
+  var seekAsk = 0;
+
+  function seekBusy() {
+    return seekAsk !== 0 && seekAsk === walkAsk && state.growing;
+  }
+
+  function seekPrompt(ask, name) {
+    growTail(true, function () {
+      if (ask !== walkAsk || state.session !== name || findOpen() || held()) {
+        seekAsk = 0;
+        updatePrevPill();
+        return;
+      }
+      var line = prevPromptLine();
+      if (line >= 0) {
+        seekAsk = 0;
+        if (landOnPrompt(line)) setStatus(PREV_LANDED, 'var(--con-muted)');
+        updatePrevPill();
+        return;
+      }
+      if (canDeepenForWalk()) { seekPrompt(ask, name); return; }
+      seekAsk = 0;
+      updatePrevPill();
+      setStatus('\uc774\uc804 \uc694\uccad\uc744 \ucc3e\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4', 'var(--con-muted)');
+    });
+    /* After the call, not before: canDeepenForWalk is false once the grow is
+     * running, and only seekBusy keeps the pill up through it. A grow that
+     * refused to start leaves growing down, and the pill goes back to normal. */
+    updatePrevPill();
+  }
+
   function gotoPrevPrompt() {
     if (!state.session || !state.lines) return;
+    /* Already loading towards one. A second press would bump walkAsk and
+     * cancel the search it is waiting on. */
+    if (seekBusy()) return;
     /* Asked here, where the layout has settled, and nowhere else. */
     if (state.walk && !walkOwnsView()) state.walk = null;
     var ask = ++walkAsk;
     var name = state.session;
     var line = prevPromptLine();
     if (line >= 0) {
-      if (landOnPrompt(line)) {
-        setStatus('\uc774\uc804 \uc694\uccad\uc73c\ub85c \uc774\ub3d9\ud588\uc2b5\ub2c8\ub2e4 \u00b7 \ub2e4\uc2dc \ub204\ub974\uba74 \uadf8 \uc804 \uc694\uccad', 'var(--con-muted)');
-      }
+      if (landOnPrompt(line)) setStatus(PREV_LANDED, 'var(--con-muted)');
       return;
     }
     if (!canDeepenForWalk()) return;
     if (!submittedLines(state.lines).length) {
-      /* No turn in the window to land on: go to the top of what is loaded and
-       * load the page above it. The grow keeps that line where it is, so the
-       * reader stands at the seam with the new page above; the next press
-       * walks into it. */
+      /* No turn in the window to land on: from the top of what is loaded,
+       * load the pages above until one shows up, and land there. */
       el.tail.scrollTop = 0;
       state.pinned = false;
       updateEndPill();
-      growTail(true, updatePrevPill);
+      seekAsk = ask;
+      seekPrompt(ask, name);
       return;
     }
     /* Past the oldest loaded turn: fetch a page and carry the walk into it.
