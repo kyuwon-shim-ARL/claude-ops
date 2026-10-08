@@ -91,6 +91,54 @@ _REFUSALS = {
 }
 
 
+# AskUserQuestion's chooser, as Claude Code 2.1.282 draws it (captures in
+# tests/fixtures/askq_*.txt):
+#
+#   ❯ 1. Small
+#     2. Large
+#     3. Type something.        <- the free-text row; its digit opens a field
+#   ───────────────────────
+#     4. Chat about this
+#   Enter to select · ↑/↓ to navigate · Esc to cancel
+#
+# The row is found by where it sits, not by its label: text typed into the
+# field replaces "Type something." on screen.
+_NUMBERED_ROW = re.compile(r"^\s*(❯\s*)?(\d+)\.\s+(.*)$")
+_RULE = re.compile(r"^\s*─{5,}\s*$")
+# How many lines a typed answer may wrap onto before the rule.
+_FIELD_WRAP_LINES = 6
+
+
+def free_text_row(screen: str | None) -> tuple[int, bool] | None:
+    """-> (row number, focused) of the chooser's free-text field, or None.
+
+    Only a single-select AskUserQuestion still on the foot of the pane counts.
+    The multi-select form returns None: its digit toggles a checkbox rather
+    than opening a field, so typed text would have nowhere to go.
+    """
+    if not screen:
+        return None
+    lines = [line for line in screen.split("\n") if line.strip()]
+    if len(lines) < 3 or "Enter to select" not in lines[-1]:
+        return None
+    chat = _NUMBERED_ROW.match(lines[-2])
+    if not chat or chat.group(3).strip() != "Chat about this":
+        return None
+    if not _RULE.match(lines[-3]):
+        return None
+    for line in reversed(lines[max(0, len(lines) - 4 - _FIELD_WRAP_LINES):-3]):
+        row = _NUMBERED_ROW.match(line)
+        if not row:
+            continue
+        number = int(row.group(2))
+        if row.group(3).startswith("[") or number != int(chat.group(2)) - 1:
+            return None
+        if not 1 <= number <= 9:
+            return None
+        return number, bool(row.group(1))
+    return None
+
+
 def is_shell(pane_command: str | None) -> bool:
     """Is the pane sitting at a shell rather than running Claude?
 
@@ -135,6 +183,12 @@ def classify_readiness(
     # thing that would clear it.
     if at_shell and is_shell_launch(text):
         return True, "shell_launch", ""
+
+    # A chooser with a free-text field is asking for exactly what was typed.
+    # The caller answers through the field (send_free_text), not the input box.
+    if (state == SessionState.WAITING_INPUT and not at_shell
+            and free_text_row(screen)):
+        return True, "free_text", ""
 
     refusal = _REFUSALS.get(state)
     if refusal is not None:

@@ -71,10 +71,11 @@ from .session_input import (
     pane_has_claude,
     send_interrupt,
     send_key,
+    send_free_text,
     send_prompt,
     session_exists,
 )
-from .session_readiness import classify_readiness, is_shell
+from .session_readiness import classify_readiness, free_text_row, is_shell
 from . import stt as _stt
 from . import stt_corpus as _stt_corpus
 from .control_audit import RateLimiter as _RateLimiter
@@ -1357,8 +1358,16 @@ async def session_prompt(name: str, req: PromptRequest, request: Request):
             media_type="application/json",
         )
 
+    via_field = reason == "free_text"
     try:
-        submitted = await loop.run_in_executor(None, send_prompt, name, req.text)
+        if via_field:
+            # An AskUserQuestion chooser: the text answers it through its
+            # "Type something." field instead of going to the input box.
+            row, focused = free_text_row(before)
+            submitted = await loop.run_in_executor(
+                None, send_free_text, name, req.text, row, focused)
+        else:
+            submitted = await loop.run_in_executor(None, send_prompt, name, req.text)
     except ValueError as e:
         _audit("prompt", name, client, False, "invalid_text")
         raise HTTPException(status_code=422, detail=str(e))
@@ -1380,6 +1389,8 @@ async def session_prompt(name: str, req: PromptRequest, request: Request):
     reason = None if submitted is not False else "left_in_box"
     if reason is None and not confirmed:
         reason = "unconfirmed"
+    if via_field:
+        reason = f"free_text|{reason}" if reason else "free_text"
     _audit("prompt", name, client, True, reason)
     return {
         "session": name,

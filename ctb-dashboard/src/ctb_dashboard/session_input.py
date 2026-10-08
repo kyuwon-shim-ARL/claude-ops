@@ -15,8 +15,11 @@ Two send paths, because tmux send-keys treats a newline as an Enter keystroke:
 """
 
 import logging
+import re
 import subprocess
 import time
+
+from .session_readiness import free_text_row
 
 logger = logging.getLogger(__name__)
 
@@ -247,12 +250,8 @@ _ENTER_TRIES = 3
 _ENTER_SETTLE = 0.6
 
 
-def _box_text(name: str) -> str | None:
-    """What sits between the input box's two rules, spaces removed.
-
-    Spaces go because the box wraps a long line at its own width, and a
-    needle taken from the text must still be found across the wrap.
-    """
+def _capture(name: str) -> str | None:
+    """The pane's visible screen, or None when tmux cannot be read."""
     try:
         out = subprocess.run(["tmux", "capture-pane", "-p", "-t", name],
                              capture_output=True, text=True, timeout=_TMUX_TIMEOUT)
@@ -260,7 +259,19 @@ def _box_text(name: str) -> str | None:
         return None
     if out.returncode != 0:
         return None
-    lines = out.stdout.split("\n")
+    return out.stdout
+
+
+def _box_text(name: str) -> str | None:
+    """What sits between the input box's two rules, spaces removed.
+
+    Spaces go because the box wraps a long line at its own width, and a
+    needle taken from the text must still be found across the wrap.
+    """
+    screen = _capture(name)
+    if screen is None:
+        return None
+    lines = screen.split("\n")
     rules = [i for i, line in enumerate(lines) if line.startswith("\u2500\u2500\u2500\u2500\u2500")]
     if len(rules) < 2:
         return None
@@ -297,6 +308,61 @@ def _submit_when_landed(name: str, body: str) -> bool:
     logger.warning("prompt to %s is still in the input box after %d Enters",
                    name, _ENTER_TRIES)
     return False
+
+
+# How long the free-text field gets to open after its digit, and to show the
+# pasted answer.
+_FIELD_TIMEOUT = 2.0
+_FIELD_POLL = 0.1
+
+
+def _no_space(text: str | None) -> str:
+    return "".join(ch for ch in (text or "") if not ch.isspace())
+
+
+def _wait_for(name: str, ok) -> bool:
+    deadline = time.monotonic() + _FIELD_TIMEOUT
+    while True:
+        if ok(_capture(name)):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(_FIELD_POLL)
+
+
+def send_free_text(name: str, text: str, row: int, focused: bool) -> bool:
+    """Answer an AskUserQuestion chooser through its "Type something." field.
+
+    `row` and `focused` come from session_readiness.free_text_row. Checked
+    against a live pane: the row's digit opens the field, a bracketed paste
+    lands in it, and one Enter answers the question with the text verbatim.
+
+    The field is a single line, so newlines become spaces. -> True once the
+    answer has left the field. Raises RuntimeError if the field never opens:
+    typing on regardless would put the text somewhere else.
+    """
+    body = re.sub(r"\s*\n\s*", " ",
+                  _validate(text).replace("\r\n", "\n").replace("\r", "\n"))
+
+    if not focused:
+        # A digit sent to a field that is already open would be typed into it.
+        _tmux(["tmux", "send-keys", "-t", name, str(row)])
+        if not _wait_for(name, lambda s: free_text_row(s) == (row, True)):
+            raise RuntimeError(f"the free-text field (row {row}) did not open")
+
+    _tmux(["tmux", "load-buffer", "-b", _BUFFER_NAME, "-"], stdin_text=body)
+    _tmux(["tmux", "paste-buffer", "-b", _BUFFER_NAME, "-t", name, "-p", "-d"])
+    needle = _no_space(body)[-12:]
+    # Enter goes once, never retried: in a multi-question chooser a second
+    # Enter would pick an option of the NEXT question.
+    _wait_for(name, lambda s: needle in _no_space(s))
+    _tmux(["tmux", "send-keys", "-t", name, "Enter"])
+    time.sleep(_ENTER_SETTLE)
+
+    after = _capture(name)
+    still_open = free_text_row(after) == (row, True)
+    tail = _no_space("\n".join((after or "").split("\n")[-12:]))
+    return not (still_open and needle in tail)
 
 
 def send_interrupt(name: str) -> None:
