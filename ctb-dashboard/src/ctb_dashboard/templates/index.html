@@ -1911,7 +1911,7 @@
         emptyState.classList.remove('hidden');
         btnCopyNames.classList.add('hidden');
         sortedSessionNames = [];
-        Array.from(grid.children).forEach(el => {
+        Array.from(grid.childNodes).forEach(el => {
           if (el !== emptyState) el.remove();
         });
         return;
@@ -2029,7 +2029,10 @@
         html += normalSessions.map(s => renderCard(s, false)).join('');
       }
 
-      Array.from(grid.children).forEach(el => {
+      // childNodes, not children: the text between the cards would stay
+      // behind every rebuild and pile up while the board is left open
+      // (tests/test_grid_render_leak_live.py).
+      Array.from(grid.childNodes).forEach(el => {
         if (el !== emptyState) el.remove();
       });
       grid.insertAdjacentHTML('afterbegin', html);
