@@ -229,13 +229,41 @@ def covered_by_pill(board, line):
         "          return a.top < b.bottom && a.bottom > b.top; }", line)
 
 
-def test_no_earlier_request_means_no_pill(board):
-    """The default pane is output only. A button for a trip with no
-    destination is worse than no button."""
-    open_console(board)
-    scroll_up(board)
-    board.wait_for_timeout(400)
-    assert board.is_hidden(PREV)
+def buried_request(board):
+    """A long answer has pushed the last request out of the loaded window:
+    the request is at line 100 of 1000, the window holds the last 40."""
+    board.ctb_log = "\n".join(
+        "❯ 묻힌 요청" if i == 100 else ("line %03d output" % i) for i in range(1000))
+    board.ctb_log_hash = "h-buried"
+    board.ctb_log_window = True
+    open_console(board, "claude_beta")
+
+
+def test_a_request_buried_under_output_still_gets_the_pill(board):
+    """The window holding no request does not mean there is none -- only that
+    the output after it is longer than the window. Hiding the button there
+    left no way back but flinging the pane up by hand."""
+    buried_request(board)
+    board.wait_for_selector(PREV, state="visible")
+
+
+def test_with_no_request_in_the_window_the_pill_loads_the_page_above(board):
+    """With nowhere to land, the press goes up from where the reader is and
+    loads the next 400 lines above it -- not the top of the transcript, and no
+    landing. What was at the top of the pane stays there, with the new page
+    above it."""
+    buried_request(board)
+    board.wait_for_selector(PREV, state="visible")
+    before = logs(board)
+    board.click(PREV)
+    board.wait_for_function("() => window.ctbConsole._state.lines.length === 440",
+                            timeout=4000)
+    board.wait_for_timeout(300)
+    assert logs(board) > before
+    # The old window's first line (log line 960) is now row 400, at the top.
+    assert abs(where(board, 400)) < 30
+    assert board.evaluate("() => window.ctbConsole._state.walk") is None
+    assert board.is_visible(PREV), "still more above, so still offered"
 
 
 def test_the_prev_pill_walks_back_one_request_at_a_time(board):

@@ -4799,16 +4799,16 @@
 
   /* Older history is fetched a page at a time, so the oldest turn in the window
    * is usually not the oldest turn there is. A reader mid-walk is offered the
-   * next page rather than a button that vanishes; a pane that holds no turns at
-   * all is offered nothing, because there is nothing to walk.
+   * next page rather than a button that vanishes -- and so is a pane holding no
+   * turn at all: that is a long answer that has pushed its request out of the
+   * window, not a session with nothing to walk back to.
    *
    * The grow's own refusals are part of the test: a held pane cannot be grown,
    * and a button that does nothing when pressed -- no movement, no fetch, no
    * word -- is worse than an absent one. */
   function canDeepenForWalk() {
     return !state.exhausted && !state.growing && !held()
-      && state.depth < MAX_TAIL_LINES
-      && !!state.lines && submittedLines(state.lines).length > 0;
+      && state.depth < MAX_TAIL_LINES && !!state.lines;
   }
 
   function updatePrevPill() {
@@ -4911,6 +4911,17 @@
       return;
     }
     if (!canDeepenForWalk()) return;
+    if (!submittedLines(state.lines).length) {
+      /* No turn in the window to land on: go to the top of what is loaded and
+       * load the page above it. The grow keeps that line where it is, so the
+       * reader stands at the seam with the new page above; the next press
+       * walks into it. */
+      el.tail.scrollTop = 0;
+      state.pinned = false;
+      updateEndPill();
+      growTail(true, updatePrevPill);
+      return;
+    }
     /* Past the oldest loaded turn: fetch a page and carry the walk into it.
      * Deliberate, because this is a press, not a scroll. */
     growTail(true, function () {
