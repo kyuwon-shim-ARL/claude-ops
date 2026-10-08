@@ -241,6 +241,11 @@ class SessionStateAnalyzer:
                        for cand in cls._logical_lines(lines, j))
         return False
 
+    # Claude Code's startup logo line. Relaunching Claude in the same pane
+    # (!cf) leaves the dead instance's last frame -- e.g. `· Processing…`
+    # over an empty prompt -- in scrollback above this line.
+    _LAUNCH_BANNER_RE = re.compile(r'^\s*\u2590\u259b.*Claude Code v\d')
+
     _DONE_MARKER_RE = re.compile(r'\u00b7\s*done\s+[^\u00b7\n]*?\d{1,2}:\d{2}(?:\s*[AP]M)?')
 
     # Fragments Claude Code appends after `done` for things left alive in the
@@ -480,6 +485,13 @@ class SessionStateAnalyzer:
 
         lines = screen_content.split('\n')
 
+        # Only the live instance's screen counts: drop everything above the
+        # last launch banner.
+        for i in range(len(lines) - 1, -1, -1):
+            if self._LAUNCH_BANNER_RE.match(lines[i]):
+                lines = lines[i:]
+                break
+
         # Last 25 lines for interrupt indicators
         recent_lines = lines[-25:]
         recent_content = '\n'.join(recent_lines)
@@ -535,21 +547,33 @@ class SessionStateAnalyzer:
 
         # Build FILTERED content: remove OMC status bar lines and separators
         filtered_lines = []
+        # Index (in filtered_lines) of the last `\u276f` directly under a
+        # separator: the live input box, whatever text it holds.
+        input_box_idx = None
+        after_separator = False
         for line in lines:
             if any(marker in line for marker in ['[OMC#', '\u23f5\u23f5', 'bypass permissions']):
                 continue
             stripped = line.strip()
             if stripped and stripped.startswith('\u2500') and stripped.endswith('\u2500'):
+                after_separator = True
                 continue
+            if after_separator and stripped.startswith('\u276f'):
+                input_box_idx = len(filtered_lines)
+            after_separator = False
             filtered_lines.append(line)
 
         # PRIORITY 2: Find prompt position, check content before it
-        prompt_idx = None
-        for i in range(len(filtered_lines) - 1, -1, -1):
-            s = filtered_lines[i].strip()
-            if s in ['\u276f', '\u276f\xa0', '\u276f ']:
-                prompt_idx = i
-                break
+        # Prefer the live input box: after a relaunch in the same pane (!cf)
+        # the dead Claude's last frame is still in scrollback, and the live box
+        # is not a bare prompt when it shows placeholder or typed text.
+        prompt_idx = input_box_idx
+        if prompt_idx is None:
+            for i in range(len(filtered_lines) - 1, -1, -1):
+                s = filtered_lines[i].strip()
+                if s in ['\u276f', '\u276f\xa0', '\u276f ']:
+                    prompt_idx = i
+                    break
 
         if prompt_idx is not None:
             pre_prompt = filtered_lines[:prompt_idx]

@@ -225,6 +225,11 @@ class SessionStateAnalyzer:
     # "Friday, Jun 26, 9:44 AM"), so the match is anchored on the H:MM clock
     # that every variant ends in -- "· done reviewing the diff" in prose does
     # not qualify. AM/PM optional for a 24h locale.
+    # Claude Code's startup logo line. Relaunching Claude in the same pane
+    # (!cf) leaves the dead instance's last frame -- e.g. `· Processing…`
+    # over an empty prompt -- in scrollback above this line.
+    _LAUNCH_BANNER_RE = re.compile(r'^\s*\u2590\u259b.*Claude Code v\d')
+
     _DONE_MARKER_RE = re.compile(r'\u00b7\s*done\s+[^\u00b7\n]*?\d{1,2}:\d{2}(?:\s*[AP]M)?')
 
     # Fragments Claude Code appends after `done` for things left alive in the
@@ -517,6 +522,13 @@ class SessionStateAnalyzer:
 
         lines = screen_content.split('\n')
 
+        # Only the live instance's screen counts: drop everything above the
+        # last launch banner.
+        for i in range(len(lines) - 1, -1, -1):
+            if self._LAUNCH_BANNER_RE.match(lines[i]):
+                lines = lines[i:]
+                break
+
         # CRITICAL FIX: Only check RECENT lines for 'esc to interrupt'
         # Old work indicators can remain on screen after completion
         # Increased to 25 lines to handle scrolling as new output is generated
@@ -764,6 +776,10 @@ class SessionStateAnalyzer:
         # is only appropriate for P1 (esc to interrupt); P2 needs full context
         # so that initiator lines aren't truncated before collapse can reach them.
         filtered_lines = []
+        # Index (in filtered_lines) of the last `❯` directly under a separator:
+        # the live input box, whatever placeholder or typed text it holds.
+        input_box_idx = None
+        after_separator = False
         for line in lines:
             # Skip OMC status bar lines
             if any(marker in line for marker in ['[OMC#', '⏵⏵', 'bypass permissions']):
@@ -771,7 +787,11 @@ class SessionStateAnalyzer:
             # Skip separator lines
             stripped = line.strip()
             if stripped and stripped.startswith('─') and stripped.endswith('─'):
+                after_separator = True
                 continue
+            if after_separator and stripped.startswith('❯'):
+                input_box_idx = len(filtered_lines)
+            after_separator = False
             filtered_lines.append(line)
         filtered_content = '\n'.join(filtered_lines)
 
@@ -784,12 +804,17 @@ class SessionStateAnalyzer:
         # content line before ❯ is a working indicator or output text.
         # If it's output (⎿, regular text), any working patterns above are stale.
         # If no prompt found (vanilla Claude), check last 8 filtered lines.
-        prompt_idx = None
-        for i in range(len(filtered_lines) - 1, -1, -1):
-            s = filtered_lines[i].strip()
-            if s in ['❯', '❯\xa0', '❯ ']:
-                prompt_idx = i
-                break
+        # Prefer the live input box: after Claude is relaunched in the same
+        # pane (!cf) the dead Claude's last frame -- `· Processing…` over an
+        # empty `❯` -- is still in scrollback, and the live box is not a bare
+        # `❯` when it shows placeholder or typed text.
+        prompt_idx = input_box_idx
+        if prompt_idx is None:
+            for i in range(len(filtered_lines) - 1, -1, -1):
+                s = filtered_lines[i].strip()
+                if s in ['❯', '❯\xa0', '❯ ']:
+                    prompt_idx = i
+                    break
 
         if prompt_idx is not None:
             # Collapse sub-output blocks (⎿ + indented continuations) before

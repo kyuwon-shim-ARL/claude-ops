@@ -1400,5 +1400,33 @@ class TestExtractWorkflowPhase:
         assert result is None
 
 
+# --- Claude relaunched in the same pane (!cf) --------------------------------
+# The previous Claude's last frame stays in scrollback: `· Processing…` above
+# an empty `❯` box. The live box below it carries placeholder or typed text,
+# so it is not a bare `❯`; anchoring on the last bare `❯` reads the dead frame.
+
+def test_relaunch_in_same_pane_reads_live_input_box():
+    screen = load_fixture("relaunched_in_same_pane_idle")
+    assert SessionStateAnalyzer()._detect_working_state(screen) is False
+
+
+def test_relaunch_banner_drops_dead_frame_spinner():
+    sep = "─" * 40
+    screen = "\n".join([
+        "· Processing…", "", sep, "❯ ", sep, "",
+        " ▐▛███▜▌   Claude Code v2.1.282", "", sep, "❯ ", sep, "",
+    ])
+    assert SessionStateAnalyzer()._detect_working_state(screen) is False
+
+
+def test_typed_text_in_live_box_does_not_fall_back_to_stale_prompt():
+    # No banner (scrolled out): the live box still wins over the stale `❯`.
+    sep = "─" * 40
+    screen = "\n".join([
+        "● Skill(deep-research)", "", sep, "❯ ", sep, "",
+        "  ⎿ done", "", sep, "❯ hello there", sep, "",
+    ])
+    assert SessionStateAnalyzer()._detect_working_state(screen) is False
+
 if __name__ == "__main__":
     pytest.main([__file__])

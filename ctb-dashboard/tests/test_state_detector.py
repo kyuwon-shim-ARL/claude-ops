@@ -171,3 +171,38 @@ def test_done_gate_matches_canonical_detector():
         pytest.skip("claude_ctb not importable in this environment")
     assert SessionStateAnalyzer._DONE_MARKER_RE.pattern == Canonical._DONE_MARKER_RE.pattern
     assert SessionStateAnalyzer._BG_TAIL_RE.pattern == Canonical._BG_TAIL_RE.pattern
+
+
+
+# --- Claude relaunched in the same pane (!cf) --------------------------------
+# Mirrors tests/test_session_state.py in the parent package.
+
+SEP = "\u2500" * 40
+
+
+def test_relaunch_banner_drops_dead_frame_spinner():
+    screen = "\n".join([
+        "\u2733 Cooked for 56s \xb7 done 12:07 AM", "", "\u276f /exit", "",
+        "\xb7 Processing\u2026", "", SEP, "\u276f ", SEP, "",
+        "[user@host land]$ claude", " \u2590\u259b\u2588\u2588\u2588\u259c\u258c   Claude Code v2.1.282", "",
+        SEP, '\u276f Try "write a test for foo.jsonl"', SEP, "",
+    ])
+    assert SessionStateAnalyzer()._detect_working_state(screen) is False
+
+
+def test_typed_text_in_live_box_does_not_fall_back_to_stale_prompt():
+    # No banner (scrolled out): the live box still wins over the stale prompt.
+    screen = "\n".join([
+        "\u25cf Skill(deep-research)", "", SEP, "\u276f ", SEP, "",
+        "  \u23bf done", "", SEP, "\u276f hello there", SEP, "",
+    ])
+    assert SessionStateAnalyzer()._detect_working_state(screen) is False
+
+
+def test_launch_banner_matches_canonical_detector():
+    try:
+        from claude_ctb.utils.session_state import SessionStateAnalyzer as Canonical
+    except ImportError:
+        import pytest
+        pytest.skip("claude_ctb not importable in this environment")
+    assert SessionStateAnalyzer._LAUNCH_BANNER_RE.pattern == Canonical._LAUNCH_BANNER_RE.pattern
