@@ -743,9 +743,15 @@
     }
 
     let _pinnedCheckedAt = 0;
-    function maybeRefreshPinned() {
+    // Called from every path that feeds the board -- the stream, the fallback
+    // poll, coming back to the page -- not just the stream: an iPhone PWA's
+    // EventSource often comes back from the background neither delivering nor
+    // erroring, so nothing reconnects and the stream path never runs.
+    // `force` skips the throttle; so does never having read the set at all,
+    // since a board drawn from no pins shows every card unpinned.
+    function maybeRefreshPinned(force) {
       const now = Date.now();
-      if (now - _pinnedCheckedAt < 10000) return;
+      if (!force && _pinnedLoaded && now - _pinnedCheckedAt < 10000) return;
       _pinnedCheckedAt = now;
       const before = JSON.stringify(_quadsCache);
       refreshPinned().then(function () {
@@ -2338,17 +2344,12 @@
     async function connect() {
       if (evtSource) evtSource.close();
 
-      try {
-        // no-store, not just because the server now says so: a response
-        // already sitting in the phone's cache from before that header
-        // existed would still be served from it.
-        const r = await fetch('/api/pinned', { cache: 'no-store' });
-        _quadsCache = await r.json();
-        _pinnedLoaded = true;
-      } catch {
-        // Keep _pinnedLoaded false — refuse to write until we successfully
-        // observe server state at least once.
-      }
+      // Through the pin queue, so a tap still in flight is not overwritten and
+      // a body that is not a pin set is not taken as one. A failed read leaves
+      // _pinnedLoaded false: writes stay refused, and maybeRefreshPinned
+      // retries from the next render instead of waiting out its throttle.
+      await refreshPinned();
+      _pinnedCheckedAt = Date.now();
 
       fetch('/api/sessions', { cache: 'no-store' })
         .then(r => r.json())
@@ -2398,7 +2399,7 @@
       if (sseOpen && (Date.now() - lastDataAt) < POLL_MS) return;
       fetch('/api/sessions', { cache: 'no-store' })
         .then(r => r.json())
-        .then(render)
+        .then(data => { render(data); maybeRefreshPinned(); })
         .catch(() => {});
     }, SSE_DOWN_POLL_MS);
     setInterval(paintConnection, 2000);
@@ -2416,6 +2417,8 @@
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) return;
       fetch('/api/sessions', { cache: 'no-store' }).then(r => r.json()).then(render).catch(() => {});
+      // Coming back is when the pins are most likely stale: read them now.
+      maybeRefreshPinned(true);
     });
 
     function pollTicketLinks() {

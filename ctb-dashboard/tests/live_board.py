@@ -69,6 +69,12 @@ LOG = "\n".join(
 QUADS = {"Q1": ["claude_alpha", "claude_alpha_wt_topic"],
          "Q2": ["claude_beta"], "Q3": [], "Q4": []}
 
+# Set before open_board() to change what the page meets from its first request:
+# STREAM "abort" (default) or "hang"; PIN_READS_TO_FAIL, how many GETs of
+# /api/pinned die on the network before they start succeeding.
+STREAM = "abort"
+PIN_READS_TO_FAIL = 0
+
 
 @contextlib.contextmanager
 def open_board(theme=None):
@@ -101,6 +107,9 @@ def open_board(theme=None):
         page.ctb_sessions = [dict(x) for x in SESSIONS]
         page.ctb_gone = set()
         page.ctb_uploads = []
+        page.ctb_stream = STREAM
+        page.ctb_hung = []
+        page.ctb_pin_reads_to_fail = PIN_READS_TO_FAIL
 
         def set_state(name, state):
             """Change a session's state and make the board fetch it now.
@@ -191,9 +200,20 @@ def open_board(theme=None):
                     # The real server answers with the set it now holds.
                     return r.fulfill(status=200, content_type="application/json",
                                      body=json.dumps(body))
+                # A read that dies on the network: what a phone's first
+                # request after coming back from the background often does.
+                if page.ctb_pin_reads_to_fail > 0:
+                    page.ctb_pin_reads_to_fail -= 1
+                    return r.abort()
                 return r.fulfill(status=200, content_type="application/json",
                                  body=json.dumps(accepted[-1] if accepted else QUADS))
             if path.startswith("/api/sessions/stream"):
+                # "hang": a stream that neither delivers nor errors -- an iOS
+                # PWA's EventSource after the app comes back. No onerror, so
+                # no reconnect. Held so the route is never answered.
+                if page.ctb_stream == "hang":
+                    page.ctb_hung.append(r)
+                    return None
                 return r.abort()
             if path.startswith("/api/sessions/") and path.endswith("/key"):
                 # What key the console actually asked tmux for. "a request was
