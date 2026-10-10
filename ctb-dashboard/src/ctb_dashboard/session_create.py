@@ -24,6 +24,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from .session_input import is_shell_session
 from .sessions import get_sessions_activity
 
 logger = logging.getLogger(__name__)
@@ -78,10 +79,9 @@ def _live_sessions() -> set:
     return set(get_sessions_activity().keys())
 
 
-def session_name_for(project: str, worktree: Optional[str] = None) -> str:
-    if worktree:
-        return f"claude_{project}_wt_{worktree}"
-    return f"claude_{project}"
+def session_name_for(project: str, worktree: Optional[str] = None, shell: bool = False) -> str:
+    base = f"claude_{project}_wt_{worktree}" if worktree else f"claude_{project}"
+    return f"{base}_sh" if shell else base
 
 
 def _validate_project_name(name: str) -> str:
@@ -378,17 +378,65 @@ def _shquote(s: str) -> str:
     return shlex.quote(s)
 
 
+def launch_shell_session(session: str, path: Path) -> None:
+    """Start a detached tmux session with a plain login shell -- no Claude.
+
+    For working with secrets (passwords, API keys) from the dashboard without
+    them ever reaching a Claude session, a push notification, or the SSE
+    snapshot. ``HISTFILE=/dev/null`` so nothing typed here is written to disk
+    by bash itself; the dashboard's own send path (session_input.send_shell_line)
+    is the other half of that promise -- it types through tmux rather than a
+    buffer, and the poller never screen-scrapes this session at all (see
+    session_input.shell_sessions / server._poll_sessions).
+
+    No ``remain-on-exit``: unlike a Claude pane, there is nothing worth
+    reading in a dead shell, so the session is left to simply disappear when
+    bash exits -- the same thing exiting a shell with a keyboard does.
+
+    Marked with the ``@ctb_shell`` tmux user option in the SAME tmux
+    invocation as the create -- a ';' argv element chains `set-option` onto
+    `new-session` -- so there is no window in which the session exists but
+    is not yet marked, for a poller or a Telegram poll that happens to land
+    in between to read as an ordinary (screen-scraped) session. A ';' here
+    is a tmux command separator, which is exactly the behaviour that bit
+    send_shell_line (see its _TRAILING_SEMICOLONS comment) -- wanted there,
+    not there.
+
+    tmux's own chaining is not transactional, though: a live tmux 3.6a still
+    creates the session even when the trailing set-option fails (verified:
+    `new-session ... ; set-option -t =wrong-name: ...` returns non-zero but
+    `has-session` on the new name still succeeds). So a non-zero result here
+    means "session exists, not necessarily marked" and the session is killed
+    before raising -- callers (create_session) must never treat an unmarked
+    session left behind by a failed create as success.
+    """
+    window = session[len("claude_"):] if session.startswith("claude_") else session
+    r = _run(
+        ["tmux", "new-session", "-d", "-s", session, "-n", window, "-c", str(path),
+         "env HISTFILE=/dev/null bash --login",
+         ";", "set-option", "-t", f"={session}:", "@ctb_shell", "1"],
+        timeout=_TMUX_TIMEOUT,
+    )
+    if r.returncode != 0:
+        _run(["tmux", "kill-session", "-t", session], timeout=_TMUX_TIMEOUT)
+        raise CreateError("tmux_failed", (r.stderr or r.stdout).strip()[:300])
+
 
 def create_session(
     project: Optional[str] = None,
     new_project: Optional[str] = None,
     worktree: Optional[str] = None,
     git_init: bool = True,
+    shell: bool = False,
 ) -> dict:
     """Create (or reuse) a project/worktree and start a Claude session in it.
 
     Exactly one of `project` / `new_project` must be given. Returns a dict with
     `status` in {"created", "exists"}; every refusal raises CreateError.
+
+    `shell=True` starts a bash-only session instead (see launch_shell_session):
+    same project/worktree resolution, different launch and a `_sh`-suffixed
+    name, so it never collides with the Claude session for the same project.
     """
     if bool(project) == bool(new_project):
         raise CreateError(
@@ -413,7 +461,7 @@ def create_session(
     if wt:
         work_dir, worktree_created = _ensure_worktree(project_dir, wt)
 
-    session = session_name_for(name, wt)
+    session = session_name_for(name, wt, shell=shell)
     result = {
         "status": "created",
         "session": session,
@@ -425,13 +473,23 @@ def create_session(
     }
 
     if session in _live_sessions():
+        if shell and not is_shell_session(session):
+            # The name is taken by something that is not a shell session --
+            # reusing it would hand this "bash only" request someone else's
+            # live Claude pane (or vice versa on the next create).
+            raise CreateError(
+                "name_taken", f"'{session}'는 이미 다른 세션이 쓰고 있습니다"
+            )
         # Nothing was started; say so plainly instead of reporting a create the
         # user would then look for in the log of a session that predates it.
         result["status"] = "exists"
         return result
 
     try:
-        launch_session(session, work_dir)
+        if shell:
+            launch_shell_session(session, work_dir)
+        else:
+            launch_session(session, work_dir)
     except CreateError as e:
         # Two taps on the button -- or a `cs` in a terminal -- race between the
         # check above and this launch, and tmux settles it by refusing the

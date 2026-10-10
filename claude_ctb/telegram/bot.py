@@ -92,6 +92,19 @@ class TelegramBridge:
             logger.warning("허용된 사용자 ID가 설정되지 않았습니다!")
             return False
         return user_id in allowed_ids
+
+    def is_shell_session(self, session_name: str) -> bool:
+        """Is `session_name` a bash-only session (ctb-dashboard's @ctb_shell
+        marker)? Every log path (this command's own /log, its line-count
+        siblings, and the inline-keyboard log callbacks) checks this before
+        capturing a pane, because that pane can hold a typed password or API
+        key -- and a Telegram message is the last place that should go."""
+        from ..session_manager import session_manager
+        return session_manager.is_shell_session(session_name)
+
+    SHELL_SESSION_LOG_REFUSAL = (
+        "🔒 이 세션은 bash 전용(비밀값 입력용) 세션이라 화면을 가져올 수 없습니다."
+    )
     
     def check_claude_session(self) -> tuple[bool, str]:
         """Check Claude tmux session status"""
@@ -626,7 +639,11 @@ class TelegramBridge:
                 else:
                     await update.message.reply_text(f"❌ 세션 `{reply_session}`이 존재하지 않습니다.")
                     return
-        
+
+        if self.is_shell_session(target_session):
+            await update.message.reply_text(self.SHELL_SESSION_LOG_REFUSAL)
+            return
+
         # Parse line count parameter (default: 50)
         line_count = 50
         logger.info(f"🔍 Log command - context.args: {context.args}")
@@ -766,7 +783,11 @@ class TelegramBridge:
                 else:
                     await update.message.reply_text(f"❌ 세션 `{reply_session}`이 존재하지 않습니다.")
                     return
-        
+
+        if self.is_shell_session(target_session):
+            await update.message.reply_text(self.SHELL_SESSION_LOG_REFUSAL)
+            return
+
         try:
             import subprocess
 
@@ -3533,11 +3554,15 @@ class TelegramBridge:
                 return
             
             logger.info(f"✅ 세션 '{session_name}' 존재 확인됨")
-            
+
+            if self.is_shell_session(session_name):
+                await query.edit_message_text(self.SHELL_SESSION_LOG_REFUSAL)
+                return
+
             # Get screen content with moderate line count - use safer approach
             try:
                 result = subprocess.run(
-                    ["tmux", "capture-pane", "-t", session_name, "-p", "-S", "-100"], 
+                    ["tmux", "capture-pane", "-t", session_name, "-p", "-S", "-100"],
                     capture_output=True, 
                     text=True,
                     timeout=10,  # Add timeout to prevent hanging
@@ -3829,17 +3854,21 @@ class TelegramBridge:
             # If session_name is empty, use active session (for long session names that exceed 64-byte callback_data limit)
             if not session_name:
                 session_name = self.config.session_name
-            
+
+            if self.is_shell_session(session_name):
+                await query.edit_message_text(self.SHELL_SESSION_LOG_REFUSAL)
+                return
+
             # Use tmux capture-pane with -S to specify start line (negative for history)
             result = subprocess.run(
-                ['tmux', 'capture-pane', '-t', str(session_name), '-p', '-S', f"-{line_count}"], 
-                capture_output=True, 
+                ['tmux', 'capture-pane', '-t', str(session_name), '-p', '-S', f"-{line_count}"],
+                capture_output=True,
                 text=True
             )
-            
+
             if result.returncode == 0:
                 current_screen = result.stdout  # Don't strip - keep all original spacing
-                
+
                 if current_screen:
                     lines = current_screen.split('\n')
 
@@ -3908,7 +3937,10 @@ class TelegramBridge:
             session_exists = _tmux('has-session', '-t', session_name) == 0
             if not session_exists:
                 return "세션이 존재하지 않습니다."
-            
+
+            if self.is_shell_session(session_name):
+                return self.SHELL_SESSION_LOG_REFUSAL
+
             # Try to capture with retry logic for attached sessions
             max_retries = 3
             for attempt in range(max_retries):

@@ -150,6 +150,23 @@ def test_preview_path_convention():
             == "/home/k/projects/alpha/.claude/worktrees/feat")
 
 
+def test_shell_checkbox_adds_shell_flag_and_suffixes_the_session_name():
+    r = build(project="alpha", shell=True)
+    assert r["payload"] == {"project": "alpha", "shell": True}
+    assert r["session"] == "claude_alpha_sh"
+
+
+def test_shell_off_is_unaffected():
+    r = build(project="alpha", shell=False)
+    assert r["payload"] == {"project": "alpha"}
+    assert r["session"] == "claude_alpha"
+
+
+def test_session_name_for_appends_sh_suffix_after_worktree():
+    assert _call("sessionNameFor", "alpha", None, True) == "claude_alpha_sh"
+    assert _call("sessionNameFor", "alpha", "feat", True) == "claude_alpha_wt_feat_sh"
+
+
 def test_filter_is_case_insensitive_substring():
     projects = [{"name": "Alpha"}, {"name": "beta-alpha"}, {"name": "gamma"}]
     assert [p["name"] for p in _call("filterProjects", projects, "ALPH")] == ["Alpha", "beta-alpha"]

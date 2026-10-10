@@ -67,13 +67,16 @@ from .session_create import (
 from .session_input import (
     ALLOWED_KEYS,
     MAX_PROMPT_BYTES as _MAX_PROMPT_BYTES,
+    is_shell_session,
     pane_command,
     pane_has_claude,
     send_interrupt,
     send_key,
     send_free_text,
     send_prompt,
+    send_shell_line,
     session_exists,
+    shell_sessions,
 )
 from .session_readiness import classify_readiness, free_text_row, is_shell
 from . import stt as _stt
@@ -546,7 +549,9 @@ def _push_unsent_drafts(session_list: list) -> None:
         now = time.time()
         for entry in session_list:
             name = entry.get("name")
-            if name not in pinned:
+            # A shell session's box can hold a secret mid-typing; it is never
+            # screen-scraped (see _poll_sessions) and must not be nagged about.
+            if name not in pinned or entry.get("shell"):
                 continue
             box = _box_draft(name)
             if not box or box[1]:      # empty box, or a suggestion nobody typed
@@ -591,7 +596,11 @@ def _push_completions(session_list: list) -> None:
         for entry in session_list:
             name = entry.get("name")
             completed_at = entry.get("completed_at")
-            if not completed_at or name not in pinned:
+            # A shell session has no "completion" worth reporting -- it never
+            # runs _probe_session at all -- and a push would risk carrying
+            # typed text anyway, so it is excluded on principle, not just
+            # because completed_at is always unset here.
+            if not completed_at or name not in pinned or entry.get("shell"):
                 continue
             if _pushed_completions.get(name) == completed_at:
                 continue
@@ -640,9 +649,29 @@ def _poll_sessions() -> Dict[str, Any]:
     except Exception:
         by_tmux = {}
 
+    # A bash-only session (session_create.launch_shell_session) is never
+    # probed: _probe_session reads the screen into last_prompt/last_reply/
+    # recap, and those land in the SSE snapshot, the completion-push body and
+    # _last_known_prompt -- any one of which would carry a typed secret
+    # somewhere it must never go. One tmux call covers every session; see
+    # session_input.shell_sessions.
+    shell_names = shell_sessions(sessions)
+    probeable = [name for name in sessions if name not in shell_names]
+
     # Parallel probe: ~1-2s instead of ~30s for 26 sessions
     with ThreadPoolExecutor(max_workers=8) as pool:
-        results = list(pool.map(_probe_session, sessions))
+        probed = dict(zip(probeable, pool.map(_probe_session, probeable)))
+
+    # Blank, idle placeholder for a shell session -- same tuple shape as
+    # _probe_session so the loop below treats every session uniformly. Built
+    # per-name, in `sessions` order, so the mtime sort _content_hash relies
+    # on is preserved rather than pushing every shell session to the end.
+    def _shell_placeholder(name: str) -> tuple:
+        return (name, SessionState.IDLE.value, get_session_path(name), None, None, "",
+                None, None, None, "", "")
+
+    results = [probed[name] if name in probed else _shell_placeholder(name)
+               for name in sessions]
 
     session_list = []
     for (name, state_val, path, context_percent, last_prompt, work_context,
@@ -701,6 +730,7 @@ def _poll_sessions() -> Dict[str, Any]:
             "pending_count": pending_count,       # null=no TodoWrite, 0=all done, N=pending tasks
             "working_since": working_since,       # epoch float when WORKING started, null otherwise
             "last_activity": activity_map.get(name, 0),  # tmux session_activity epoch (staleness filter)
+            "shell": name in shell_names,  # bash-only session -- never screen-scraped
         }
         session_list.append(entry)
 
@@ -1291,6 +1321,125 @@ async def get_session_log(name: str, lines: int = 50, fit: int = 0, since: str =
 
 class PromptRequest(BaseModel):
     text: str
+    # True routes the text straight into a bash-only session's pane (see
+    # session_create.launch_shell_session) instead of through the Claude
+    # readiness gate below. That gate has nothing to read in a shell session
+    # -- there is no Claude UI, so no state to classify -- and the refusal it
+    # would otherwise produce ("shell") is exactly the pane this mode is for.
+    shell: bool = False
+
+
+# The foreground commands a shell-mode send is allowed to reach, beyond the
+# plain shells is_shell() already recognises -- the point of this mode is
+# typing secrets at exactly these prompts (a sudo password, an ssh/mysql/
+# psql login, a gpg passphrase, a REPL). A deny-list was tried first and
+# rejected: it named interactive risk tools like `vim`/`less`/`tmux` instead
+# of the thing actually being guarded against (reaching Claude), so it let
+# through anything unanticipated and blocked ordinary tools nobody intended
+# to block. This is deliberately an allow-list instead: unknown or
+# unanticipated is refused, by name, rather than guessed at.
+_SHELL_PROMPT_ALLOWED_EXTRA = frozenset({
+    "sudo", "su", "ssh", "passwd", "gpg", "mysql", "psql", "sqlite3",
+    "python", "python3",
+})
+
+
+def _shell_command_allowed(cmd: str | None) -> bool:
+    if cmd is None:
+        return False
+    base = cmd.strip().lstrip("-").lower()
+    return is_shell(cmd) or base in _SHELL_PROMPT_ALLOWED_EXTRA
+
+
+async def _shell_prompt(name: str, req: "PromptRequest", client: str | None) -> Dict[str, Any]:
+    """The `shell=True` half of session_prompt: type raw text into a
+    bash-only pane, refusing only when the text could reach something other
+    than the narrow set of prompts this mode exists for.
+
+    No readiness gate, no mode characters, no multi-line paste -- a shell
+    session is for typing exactly what was given, the way a terminal would.
+    What is refused is deliberately an allow-list (see
+    _SHELL_PROMPT_ALLOWED_EXTRA) rather than a list of things to block: a
+    pane running claude, or a foreground command tmux could not identify, or
+    simply a command this mode was never meant to reach, is refused by name
+    rather than guessed at.
+    """
+    def _refuse(reason: str, message: str) -> Response:
+        _audit("prompt", name, client, False, reason)
+        return Response(
+            content=json.dumps(
+                {"session": name, "status": "refused", "reason": reason, "message": message},
+                ensure_ascii=False,
+            ),
+            status_code=409,
+            media_type="application/json",
+        )
+
+    loop = asyncio.get_running_loop()
+    cmd = await loop.run_in_executor(None, pane_command, name)
+    if cmd is None:
+        return _refuse(
+            "unknown_pane",
+            "현재 포그라운드 명령을 확인할 수 없어 전송을 막았습니다.",
+        )
+    if not _shell_command_allowed(cmd):
+        return _refuse(
+            "command_not_allowed",
+            f"'{cmd}'는 셸 전송이 허용된 명령이 아닙니다. Claude로 전달될 수 있어 막았습니다.",
+        )
+    # A command on the allow-list can still be Claude itself, sharing a
+    # process group with the bash that launched it -- tmux then reports the
+    # group leader ('bash'), not 'claude'. Same quirk session_readiness
+    # guards against on the ordinary path.
+    if await loop.run_in_executor(None, pane_has_claude, name):
+        return _refuse(
+            "claude_running",
+            "이 텍스트는 Claude로 전달될 수 있어 막았습니다. "
+            "bash 프롬프트일 때만 셸 전송을 쓸 수 있습니다.",
+        )
+
+    # A single line only: send_shell_line types exactly what it is given and
+    # presses Enter once, so a second line would either be silently dropped
+    # or run as a second command the caller never saw. One trailing line
+    # ending is accepted and stripped -- a textarea or `echo` commonly adds
+    # one -- but anything after that is a real second line.
+    text = req.text
+    if text.endswith("\r\n"):
+        text = text[:-2]
+    elif text.endswith("\n"):
+        text = text[:-1]
+    if not text or "\n" in text or "\r" in text:
+        _audit("prompt", name, client, False, "invalid_text")
+        raise HTTPException(status_code=422, detail="Shell text must be a single line")
+    # Control characters (other than the trailing line ending already
+    # stripped above) have no business in a line that is typed, not pasted
+    # -- send-keys -l would type them as raw bytes into the pane.
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7f for ch in text):
+        _audit("prompt", name, client, False, "invalid_text")
+        raise HTTPException(status_code=422, detail="Shell text must not contain control characters")
+
+    analyzer = _state_analyzer
+    before = await loop.run_in_executor(
+        None, lambda: analyzer.get_screen_content(name, use_cache=False)
+    )
+    try:
+        await loop.run_in_executor(None, send_shell_line, name, text)
+    except RuntimeError as e:
+        _audit("prompt", name, client, False, "tmux_failed")
+        raise HTTPException(status_code=502, detail=str(e))
+
+    await asyncio.sleep(_SEND_CONFIRM_DELAY)
+    after = await loop.run_in_executor(
+        None, lambda: analyzer.get_screen_content(name, use_cache=False)
+    )
+    confirmed = bool(after) and after != before
+    _audit("prompt", name, client, True, "shell")
+    return {
+        "session": name,
+        "status": "sent",
+        "confirmed": confirmed,
+        "submitted": True,
+    }
 
 
 @app.post("/api/sessions/{name}/prompt", dependencies=[Depends(require_control_token)])
@@ -1321,6 +1470,9 @@ async def session_prompt(name: str, req: PromptRequest, request: Request):
             status_code=413,
             detail=f"Text too long: {size} bytes (limit {_MAX_PROMPT_BYTES})",
         )
+
+    if req.shell:
+        return await _shell_prompt(name, req, client)
 
     # Refuse rather than send blind: on a phone the screen is not visible, and
     # tmux send-keys succeeds even when a shell or a permission prompt would
@@ -1741,6 +1893,9 @@ class CreateSessionRequest(BaseModel):
     new_project: str | None = None
     worktree: str | None = None
     git_init: bool = True
+    # A bash-only session (session_create.launch_shell_session) instead of a
+    # Claude one -- for secrets that must never reach Claude.
+    shell: bool = False
 
 
 @app.get("/api/projects")
@@ -1787,6 +1942,7 @@ async def api_create_session(req: CreateSessionRequest, request: Request):
                 new_project=req.new_project,
                 worktree=req.worktree,
                 git_init=req.git_init,
+                shell=req.shell,
             ),
         )
     except CreateError as e:
@@ -1798,6 +1954,7 @@ async def api_create_session(req: CreateSessionRequest, request: Request):
             "invalid_project": 422,
             "invalid_worktree": 422,
             "not_git": 409,
+            "name_taken": 409,
         }.get(e.code, 502)
         raise HTTPException(status_code=status, detail=e.message)
     except Exception as e:
@@ -2104,7 +2261,14 @@ async def stt_transcribe(request: Request, session: str = "", hints: int = 1):
         )
     if hints:
         await loop.run_in_executor(None, _refresh_glossary_if_stale)
-        lines = await loop.run_in_executor(None, _screen_lines_for_stt, session) if session else []
+        # A bash-only session's screen can hold a password or an API key
+        # mid-typing. screen_terms() feeds the literal screen content to
+        # OpenAI as a transcription hint, so for a shell session this skips
+        # straight to [] -- session_terms(session) (just the session's own
+        # name) still applies, which is harmless.
+        is_shell = session and await loop.run_in_executor(None, is_shell_session, session)
+        lines = (await loop.run_in_executor(None, _screen_lines_for_stt, session)
+                  if session and not is_shell else [])
         prompt = _stt.build_prompt(session, lines, _stt.read_glossary())
     else:
         # The lab's A/B: the same clip with no terms, to see what the hints buy.

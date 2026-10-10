@@ -159,7 +159,15 @@ class MultiSessionMonitor:
         os.makedirs(self.state_dir, exist_ok=True)
 
     def discover_sessions(self) -> Set[str]:
-        """Discover all active Claude sessions"""
+        """Discover all active Claude sessions.
+
+        Bash-only sessions (ctb-dashboard's @ctb_shell marker, used for
+        typing passwords/API keys from the dashboard console) are excluded
+        by session_manager.get_all_claude_sessions() itself -- a completion
+        notification carries screen text, so that exclusion lives in the one
+        place every caller (this monitor, the bot's /summary, /board, ...)
+        shares, rather than being repeated here.
+        """
         return set(session_manager.get_all_claude_sessions())
 
     def get_monitoring_status(self) -> Dict[str, any]:

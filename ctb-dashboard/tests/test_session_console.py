@@ -238,7 +238,7 @@ def test_a_drag_that_selected_text_does_not_thaw_the_pane(console_js):
 
 def test_sending_thaws_the_hold(console_js):
     """A hold is for reading; a key or a prompt is the end of reading."""
-    for fn in ("function sendKey(key, label, via) {", "function submit(via) {"):
+    for fn in ("function sendKey(key, label, via) {", "function submit(via, forceShell) {"):
         body = console_js[console_js.index(fn):]
         assert "unhold();" in body[:body.index("\n  }")]
 

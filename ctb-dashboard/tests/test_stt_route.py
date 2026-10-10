@@ -79,6 +79,41 @@ def test_stt_transcribes_with_a_prompt_built_from_the_session(client, monkeypatc
         assert term in seen["prompt"], term
 
 
+def test_shell_session_screen_lines_are_never_sent_to_openai(client, monkeypatch):
+    """A bash-only session's screen can hold a password mid-typing; the
+    prompt sent to OpenAI must not carry it, even though session_terms()
+    (just the session's own name) is harmless and stays."""
+    monkeypatch.setattr(_srv, "is_shell_session", lambda name: True)
+    calls = []
+    monkeypatch.setattr(_srv, "_screen_lines_for_stt",
+                        lambda name: calls.append(name) or pytest.fail("screen must not be read"))
+    seen = {}
+
+    def fake(audio, mime, prompt, **kw):
+        seen.update(prompt=prompt)
+        return {"text": "ok", "seconds": 1}
+
+    monkeypatch.setattr(stt, "transcribe", fake)
+    r = client.post("/api/stt?session=claude_demo_sh", content=b"x", headers=_AUDIO)
+    assert r.status_code == 200
+    assert calls == []
+    assert "uni-mol-QSAR" not in seen["prompt"]  # the fixture's canned screen term
+
+
+def test_non_shell_session_is_unaffected(client, monkeypatch):
+    monkeypatch.setattr(_srv, "is_shell_session", lambda name: False)
+    seen = {}
+
+    def fake(audio, mime, prompt, **kw):
+        seen.update(prompt=prompt)
+        return {"text": "ok", "seconds": 1}
+
+    monkeypatch.setattr(stt, "transcribe", fake)
+    r = client.post("/api/stt?session=claude_uni-mol-QSAR", content=b"x", headers=_AUDIO)
+    assert r.status_code == 200
+    assert "test_stt.py" in seen["prompt"]
+
+
 def test_upstream_errors_pass_through_with_their_status(client, monkeypatch):
     def fake(*a, **k):
         raise stt.TranscribeError(429, "quota")

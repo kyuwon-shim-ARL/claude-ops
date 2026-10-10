@@ -365,6 +365,127 @@ def send_free_text(name: str, text: str, row: int, focused: bool) -> bool:
     return not (still_open and needle in tail)
 
 
+def is_shell_session(name: str) -> bool:
+    """Was this session created as a bash-only session (the ``@ctb_shell``
+    tmux user option, set by session_create.create_session)?
+
+    False on any failure: an unmarked session is the common case, and a
+    tmux hiccup must not be read as "this is a shell session" -- that
+    would send the shell-mode text path (no readiness gate at all) to a
+    session that was never meant to have it.
+    """
+    # No '=' exact-match prefix: verified against a live tmux 3.6a that
+    # `show-options -t =NAME -qv @ctb_shell` comes back empty for a session
+    # that was marked (via plain `-t NAME`) and plainly carries the option --
+    # `show-options -t NAME` (no '=') sees it correctly. Session names here
+    # are exact and unique, so the prefix buys nothing and costs this.
+    try:
+        result = subprocess.run(
+            ["tmux", "show-options", "-t", name, "-qv", "@ctb_shell"],
+            capture_output=True, text=True, timeout=_TMUX_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning("tmux show-options timed out for %s", name)
+        return False
+    if result.returncode != 0:
+        return False
+    return (result.stdout or "").strip() == "1"
+
+
+# The last successful scan, kept so a failed one does not have to answer
+# "nothing is a shell session" -- which it is not entitled to say, having
+# not actually looked. Module-level because the poller calls shell_sessions()
+# fresh on every poll and the whole point is to remember across those calls.
+_shell_sessions_cache: set[str] = set()
+
+
+def shell_sessions(candidates: "list[str] | None" = None) -> set[str]:
+    """Every tmux session name marked ``@ctb_shell`` -- one tmux call, for the
+    poller, rather than a per-session query it would otherwise need to repeat
+    on every session on every poll.
+
+    Fails open on purpose, not closed: this set gates which sessions get
+    screen-scraped and pushed about, and "assume nothing is a shell session"
+    is the unsafe direction to guess in when the scan itself could not run.
+    On failure this returns the last successful scan's set (sticky) unioned
+    with every name in `candidates` that ends in ``_sh`` -- the suffix
+    create_session always gives a shell session, so a session created during
+    the very outage that broke the scan (and so missing from the sticky set)
+    is still caught by its name alone. `candidates` is optional because not
+    every caller has a session list in hand; omitting it only means that
+    specific fallback does nothing, not that sticky stops working.
+    """
+    try:
+        result = subprocess.run(
+            ["tmux", "list-sessions", "-F", "#{session_name}\t#{@ctb_shell}"],
+            capture_output=True, text=True, timeout=_TMUX_TIMEOUT,
+        )
+    except (subprocess.TimeoutExpired, OSError) as e:
+        logger.warning("tmux list-sessions (shell marker scan) failed: %s", e)
+        return _shell_sessions_fail_open(candidates)
+    if result.returncode != 0:
+        logger.warning("tmux list-sessions (shell marker scan) failed: rc=%d", result.returncode)
+        return _shell_sessions_fail_open(candidates)
+    out = set()
+    for line in (result.stdout or "").splitlines():
+        parts = line.split("\t", 1)
+        if len(parts) == 2 and parts[1].strip() == "1":
+            out.add(parts[0])
+    _shell_sessions_cache.clear()
+    _shell_sessions_cache.update(out)
+    return out
+
+
+def _shell_sessions_fail_open(candidates: "list[str] | None") -> set[str]:
+    out = set(_shell_sessions_cache)
+    if candidates:
+        out.update(name for name in candidates if name.endswith("_sh"))
+    return out
+
+
+# tmux applies its own command-line splitting to a `send-keys -l` argument
+# even though -l means "literal" and the text arrives double-dashed: verified
+# against a live tmux 3.6a, `send-keys -l -- 'abc;'` reaches the pane as
+# 'abc', and 'p;;' as 'p;' -- the LAST ';' of a trailing run is silently
+# eaten, every time, however many there are. A ';' anywhere but at the very
+# end ('x;y') is unaffected. Sent as its own keystroke -- `-H 3b`, hex for
+# ';' -- instead of as text tmux's parser can see as chainable, it survives.
+_TRAILING_SEMICOLONS = re.compile(r";+$")
+
+
+def send_shell_line(name: str, text: str) -> None:
+    """Type `text` into a bash-only session's pane and press Enter.
+
+    Deliberately not send_prompt: there is no readiness gate (the caller --
+    session_prompt's shell path -- already decided this pane is safe to
+    type into), no mode-character handling, and no bracketed paste. A tmux
+    buffer (load-buffer/paste-buffer) outlives the call it is used in and
+    this path exists specifically for secrets, so the text never touches
+    one -- ``send-keys -l`` types it as literal keystrokes instead.
+
+    ``--`` ends tmux's own option parsing so a line starting with '-'
+    (a flag-shaped password) is not read as one. See _TRAILING_SEMICOLONS
+    for why a trailing ';' run is split off and sent separately.
+
+    Raises RuntimeError on any tmux failure, including a timeout or a
+    missing tmux binary -- caught here specifically so the error never
+    carries `text` (a password, an API key) in its message or a log line.
+    """
+    trailing = _TRAILING_SEMICOLONS.search(text)
+    body = text[:trailing.start()] if trailing else text
+    semicolons = len(trailing.group()) if trailing else 0
+
+    try:
+        if body:
+            _tmux(["tmux", "send-keys", "-t", name, "-l", "--", body])
+        for _ in range(semicolons):
+            _tmux(["tmux", "send-keys", "-t", name, "-H", "3b"])
+        _tmux(["tmux", "send-keys", "-t", name, "Enter"])
+    except (subprocess.TimeoutExpired, OSError) as e:
+        logger.warning("send_shell_line to %s failed: %s", name, type(e).__name__)
+        raise RuntimeError(f"tmux send-keys to {name} failed") from None
+
+
 def send_interrupt(name: str) -> None:
     """Send ESC -- the same key the bot's /stop uses to halt Claude."""
     _tmux(["tmux", "send-keys", "-t", name, "Escape"])

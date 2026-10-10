@@ -1243,6 +1243,9 @@
          * happening in it, only by what it is called. */
         hay: `${s.work_context || ''} ${s.last_prompt || ''}`.trim(),
         context_percent: (typeof s.context_percent === 'number') ? s.context_percent : null,
+        // Bash-only session (no Claude at all) -- the console reads this to
+        // route a send through the shell path instead of the prompt gate.
+        shell: s.shell === true,
       };
     }
 

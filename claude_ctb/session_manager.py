@@ -6,10 +6,14 @@ Manages active session state and switching between different Claude Code session
 
 import glob
 import json
+import logging
 import os
+import subprocess
 import time
 from datetime import datetime
 from typing import Dict, List
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -237,11 +241,18 @@ class SessionManager:
     def get_all_claude_sessions(self, sort_by_mtime: bool = True) -> List[str]:
         """Get list of all Claude sessions (excluding monitoring sessions)
 
+        Also excludes bash-only sessions marked ``@ctb_shell`` by
+        ctb-dashboard's session_create.launch_shell_session -- those exist
+        specifically so a typed password or API key never reaches anything
+        but the pane itself, and every caller of this method (the Telegram
+        bot's /summary, /board, the monitor's discover_sessions, ...)
+        inherits that exclusion from here rather than each having to repeat
+        it. See _shell_marked_sessions for the failure-handling reasoning.
+
         Args:
             sort_by_mtime: If True, sort sessions by most recently modified (newest first)
         """
         try:
-            import subprocess
             result = subprocess.run(
                 "tmux list-sessions 2>/dev/null | grep '^claude' | cut -d: -f1",
                 shell=True,
@@ -253,6 +264,8 @@ class SessionManager:
                 sessions = [s.strip() for s in result.stdout.split('\n') if s.strip()]
                 # Exclude monitoring sessions and telegram bridge
                 sessions = [s for s in sessions if s not in ['claude-multi-monitor', 'claude-monitor', 'claude-telegram-bridge']]
+                shell_marked = self._shell_marked_sessions(sessions)
+                sessions = [s for s in sessions if s not in shell_marked]
 
                 if sort_by_mtime and sessions:
                     # Sort by tmux session activity time (most recent first)
@@ -263,6 +276,58 @@ class SessionManager:
                 return []
         except Exception:
             return []
+
+    def _shell_marked_sessions(self, candidates: List[str]) -> set:
+        """Every live tmux session with ``@ctb_shell`` set to '1'.
+
+        Fails open, not closed, and sticky: this result excludes sessions
+        from every caller of get_all_claude_sessions, so "the scan failed,
+        assume nothing is a shell session" is the unsafe guess -- it would
+        let a password-holding pane straight into a Telegram notification.
+        On failure this returns the last successful scan's set unioned with
+        every name in `candidates` ending in ``_sh`` (the suffix
+        ctb-dashboard's session_create always gives a shell session), so a
+        session created during the very outage that broke the scan is still
+        caught by its name alone even though it cannot be in the sticky set.
+        """
+        try:
+            result = subprocess.run(
+                ["tmux", "list-sessions", "-F", "#{session_name}\t#{@ctb_shell}"],
+                capture_output=True, text=True, timeout=5,
+            )
+        except (subprocess.TimeoutExpired, OSError) as e:
+            logger.warning("tmux list-sessions (shell marker scan) failed: %s", e)
+            return self._shell_marked_fail_open(candidates)
+        if result.returncode != 0:
+            logger.warning("tmux list-sessions (shell marker scan) failed: rc=%d", result.returncode)
+            return self._shell_marked_fail_open(candidates)
+        out = set()
+        for line in (result.stdout or "").splitlines():
+            parts = line.split("\t", 1)
+            if len(parts) == 2 and parts[1].strip() == "1":
+                out.add(parts[0])
+        self._shell_marked_cache = set(out)
+        return out
+
+    def _shell_marked_fail_open(self, candidates: List[str]) -> set:
+        out = set(getattr(self, "_shell_marked_cache", set()))
+        out.update(name for name in (candidates or []) if name.endswith("_sh"))
+        return out
+
+    def is_shell_session(self, session_name: str) -> bool:
+        """Was this session created as a bash-only session (the
+        ``@ctb_shell`` tmux user option)? False on any failure -- a tmux
+        hiccup must not be read as "safe to screen-capture"."""
+        try:
+            result = subprocess.run(
+                ["tmux", "show-options", "-t", session_name, "-qv", "@ctb_shell"],
+                capture_output=True, text=True, timeout=5,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return False
+        if result.returncode != 0:
+            return False
+        return (result.stdout or "").strip() == "1"
 
     def _sort_sessions_by_activity(self, sessions: List[str]) -> List[str]:
         """Sort sessions by last activity time (most recent first)

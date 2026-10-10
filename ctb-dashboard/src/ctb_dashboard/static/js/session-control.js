@@ -1633,6 +1633,10 @@
             label: wt === -1 ? stripped : stripped.slice(0, wt),
             branch: wt === -1 ? null : stripped.slice(wt + 4),
             context_percent: (typeof s.context_percent === 'number') ? s.context_percent : null,
+            // Carried over so isShellSession works from this fallback too --
+            // it is consulted (via sessionCatalog -> sessionOrder) before the
+            // board has published anything, e.g. right after a fresh load.
+            shell: s.shell === true,
           };
         });
         renderStrip();
@@ -5849,6 +5853,19 @@
 
   /* --- actions ---------------------------------------------------------- */
 
+  /* Is the open session a bash-only one (no Claude at all)? Read from the
+   * published catalogue rather than tracked locally: the console can be
+   * opened straight onto a session it has never polled yet, and the
+   * catalogue is the one place that already carries the server's answer
+   * (session_entry["shell"] in server.py's _poll_sessions). */
+  function isShellSession(name) {
+    var all = sessionCatalog();
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].name === name) return all[i].shell === true;
+    }
+    return false;
+  }
+
   function post(path, body) {
     return window.ctbControl.send('/api/sessions/' +
       encodeURIComponent(state.session) + path, {
@@ -5876,11 +5893,17 @@
    * rather than guessed. */
   var ECHO_ENTER_MS = 1500;
 
-  function submit(via) {
+  function submit(via, forceShell) {
     if (state.busy || !state.session) return;
     unhold();
     endWalk();
     var text = el.input.value;
+    /* A bash-only session has no Claude prompt box to swallow the text, no
+     * readiness gate to refuse it, and nothing worth saving as a draft --
+     * the box can hold a password mid-typing. `forceShell` lets a refusal
+     * on the ordinary path (Claude exited to bash -- see the 409 handling
+     * below) resend through here even for a session not marked shell yet. */
+    var shell = forceShell || isShellSession(state.session);
     /* An empty box means the gesture was not "send this text" but "press
      * Enter" -- answering a prompt, accepting a default, nudging a pane. It
      * used to do nothing at all.
@@ -5915,14 +5938,14 @@
 
     state.busy = true;
     el.send.disabled = true;
-    say('전송 중…', 'var(--con-muted)');
+    say(shell ? 'bash로 전송 중…' : '전송 중…', 'var(--con-muted)');
     /* Remembered so the pending-input marking can say "this one is yours".
      * Only the last: what is sitting in the box now can only be the last thing
      * that went in, and a longer history would let an old send claim a line
      * that is no longer the same text. */
     state.sent = { session: sent, text: text };
 
-    post('/prompt', { text: text })
+    post('/prompt', shell ? { text: text, shell: true } : { text: text })
       .then(function (res) {
         return res.json().catch(function () { return {}; }).then(function (body) {
           return { status: res.status, body: body };
@@ -5944,10 +5967,38 @@
           } else if (r.body.confirmed === false) {
             say('전송됨 · 화면 변화 없음', 'var(--con-warn)');
           } else {
-            say('전송됨', 'var(--con-ok)');
+            say(shell ? 'bash로 전송됨' : '전송됨', 'var(--con-ok)');
           }
           pollTail();
         } else if (r.status === 409) {
+          /* A plain session refused for sitting at a shell (Claude exited,
+           * crashed, or was never started) is not a dead end -- the text can
+           * still go in as a shell command, the same way shell=True would
+           * send it, if that is really what is wanted. Only that one reason
+           * offers the resend; every other refusal (awaiting a choice, a
+           * live shell session refusing because Claude is running there,
+           * context limit, error) is not something retyping as bash fixes.
+           *
+           * Gated on state.session === sent: the request can land after a
+           * switch, and a confirm dialog for a session no longer open --
+           * resending into whatever IS open now, or into a session the user
+           * has moved on from -- is worse than just reporting the refusal. */
+          if (!shell && r.body.reason === 'shell' && state.session === sent) {
+            var retry = window.confirm(
+              '이 세션은 지금 Claude가 아니라 bash입니다. 셸 명령으로 실행할까요?\n\n' +
+              '이 세션은 bash 전용(비밀값용) 세션이 아니라 화면이 모니터링(알림 ·' +
+              ' 화면 캡처)에 그대로 노출됩니다. 비밀값 입력엔 bash 전용 세션을 쓰세요.');
+            if (retry) {
+              el.input.value = text;
+              /* Not called inline: this handler still runs inside the send
+               * that just finished, and the `busy` flag it is about to clear
+               * (below, after this .then) would otherwise clear a moment
+               * after the resend sets it again. A fresh macrotask runs after
+               * that cleanup. */
+              setTimeout(function () { submit(via, true); }, 0);
+              return;
+            }
+          }
           say('거부: ' + (r.body.reason || ''), 'var(--con-warn)');
           if (r.body.message) window.alert(r.body.message);
         } else if (r.status === 413) {
@@ -6063,17 +6114,36 @@
   function loadDrafts() {
     try {
       var raw = JSON.parse(localStorage.getItem(DRAFT_KEY));
-      if (raw && typeof raw === 'object') state.drafts = raw;
+      if (raw && typeof raw === 'object') {
+        /* A draft stored before a session was marked shell -- or before this
+         * guard existed -- must not come back. Dropped here too, not only on
+         * the next save, so it is never even held in memory. */
+        var kept = {};
+        Object.keys(raw).forEach(function (k) {
+          if (!isShellSession(k)) kept[k] = raw[k];
+        });
+        state.drafts = kept;
+      }
     } catch (e) { /* unreadable or unavailable; start empty */ }
   }
 
+  /* The one place that decides what reaches localStorage. Every call site
+   * that touches state.drafts calls this and nothing else -- no call site
+   * guards itself, because a shell session's text can arrive through any of
+   * them (typed, recalled, pasted, an upload's path) and a guard missed at
+   * even one of them is a leak. This also means a session that becomes a
+   * shell session (or whose entry simply has not loaded into the catalogue
+   * yet) still gets its draft purged on the very next write -- see
+   * isShellSession's "unknown defaults to not-shell" note; the window is a
+   * save or two until the catalogue catches up, no more. */
   function saveDrafts() {
     try {
       /* Empty entries are not drafts, and would otherwise accumulate one key
-       * per session ever opened. */
+       * per session ever opened. A shell session's text never counts as a
+       * draft at all -- its box can hold a password mid-typing. */
       var out = {};
       Object.keys(state.drafts).forEach(function (k) {
-        if (state.drafts[k]) out[k] = state.drafts[k];
+        if (state.drafts[k] && !isShellSession(k)) out[k] = state.drafts[k];
       });
       localStorage.setItem(DRAFT_KEY, JSON.stringify(out));
     } catch (e) { /* quota or private mode: the in-memory copy still works */ }
@@ -6150,10 +6220,18 @@
       var raw = JSON.parse(localStorage.getItem(TAIL_KEY)) || {};
       var all = {};
       Object.keys(raw).forEach(function (n) {
+        // A shell session's pane can hold a password or an API key. Painting
+        // it on the next open is fine (the poll already fetched it, and
+        // state.cache above still gets it); writing it to localStorage,
+        // where it would outlive the tab and this device's own security
+        // model, is not. A name stored before it was marked shell -- or
+        // before this guard existed -- is purged here too, not just skipped
+        // going forward.
+        if (isShellSession(n)) return;
         var kept = normalise(raw[n]);
         if (kept) all[n] = kept;
       });
-      all[name] = entry;
+      if (!isShellSession(name)) all[name] = entry;
       var names = Object.keys(all).sort(function (a, b) { return all[b].at - all[a].at; });
       names.slice(TAIL_KEEP).forEach(function (n) { delete all[n]; });
       localStorage.setItem(TAIL_KEY, JSON.stringify(all));
@@ -6264,6 +6342,12 @@
     state.pinned = true;
     setFrozen(false);
     el.title.textContent = name.replace(/^claude[_-]/, '');
+    /* The one visible sign that a send here goes to bash, not Claude --
+     * everything else about the box (Enter to send, Shift+Enter for a
+     * newline) is unchanged. */
+    el.input.placeholder = isShellSession(name)
+      ? 'bash 명령 · Claude로 가지 않음 (Enter 전송)'
+      : '지시 입력 (Enter 전송 · Shift+Enter 줄바꿈)';
     /* The last pane this console painted for the session, if there is one,
      * goes up at once -- a switch between two sessions should feel like
      * turning a page, not like a first load. The poll that starts below
@@ -6438,6 +6522,11 @@
     _renderStrip: renderStrip,
     _syncSurfaces: syncSurfaces,
     _markChipGone: markChipGone,
+    _isShellSession: isShellSession,
+    _submit: submit,
+    _saveDrafts: saveDrafts,
+    _loadDrafts: loadDrafts,
+    _rememberTail: rememberTail,
     _paintRunDividers: paintRunDividers,
     _renderTail: renderTail,
     _railHome: function () { return el.railHome; },

@@ -108,4 +108,8 @@ def _no_live_system(monkeypatch, tmp_path):
     # their own afterwards and win, since this fixture runs first.
     monkeypatch.setattr(server, "pane_command", lambda name: "claude")
     monkeypatch.setattr(server, "pane_has_claude", lambda name: True)
+    # _poll_sessions calls this once per poll to find bash-only sessions; the
+    # harmless default is "none", same reasoning as pane_command above.
+    monkeypatch.setattr(server, "shell_sessions", lambda *a, **k: set())
+    monkeypatch.setattr(server, "is_shell_session", lambda name: False)
 

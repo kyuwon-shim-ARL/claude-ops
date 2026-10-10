@@ -29,9 +29,10 @@
   var PROJECT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
   var WORKTREE_RE = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$/;
 
-  function sessionNameFor(project, worktree) {
-    return worktree ? 'claude_' + project + '_wt_' + worktree
-                    : 'claude_' + project;
+  function sessionNameFor(project, worktree, shell) {
+    var base = worktree ? 'claude_' + project + '_wt_' + worktree
+                        : 'claude_' + project;
+    return shell ? base + '_sh' : base;
   }
 
   /* Turn the form state into a request body, or an error to show.
@@ -78,10 +79,11 @@
       payload.project = project;
     }
     if (worktree) payload.worktree = worktree;
+    if (s.shell) payload.shell = true;
 
     return {
       payload: payload,
-      session: sessionNameFor(project, worktree),
+      session: sessionNameFor(project, worktree, s.shell),
       worktree: worktree,
     };
   }
@@ -112,6 +114,10 @@
     wtMode: 'none',
     wtExisting: '',
     wtNew: '',
+    /* "Claude 없이 bash만" -- a session with no Claude in it at all, for
+     * passwords and API keys. Independent of the worktree picker: either
+     * kind of session can be a plain shell. */
+    shell: false,
     root: '',
     projects: [],
     worktrees: [],
@@ -290,6 +296,22 @@
     });
     el.wtInput.addEventListener('keydown', onFieldEnter);
 
+    /* bash-only toggle -- works for an existing project or a new one, with
+     * or without a worktree, so it sits below all of that rather than
+     * inside any one pane. */
+    var shellRow = document.createElement('label');
+    shellRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:14px;' +
+      'font-size:12px;color:#c9c4dc;cursor:pointer;';
+    el.shell = document.createElement('input');
+    el.shell.type = 'checkbox';
+    el.shell.id = 'new-session-shell';
+    el.shell.addEventListener('change', function () {
+      state.shell = el.shell.checked;
+      renderPreview();
+    });
+    shellRow.appendChild(el.shell);
+    shellRow.appendChild(document.createTextNode('Claude 없이 bash만 (비밀값 작업용)'));
+
     /* preview + error */
     el.preview = document.createElement('div');
     el.preview.style.cssText = "margin-top:14px;padding:10px 12px;border-radius:10px;" +
@@ -326,6 +348,7 @@
     box.appendChild(el.wtSection);
     box.appendChild(el.wtSelect);
     box.appendChild(el.wtInput);
+    box.appendChild(shellRow);
     box.appendChild(el.preview);
     box.appendChild(el.error);
     box.appendChild(actions);
@@ -706,6 +729,10 @@
     el.root.style.display = 'flex';
     setMode(state.mode);
     setWtMode(state.wtMode);
+    // Not remembered across opens, unlike mode/wtMode: a checkbox that means
+    // "about to type a password" should never still be on from last time.
+    state.shell = false;
+    el.shell.checked = false;
     setBusy(false);
     /* Arrows start from whatever is selected, not from the top of the list. */
     state.cursor = 0;
