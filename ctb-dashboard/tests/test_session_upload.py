@@ -166,7 +166,19 @@ def test_safe_name_keeps_the_extension_when_truncating():
     long = "가" * 200 + ".csv"
     out = _up.safe_name(long)
     assert out.endswith(".csv")
-    assert len(out.encode("utf-8")) <= 100
+    assert len(out.encode("utf-8")) <= 200
+
+
+def test_safe_name_keeps_a_long_korean_name_whole():
+    """Sixty Hangul syllables is 180 bytes: a real document title, not abuse."""
+    name = "가" * 60 + ".pdf"
+    assert _up.safe_name(name) == name
+
+
+def test_a_truncated_name_still_fits_the_filesystem_with_a_collision_suffix():
+    out = _up.safe_name("가" * 200 + ".csv")
+    stem, _, ext = out.rpartition(".")
+    assert len(f"{stem}-50.{ext}".encode("utf-8")) <= 255
 
 
 def test_safe_name_normalises_decomposed_hangul():

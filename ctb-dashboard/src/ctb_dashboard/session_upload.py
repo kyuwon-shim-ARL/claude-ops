@@ -60,7 +60,9 @@ RECEIVE_TIMEOUT = float(os.environ.get("CTB_UPLOAD_TIMEOUT", "120"))
 # descriptors held.
 MAX_CONCURRENT = int(os.environ.get("CTB_UPLOAD_CONCURRENCY", "4"))
 
-_MAX_NAME_BYTES = 100
+# Linux allows 255 bytes per name. 200 keeps about 66 Hangul syllables (three
+# bytes each) and leaves room for the "-<n>" a collision adds.
+_MAX_NAME_BYTES = 200
 _COLLISION_TRIES = 50
 
 # Control characters, path separators and the Windows-reserved set. NUL would
