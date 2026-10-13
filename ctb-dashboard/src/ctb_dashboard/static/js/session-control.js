@@ -2762,8 +2762,8 @@
    * a browser closes a tab: when the same git checks the trash runs say it is
    * safe (clean tree, pushed, and a worktree merged), the session is gone
    * with no dialog and the console moves to the neighbour on the rail. When
-   * they do not, nothing happens but a line of reasons -- the forced delete
-   * stays where it is, behind the card's trash and its second confirmation.
+   * they do not, see closeStep: a plain session closes anyway, a worktree
+   * needs a second press.
    *
    * Ctrl/Cmd+Shift+Q brings back the last closed session, one per press,
    * newest first, the way a browser reopens closed tabs. The server kept its
@@ -2788,37 +2788,79 @@
     if (Array.isArray(state.order)) state.order = state.order.filter(keep);
   }
 
-  function closeSession() {
-    if (!state.session || closing || state.busy) return;
-    var name = state.session;
-    closing = true;
-    setStatus('닫는 중…', 'var(--con-muted)');
-    window.ctbControl.send('/api/sessions/' + encodeURIComponent(name) + '/delete', {
-      method: 'POST', body: JSON.stringify({ force: false }),
+  /* What a delete answer means for the close. A blocked plain session is
+   * closed anyway: deleting it only ends tmux, its files and commits stay on
+   * disk, and Shift+Q brings it back -- the reasons ride along on the status
+   * line instead of stopping the close. A blocked worktree is different, its
+   * directory and branch go with it, so the first press only arms and a
+   * second press within FORCE_ARM_MS forces it. A forced request that is
+   * still refused is an error, never another retry. */
+  var FORCE_ARM_MS = 3000;
+  var forceArm = null;
+
+  function closeStep(r, forced) {
+    if (r.status === 200 && r.body.status === 'deleted') return 'deleted';
+    if (r.status === 409) {
+      if (r.body.check && r.body.check.is_worktree) return 'arm';
+      if (!forced) return 'force';
+    }
+    return 'error';
+  }
+
+  /* allowWorktree=false on the automatic retry: it forces because the first
+   * answer said "not a worktree", and the server checks again -- if that check
+   * finds a worktree after all, the force does not apply to it. */
+  function postDelete(name, force, allowWorktree) {
+    return window.ctbControl.send('/api/sessions/' + encodeURIComponent(name) + '/delete', {
+      method: 'POST',
+      body: JSON.stringify({ force: force, allow_worktree: allowWorktree }),
     }).then(function (res) {
       return res.json().catch(function () { return {}; }).then(function (body) {
         return { status: res.status, body: body };
       });
-    }).then(function (r) {
+    });
+  }
+
+  function closeSession() {
+    if (!state.session || closing || state.busy) return;
+    var name = state.session;
+    var forced = !!(forceArm && forceArm.name === name && Date.now() < forceArm.until);
+    forceArm = null;
+    var reasons = [];
+    closing = true;
+    setStatus('닫는 중…', 'var(--con-muted)');
+    function settle(r, wasForced) {
+      var step = closeStep(r, wasForced);
+      if (step === 'force') {
+        reasons = (r.body.check && r.body.check.reasons) || [];
+        return postDelete(name, true, false).then(function (r2) { return settle(r2, true); });
+      }
       closing = false;
-      if (r.status === 200 && r.body.status === 'deleted') {
+      if (step === 'deleted') {
         var next = neighbourAfterClose(sessionOrder(), name);
         dropFromOrders(name);
         delete state.drafts[name];
         saveDrafts();
         if (next) show(next.name, true); else hide();
+        if (reasons.length) {
+          setStatus('닫음 · ' + name + ' · ' + reasons.join(' · ') + ' · 복원은 '
+            + (IS_MAC ? 'Option' : 'Alt') + '+Shift+Q', 'var(--con-warn)');
+        }
         return;
       }
       if (state.session !== name) return;
-      if (r.status === 409) {
-        var reasons = (r.body.check && r.body.check.reasons) || [];
-        setStatus('닫기 보류 · ' + (reasons.join(' · ') || '안전하지 않음') + ' · 강제 삭제는 카드의 🗑', 'var(--con-warn)');
+      if (step === 'arm') {
+        var why = (r.body.check && r.body.check.reasons) || [];
+        forceArm = { name: name, until: Date.now() + FORCE_ARM_MS };
+        setStatus('닫기 보류 · ' + (why.join(' · ') || '안전하지 않음')
+          + ' · 3초 안에 한 번 더 누르면 워크트리와 브랜치까지 삭제', 'var(--con-warn)');
       } else if (r.status === 200) {
         setStatus('닫기 실패 · ' + (r.body.error || r.body.status || ''), 'var(--con-err)');
       } else {
         setStatus('닫기 실패 (' + r.status + ')', 'var(--con-err)');
       }
-    }).catch(function () {
+    }
+    postDelete(name, forced, true).then(function (r) { return settle(r, forced); }).catch(function () {
       closing = false;
       if (state.session === name) setStatus('닫기 실패 · 네트워크', 'var(--con-err)');
     });
@@ -6517,6 +6559,7 @@
     _unlockPage: unlockPage,
     _stepSession: stepSession,
     _neighbourAfterClose: neighbourAfterClose,
+    _closeStep: closeStep,
     _linkifyLines: linkifyLines,
     _whenSettled: whenSettled,
     _renderStrip: renderStrip,

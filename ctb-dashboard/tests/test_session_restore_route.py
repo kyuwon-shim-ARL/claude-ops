@@ -21,7 +21,7 @@ def client(monkeypatch, tmp_path):
 
 
 def test_a_safe_delete_is_remembered(client, monkeypatch):
-    monkeypatch.setattr(_srv, "delete_session", lambda n, f: {"status": "deleted", "session": n})
+    monkeypatch.setattr(_srv, "delete_session", lambda n, f, w=True: {"status": "deleted", "session": n})
     r = client.post("/api/sessions/claude_x/delete", json={"force": False}, headers=_H)
     assert r.status_code == 200
     closed = client.get("/api/sessions/closed").json()["closed"]
@@ -30,14 +30,14 @@ def test_a_safe_delete_is_remembered(client, monkeypatch):
 
 def test_a_blocked_delete_is_not_remembered(client, monkeypatch):
     monkeypatch.setattr(_srv, "delete_session",
-                        lambda n, f: {"status": "blocked", "check": {"safe": False, "reasons": ["dirty"]}})
+                        lambda n, f, w=True: {"status": "blocked", "check": {"safe": False, "reasons": ["dirty"]}})
     r = client.post("/api/sessions/claude_x/delete", json={"force": False}, headers=_H)
     assert r.status_code == 409
     assert client.get("/api/sessions/closed").json()["closed"] == []
 
 
 def test_restore_relaunches_the_last_closed_and_returns_it(client, monkeypatch):
-    monkeypatch.setattr(_srv, "delete_session", lambda n, f: {"status": "deleted", "session": n})
+    monkeypatch.setattr(_srv, "delete_session", lambda n, f, w=True: {"status": "deleted", "session": n})
     launched = []
     monkeypatch.setattr(sr, "launch_session", lambda s, cwd: launched.append(s))
     client.post("/api/sessions/claude_a/delete", json={"force": False}, headers=_H)

@@ -246,13 +246,19 @@ def _kill_tmux(session_name: str) -> bool:
         return False
 
 
-def delete_session(session_name: str, force: bool = False) -> dict:
+def delete_session(session_name: str, force: bool = False, allow_worktree: bool = True) -> dict:
     """Delete a session. Blocks unsafe deletes unless force=True.
+
+    `allow_worktree=False` narrows the force to plain sessions: a caller that
+    forces on the strength of an earlier check saying "not a worktree" must
+    not delete one if this check finds that it is.
 
     Returns a dict with `status` in {"deleted", "blocked", "error"}.
     """
     check = check_delete_safety(session_name)
 
+    if check["is_worktree"] and not allow_worktree:
+        force = False
     if not force and not check["safe"]:
         return {"status": "blocked", "check": check}
 

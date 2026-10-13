@@ -142,6 +142,33 @@ def test_force_delete_removes_unmerged_worktree(repo, monkeypatch):
     assert not Path(wt).exists()
 
 
+def test_a_force_that_excludes_worktrees_leaves_an_unsafe_worktree_alone(repo, monkeypatch):
+    """Ctrl+Q forces a plain session on the strength of a first check that
+    said "not a worktree". If the server's own check now says it is one, that
+    force must not reach `worktree remove --force` and `branch -D`."""
+    wt = repo.parent / "wt"
+    _git(repo, "worktree", "add", "-b", "feature", str(wt))
+    (wt / "h.txt").write_text("wt work")
+    _git(wt, "add", ".")
+    _git(wt, "commit", "-m", "wt commit")
+    _patch_path(monkeypatch, wt)
+    killed = []
+    monkeypatch.setattr(session_delete, "_kill_tmux", lambda name: killed.append(name) or True)
+    out = session_delete.delete_session("claude_x_wt_feature", force=True, allow_worktree=False)
+    assert out["status"] == "blocked"
+    assert killed == []
+    assert Path(wt).exists()
+
+
+def test_a_force_that_excludes_worktrees_still_closes_a_plain_session(repo, monkeypatch):
+    (repo / "f.txt").write_text("dirty")
+    _patch_path(monkeypatch, repo)
+    monkeypatch.setattr(session_delete, "_kill_tmux", lambda name: True)
+    out = session_delete.delete_session("claude_x", force=True, allow_worktree=False)
+    assert out["status"] == "deleted"
+    assert (repo / "f.txt").read_text() == "dirty"
+
+
 def test_safe_delete_removes_merged_worktree(repo, monkeypatch):
     wt = repo.parent / "wt"
     _git(repo, "worktree", "add", "-b", "feature", str(wt))

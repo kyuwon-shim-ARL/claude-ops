@@ -1634,6 +1634,7 @@ async def session_interrupt(name: str, request: Request):
 
 class DeleteRequest(BaseModel):
     force: bool = False
+    allow_worktree: bool = True
 
 
 # --- file upload: something for the session to work on -------------------------
@@ -1819,7 +1820,8 @@ async def session_delete(name: str, req: DeleteRequest, request: Request):
     if not _SESSION_NAME_RE.match(name):
         raise HTTPException(status_code=422, detail="Invalid session name")
     loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(None, _delete_and_remember, name, req.force)
+    result = await loop.run_in_executor(
+        None, _delete_and_remember, name, req.force, req.allow_worktree)
     _audit(
         "delete", name, request.client.host if request.client else None,
         result.get("status") == "deleted",
@@ -1837,11 +1839,11 @@ async def session_delete(name: str, req: DeleteRequest, request: Request):
 _CLOSED_HISTORY_PATH = _restore.history_path(_STATE_DIR)
 
 
-def _delete_and_remember(name: str, force: bool) -> dict:
+def _delete_and_remember(name: str, force: bool, allow_worktree: bool = True) -> dict:
     """What restore needs is read while the session is alive, so it is taken
     before the kill and kept only if the delete went through."""
     entry = _restore.describe(name)
-    result = delete_session(name, force)
+    result = delete_session(name, force, allow_worktree)
     if result.get("status") == "deleted" and entry.get("path"):
         try:
             _restore.record(_CLOSED_HISTORY_PATH, entry)

@@ -16,15 +16,11 @@ def _block():
     return js[js.index("  /* Ctrl/Cmd+Q closes the open session"):js.index("  /* Ctrl/Cmd+Tab bounces")]
 
 
-def test_close_uses_the_trashs_delete_without_force():
+def test_close_asks_without_force_first_and_never_opens_a_dialog():
     b = _block()
-    assert re.search(r"/delete', \{\s*method: 'POST', body: JSON\.stringify\(\{ force: false \}\)", b)
-    assert "force: true" not in b
-
-
-def test_a_blocked_close_only_reports_and_points_at_the_trash():
-    b = _block()
-    assert "r.status === 409" in b and "reasons" in b and "🗑" in b
+    assert re.search(r"/delete', \{\s*method: 'POST',\s*body: JSON\.stringify\(\{ force: force, allow_worktree: allowWorktree \}\)", b)
+    # The automatic retry for a plain session must not be able to delete a worktree.
+    assert "postDelete(name, true, false)" in b
     assert "confirm(" not in b and "alert(" not in b  # no dialog either way
 
 
@@ -48,6 +44,65 @@ def test_chords_q_and_shift_q_with_alt_fallback():
 
 
 pytestmark_node = pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+
+_HARNESS_HEAD = """
+global.window = { location: {search:'', pathname:'/'}, addEventListener(){}, history:{} };
+global.document = { addEventListener(){}, readyState:'complete',
+  createElement: () => ({style:{ setProperty(){} }, setAttribute(){}, addEventListener(){}, appendChild(){}}),
+  body: {appendChild(){}}, head: {appendChild(){}}, documentElement: {style:{setProperty(){}}} };
+global.navigator = {}; global.fetch = () => new Promise(() => {});
+"""
+
+
+def _close_step(status, body, forced):
+    harness = _HARNESS_HEAD + f"""
+    require({json.dumps(str(CONSOLE_JS))});
+    const r = window.ctbConsole._closeStep({{status: {status}, body: {json.dumps(body)}}}, {json.dumps(forced)});
+    process.stdout.write(JSON.stringify(r));
+    """
+    res = subprocess.run(["node", "-e", harness], capture_output=True, text=True, timeout=20)
+    assert res.returncode == 0, res.stderr
+    return json.loads(res.stdout)
+
+
+_DIRTY = ["커밋되지 않은 변경사항이 있습니다"]
+
+
+@pytestmark_node
+def test_a_blocked_plain_session_is_closed_anyway():
+    # Its files stay on disk; only tmux goes, and restore brings it back.
+    blocked = {"status": "blocked", "check": {"is_worktree": False, "reasons": _DIRTY}}
+    assert _close_step(409, blocked, False) == "force"
+
+
+@pytestmark_node
+def test_a_blocked_worktree_arms_instead_of_deleting():
+    # Its directory and branch would be deleted: the first press only warns.
+    blocked = {"status": "blocked", "check": {"is_worktree": True, "reasons": _DIRTY}}
+    assert _close_step(409, blocked, False) == "arm"
+
+
+@pytestmark_node
+def test_a_forced_request_that_is_still_blocked_does_not_loop():
+    blocked = {"status": "blocked", "check": {"is_worktree": False, "reasons": _DIRTY}}
+    assert _close_step(409, blocked, True) == "error"
+
+
+@pytestmark_node
+def test_a_retry_the_server_found_to_be_a_worktree_arms():
+    # The first check missed the worktree; the server's did, and refused.
+    blocked = {"status": "blocked", "check": {"is_worktree": True, "reasons": _DIRTY}}
+    assert _close_step(409, blocked, True) == "arm"
+
+
+@pytestmark_node
+@pytest.mark.parametrize("status,body,expected", [
+    (200, {"status": "deleted"}, "deleted"),
+    (200, {"status": "error", "error": "x"}, "error"),
+    (500, {}, "error"),
+])
+def test_other_outcomes(status, body, expected):
+    assert _close_step(status, body, False) == expected
 
 
 @pytestmark_node
