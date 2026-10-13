@@ -43,6 +43,16 @@ def test_chords_q_and_shift_q_with_alt_fallback():
     assert "if (!e.shiftKey && !state.session) return;" in b
 
 
+def test_the_worktree_arm_says_trash_and_how_to_get_it_back():
+    """A second press parks the worktree in the trash; it no longer deletes
+    the directory and branch, and the status line must not say it does."""
+    b = _block()
+    arm = b[b.index("if (step === 'arm')"):b.index("} else if (r.status === 200)")]
+    assert "휴지통" in arm and "7일" in arm
+    assert "(IS_MAC ? 'Option' : 'Alt')" in arm and "Shift+Q" in arm
+    assert "브랜치까지 삭제" not in arm
+
+
 pytestmark_node = pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 
 _HARNESS_HEAD = """

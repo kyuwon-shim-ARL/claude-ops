@@ -222,6 +222,7 @@ node_modules/
 
 # Claude
 .claude/worktrees/
+.claude/trash/
 .omc/
 """
 
@@ -292,6 +293,23 @@ def _ensure_worktree(project_dir: Path, worktree: str) -> tuple[Path, bool]:
         # it out instead of failing, which is what cs does.
         r2 = _git(project_dir, "worktree", "add", str(wt_dir), branch)
         if r2.returncode != 0:
+            # A force-deleted worktree keeps its branch checked out in the
+            # trash (session_delete), and git will not check a branch out
+            # twice. Its own message names a path; this names the way out.
+            # Not resolved automatically: which of the two is wanted is the
+            # user's call.
+            # realpath: `_worktree_branches` keys are realpaths. The path goes
+            # in the message because the restore history may no longer hold
+            # this entry (capped, one per session name).
+            trash = os.path.realpath(project_dir / ".claude" / "trash") + os.sep
+            parked = [p for p, b in _worktree_branches(project_dir).items()
+                      if p.startswith(trash) and b == branch]
+            if parked:
+                raise CreateError(
+                    "worktree_in_trash",
+                    f"같은 이름의 워크트리 '{worktree}'가 휴지통({parked[0]})에 있습니다 — "
+                    "Alt(Option)+Shift+Q로 복원하거나 보관 기간(7일)이 지난 뒤 다시 만드세요",
+                )
             # r2's message, not r's: the fallback is the attempt that decided
             # the outcome, and r's "branch already exists" is exactly the thing
             # the fallback was trying to accommodate.

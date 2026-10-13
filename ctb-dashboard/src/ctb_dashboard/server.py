@@ -1844,6 +1844,11 @@ def _delete_and_remember(name: str, force: bool, allow_worktree: bool = True) ->
     before the kill and kept only if the delete went through."""
     entry = _restore.describe(name)
     result = delete_session(name, force, allow_worktree)
+    if result.get("trashed_to"):
+        # Where the worktree went and where it came from, so restore can move
+        # it back rather than make a fresh one at the same path.
+        entry["trashed_to"] = result["trashed_to"]
+        entry["trashed_from"] = result.get("trashed_from")
     if result.get("status") == "deleted" and entry.get("path"):
         try:
             _restore.record(_CLOSED_HISTORY_PATH, entry)

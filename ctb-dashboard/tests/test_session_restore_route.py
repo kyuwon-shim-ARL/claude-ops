@@ -28,6 +28,16 @@ def test_a_safe_delete_is_remembered(client, monkeypatch):
     assert [c["session"] for c in closed] == ["claude_x"]
 
 
+def test_a_trashed_worktree_is_remembered_with_its_trash_path(client, monkeypatch):
+    monkeypatch.setattr(_srv, "delete_session",
+                        lambda n, f, w=True: {"status": "deleted", "session": n, "trashed_to": "/r/.claude/trash/x-1",
+                                            "trashed_from": "/r/.claude/worktrees/x"})
+    client.post("/api/sessions/claude_r_wt_x/delete", json={"force": True}, headers=_H)
+    closed = client.get("/api/sessions/closed").json()["closed"]
+    assert closed[0]["trashed_to"] == "/r/.claude/trash/x-1"
+    assert closed[0]["trashed_from"] == "/r/.claude/worktrees/x"
+
+
 def test_a_blocked_delete_is_not_remembered(client, monkeypatch):
     monkeypatch.setattr(_srv, "delete_session",
                         lambda n, f, w=True: {"status": "blocked", "check": {"safe": False, "reasons": ["dirty"]}})

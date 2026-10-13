@@ -227,6 +227,42 @@ def test_worktree_reuses_orphaned_branch(root, launched):
     assert wt.is_dir()
 
 
+def test_a_name_whose_branch_sits_in_the_trash_says_so(root, launched):
+    """The trashed worktree still has `worktree-<name>` checked out, so git
+    refuses a second checkout. Its own message ("already used by worktree at
+    .../.claude/trash/...") does not say what to do about it."""
+    session_create.create_session(project="alpha", worktree="feat")
+    wt = root / "alpha" / ".claude" / "worktrees" / "feat"
+    (root / "alpha" / ".claude" / "trash").mkdir()
+    _git(root / "alpha", "worktree", "move", str(wt),
+         str(root / "alpha" / ".claude" / "trash" / "feat-20261013T120000"))
+    with pytest.raises(CreateError) as e:
+        session_create.create_session(project="alpha", worktree="feat")
+    assert e.value.code == "worktree_in_trash"
+    assert "휴지통" in e.value.message and "Shift+Q" in e.value.message
+    # The history entry may be gone (capped, deduped by name): say where it is.
+    assert "feat-20261013T120000" in e.value.message
+
+
+def test_the_trash_is_recognised_through_a_symlinked_projects_root(tmp_path, root, monkeypatch, launched):
+    link = tmp_path / "projects-link"
+    link.symlink_to(root)
+    monkeypatch.setenv("CTB_PROJECTS_ROOT", str(link))
+    session_create.create_session(project="alpha", worktree="feat")
+    real = root / "alpha"
+    (real / ".claude" / "trash").mkdir()
+    _git(real, "worktree", "move", str(real / ".claude" / "worktrees" / "feat"),
+         str(real / ".claude" / "trash" / "feat-20261013T120000"))
+    with pytest.raises(CreateError) as e:
+        session_create.create_session(project="alpha", worktree="feat")
+    assert e.value.code == "worktree_in_trash"
+
+
+def test_new_projects_ignore_the_worktree_trash(root, launched):
+    session_create.create_session(new_project="gamma2")
+    assert ".claude/trash/" in (root / "gamma2" / ".gitignore").read_text()
+
+
 def test_worktree_on_non_git_project_is_refused(root, launched):
     with pytest.raises(CreateError) as e:
         session_create.create_session(project="beta", worktree="feat")

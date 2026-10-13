@@ -2706,7 +2706,7 @@
     function _checkSummaryHtml(check) {
       const disp = escapeHtml(shortName(check.session || ''));
       let rows = '';
-      if (check.is_worktree) rows += `<div>⎇ 워크트리 세션 — 삭제 시 작업 디렉토리가 제거됩니다.</div>`;
+      if (check.is_worktree) rows += `<div>⎇ 워크트리 세션 — 강제 삭제 시 작업 디렉토리가 휴지통으로 옮겨집니다.</div>`;
       if (check.reasons && check.reasons.length) {
         rows += `<ul style="margin:8px 0 0 0;padding-left:18px;color:#fca5a5;">` +
           check.reasons.map(r => `<li style="margin:2px 0;">${escapeHtml(r)}</li>`).join('') + `</ul>`;
@@ -2719,15 +2719,18 @@
       _themeModal();
       const { disp } = _checkSummaryHtml(check);
       deleteModalTitle.textContent = '⚠️ 강제 삭제 확인';
-      // Only a worktree loses files. Warning about permanent loss on a regular
-      // session is untrue and talks people out of a harmless action.
+      // Neither case destroys anything any more: a regular session leaves its
+      // files on disk, and a forced worktree is parked in the repo's trash
+      // (session_delete) with its files and branch. Warning about permanent
+      // loss would talk people out of an action they can undo.
+      const alt = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent) ? 'Option' : 'Alt';
       const consequence = check.is_worktree
-        ? '작업 디렉토리가 <strong style="color:#ef4444;">삭제</strong>되어 저장되지 않은 변경사항·미푸시 커밋이 <strong>영구히 사라집니다</strong>.'
+        ? `작업 디렉토리가 브랜치·변경사항째 <strong style="color:#ef4444;">휴지통</strong>으로 옮겨집니다. <strong>7일</strong> 동안 ${alt}+Shift+Q로 복원할 수 있고, 그 뒤에는 삭제됩니다.`
         : 'tmux 세션만 종료합니다. <strong>파일은 디스크에 그대로 유지</strong>되며, 커밋되지 않은 변경사항도 남아 있습니다.';
       deleteModalBody.innerHTML =
         `<div><strong>${disp}</strong> 세션을 <strong style="color:#ef4444;">강제로</strong> 삭제합니다.</div>` +
         `<div style="margin-top:8px;">${consequence} 계속하시겠습니까?</div>`;
-      _setConfirmBtn('영구 삭제', true);
+      _setConfirmBtn(check.is_worktree ? '휴지통으로' : '강제 삭제', true);
       _bindConfirm(() => performDelete(name, true));
     }
 

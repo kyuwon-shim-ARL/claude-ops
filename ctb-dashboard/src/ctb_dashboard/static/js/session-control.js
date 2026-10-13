@@ -2791,10 +2791,11 @@
   /* What a delete answer means for the close. A blocked plain session is
    * closed anyway: deleting it only ends tmux, its files and commits stay on
    * disk, and Shift+Q brings it back -- the reasons ride along on the status
-   * line instead of stopping the close. A blocked worktree is different, its
-   * directory and branch go with it, so the first press only arms and a
-   * second press within FORCE_ARM_MS forces it. A forced request that is
-   * still refused is an error, never another retry. */
+   * line instead of stopping the close. A blocked worktree is different, a
+   * force moves its directory and branch to the repo's trash -- restorable,
+   * but gone from where it was and purged after 7 days -- so the first press
+   * only arms and a second press within FORCE_ARM_MS forces it. A forced
+   * request that is still refused is an error, never another retry. */
   var FORCE_ARM_MS = 3000;
   var forceArm = null;
 
@@ -2853,7 +2854,8 @@
         var why = (r.body.check && r.body.check.reasons) || [];
         forceArm = { name: name, until: Date.now() + FORCE_ARM_MS };
         setStatus('닫기 보류 · ' + (why.join(' · ') || '안전하지 않음')
-          + ' · 3초 안에 한 번 더 누르면 워크트리와 브랜치까지 삭제', 'var(--con-warn)');
+          + ' · 3초 안에 한 번 더 누르면 워크트리를 휴지통으로 (7일간 '
+          + (IS_MAC ? 'Option' : 'Alt') + '+Shift+Q로 복원)', 'var(--con-warn)');
       } else if (r.status === 200) {
         setStatus('닫기 실패 · ' + (r.body.error || r.body.status || ''), 'var(--con-err)');
       } else {
