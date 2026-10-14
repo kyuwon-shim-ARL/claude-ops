@@ -4047,20 +4047,36 @@
    * Wrapped tails are the indented lines that follow, to the first blank.
    * Pure; tested. */
   /* One line, one question: is line `i` a prompt the user submitted? Column
-   * zero, something after the \u276f, and no rule above it. Both readers of
-   * this -- recall and the jump-back pill -- must agree on what a turn
-   * boundary is, so there is one copy of the test. Pure; tested. */
+   * zero, something after the \u276f, and no rule above it. findLastSubmitted
+   * (recall) uses this test alone, typed prompts only -- pasting an answer
+   * header into the input box would be useless. submittedLines (the
+   * jump-back pill and the walk) uses this OR isAnsweredQuestion below, since
+   * an answered AskUserQuestion is also a turn the reader can jump back to.
+   * Pure; tested. */
   function isSubmitted(lines, i) {
     if (lines[i].charAt(0) !== '\u276f') return false;
     if (!lines[i].slice(1).replace(/^[\s\u00a0]+|[\s\u00a0]+$/g, '')) return false;
     return !(i > 0 && RULE_RE.test(lines[i - 1]));        /* that is the box */
   }
 
-  /* Every submitted prompt, top to bottom, as line indices. Pure; tested. */
+  /* The header Claude Code prints once the reader has answered an
+   * AskUserQuestion block, flush left like a typed prompt -- the bullet is
+   * "\u25cf" on Linux terminals and "\u23fa" on macOS ones. Prose that merely
+   * mentions the phrase, or the bullet used for something else (e.g.
+   * "\u25cf Bash(...)"), does not match: the whole header text and column
+   * zero are both required. Pure; tested. */
+  var ANSWERED_RE = /^[\u25cf\u23fa]\s*User answered Claude's questions:/;
+
+  function isAnsweredQuestion(lines, i) {
+    return ANSWERED_RE.test(lines[i]);
+  }
+
+  /* Every turn boundary the reader can jump back to, top to bottom, as line
+   * indices: typed prompts plus answered-question headers. Pure; tested. */
   function submittedLines(lines) {
     var out = [];
     for (var i = 0; i < lines.length; i++) {
-      if (isSubmitted(lines, i)) out.push(i);
+      if (isSubmitted(lines, i) || isAnsweredQuestion(lines, i)) out.push(i);
     }
     return out;
   }

@@ -141,3 +141,61 @@ def test_the_pill_and_recall_agree_on_what_a_turn_is():
 
 def test_no_turns_at_all():
     assert submitted(["그냥 출력", "", "  더 많은 출력"]) == []
+
+
+# --- answered AskUserQuestion blocks are also turn boundaries --------------
+
+def test_answered_question_header_counts_as_a_turn_linux_bullet():
+    assert submitted([
+        "❯ 첫 요청",
+        "",
+        "● User answered Claude's questions:",
+        "  ⎿  · 협업 형태를 어떻게 잡을까요? → GitHub 원격 (권장)",
+    ]) == [0, 2]
+
+
+def test_answered_question_header_counts_as_a_turn_macos_bullet():
+    assert submitted([
+        "⏺ User answered Claude's questions:",
+        "  ⎿  · 질문 → 답",
+    ]) == [0]
+
+
+def test_mixed_typed_and_answered_turns_stay_in_order():
+    assert submitted([
+        "❯ 첫 요청",
+        "  답",
+        "",
+        "● User answered Claude's questions:",
+        "  ⎿  · 질문 → 답",
+        "",
+        "❯ 두 번째 요청",
+    ]) == [0, 3, 6]
+
+
+def test_answered_header_must_be_at_column_zero():
+    """Indented into Claude's own prose, this is not a turn boundary."""
+    assert submitted([
+        "❯ 요청",
+        "  User answered Claude's questions:",
+    ]) == [0]
+
+
+def test_bullet_used_for_something_else_is_not_a_turn():
+    """The same bullet introduces ordinary tool-call lines; only the full
+    header phrase makes it a turn boundary."""
+    assert submitted([
+        "● Bash(echo hi)",
+        "  ⎿  hi",
+    ]) == []
+
+
+def test_recall_still_ignores_answered_question_blocks():
+    """findLastSubmitted stays typed-prompts only: pasting an answer header
+    into the input box would be useless."""
+    assert recall([
+        "❯ 실제 요청",
+        "",
+        "● User answered Claude's questions:",
+        "  ⎿  · 질문 → 답",
+    ]) == "실제 요청"
