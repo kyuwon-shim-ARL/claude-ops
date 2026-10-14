@@ -852,13 +852,27 @@
       });
     }
 
-    function moveToQuadrant(name, targetQ) {
-      return _pinChange((q) => {
-        _removeFromQuads(q, name);
-        if (!q[targetQ]) q[targetQ] = [];
-        q[targetQ].push(name);
-        return q;
-      });
+    // The array order is the quadrant's order, so a drop is "put X just before
+    // Y in Q" -- or at the end when there is no Y. Anchored to a name rather
+    // than an index: re-applied to a set another client has changed since,
+    // an index points at whatever slid into that slot, while the name still
+    // means the card the user dropped it above. An anchor that has gone
+    // (unpinned elsewhere) falls back to appending.
+    function _moveBefore(q, name, targetQ, before) {
+      _removeFromQuads(q, name);
+      if (!q[targetQ]) q[targetQ] = [];
+      const at = before ? q[targetQ].indexOf(before) : -1;
+      if (at === -1) q[targetQ].push(name);
+      else q[targetQ].splice(at, 0, name);
+      return q;
+    }
+
+    // A move that leaves every quadrant as it was -- a card dropped back
+    // where it started -- writes nothing and repaints nothing.
+    function moveToQuadrant(name, targetQ, before) {
+      const next = _moveBefore(_cloneQuads(_quadsCache), name, targetQ, before);
+      if (JSON.stringify(next) === JSON.stringify(_quadsCache)) return Promise.resolve(true);
+      return _pinChange((q) => _moveBefore(q, name, targetQ, before));
     }
 
     // --- Notification system ---
@@ -1225,17 +1239,53 @@
     const _STATE_ORDER = { working: 0, stuck_after_agent: 1, waiting: 2,
                            context_limit: 3, error: 4, idle: 5, unknown: 6 };
 
-    // Takes the pinned set rather than fetching it: getPinned() builds a fresh
-    // Set out of four spread arrays, and a comparator is called O(n log n)
-    // times — ~280 of them per render at 71 sessions, on the SSE path.
-    function _bySessionOrder(pinned) {
-      return (a, b) => {
-        const tierDiff = (pinned.has(a.name) ? 0 : 1) - (pinned.has(b.name) ? 0 : 1);
-        if (tierDiff !== 0) return tierDiff;
-        const stateDiff = (_STATE_ORDER[a.state] ?? 9) - (_STATE_ORDER[b.state] ?? 9);
-        if (stateDiff !== 0) return stateDiff;
-        return (b.updated_at || 0) - (a.updated_at || 0);
-      };
+    // Unpinned sessions have no order of their own, so state then recency
+    // decides it, as it always has.
+    function _bySessionState(a, b) {
+      const stateDiff = (_STATE_ORDER[a.state] ?? 9) - (_STATE_ORDER[b.state] ?? 9);
+      if (stateDiff !== 0) return stateDiff;
+      return (b.updated_at || 0) - (a.updated_at || 0);
+    }
+
+    // One quadrant, in display order. Working sessions sit on top, newest
+    // first: they are the ones moving, and nothing needs doing about them.
+    // Everything else keeps its place in the stored pin array, which is the
+    // order the user dragged it into. Waiting is not lifted over idle any
+    // more -- a state sort reshuffled the quadrant every time a session
+    // finished, and the user could never make a session stay where they put
+    // it. Names with no live session are skipped, not dropped from the array.
+    function _quadrantOrder(names, byName) {
+      const seen = new Set();
+      const working = [];
+      const rest = [];
+      for (const n of names) {
+        const s = byName[n];
+        if (!s || seen.has(n)) continue;
+        seen.add(n);
+        (s.state === 'working' ? working : rest).push(s);
+      }
+      working.sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
+      return working.concat(rest);
+    }
+
+    // The rail's order: Q1 to Q4 each in its own order, then everything
+    // unpinned. The grid starts from the same order but groups same-repo
+    // sessions inside a quadrant, so the two can differ there. Takes the sessions to order -- the filtered list
+    // for the strip, all of them for the palette -- so a pinned name the
+    // filter hid does not come back through the pin arrays.
+    function _railOrder(sessions, quads) {
+      const byName = {};
+      for (const s of sessions) byName[s.name] = s;
+      const out = [];
+      const placed = new Set();
+      for (const qid of ['Q1', 'Q2', 'Q3', 'Q4']) {
+        for (const s of _quadrantOrder((quads && quads[qid]) || [], byName)) {
+          if (placed.has(s.name)) continue;
+          placed.add(s.name);
+          out.push(s);
+        }
+      }
+      return out.concat(sessions.filter(s => !placed.has(s.name)).sort(_bySessionState));
     }
 
     function _toOrderItem(s) {
@@ -1299,7 +1349,7 @@
       if (!lastSSEData) return;
       const sessions = lastSSEData.sessions || [];
       const pinned = getPinned();
-      const visible = applyFilters(sessions, pinned).sort(_bySessionOrder(pinned));
+      const visible = _railOrder(applyFilters(sessions, pinned), getQuadrants());
       const shown = new Set(visible.map(s => s.name));
 
       const filterActive = _filterAge !== 'all';
@@ -1801,7 +1851,7 @@
 
       return `
         <div class="group relative overflow-hidden ${cfg.border} draggable-card${freshClass}"
-             data-session-name="${name}" tabindex="0"
+             data-session-name="${name}" data-state="${escapeHtml(session.state || '')}" tabindex="0"
              style="border-radius:20px 20px 16px 20px;background:${wtCardBg};border:1px solid;padding:${cardPadding};box-shadow:${cfg.glow},${t.cardShadowBase};${borderStyle}${wtStripe}${staleOpacity}transition:all 0.3s ease;">
           ${freshBar}
           <div class="long-press-ring"></div>
@@ -1836,6 +1886,13 @@
     // Group sessions in a quadrant by repo (parseSessionName parent/display).
     // Returns ordered array of items: {type:'group', repo, sessions} | {type:'card', session}
     // Singletons (group size 1) render as plain cards. First-occurrence ordering preserved.
+    //
+    // Takes the quadrant already in display order (_quadrantOrder) and keeps
+    // it: a group sits where its first member would, and its members keep
+    // the order they came in. That lets a group pull a lower-ranked session up
+    // next to its repo sibling, which is acceptable -- the sibling is the
+    // reason to look at it, and splitting one repo's sessions across the
+    // quadrant to honour the order exactly would undo what grouping is for.
     function groupQuadrantSessions(sessions) {
       const groupMap = new Map();
       const order = [];
@@ -1854,15 +1911,6 @@
         if (list.length === 1) {
           items.push({ type: 'card', session: list[0] });
         } else {
-          // state priority first; main before wt only as tiebreaker
-          const _gOrd = { working: 0, stuck_after_agent: 1, waiting: 2, error: 3, context_limit: 4, idle: 5, unknown: 6 };
-          list.sort((a, b) => {
-            const sd = (_gOrd[a.state] ?? 5) - (_gOrd[b.state] ?? 5);
-            if (sd !== 0) return sd;
-            const aWt = parseSessionName(a.name).isWorktree ? 1 : 0;
-            const bWt = parseSessionName(b.name).isWorktree ? 1 : 0;
-            return aWt - bWt;
-          });
           items.push({ type: 'group', repo: key, sessions: list });
         }
       }
@@ -1874,7 +1922,7 @@
       const count = group.sessions.length;
       const cardsHtml = group.sessions.map(s => renderCard(s, true)).join('');
       return `
-        <div class="project-group" style="border:1.5px solid ${t.groupBorder};border-radius:14px;padding:8px;background:${t.groupBgTint};box-shadow:${t.groupGlow};">
+        <div class="project-group" data-group-repo="${repoLabel}" style="border:1.5px solid ${t.groupBorder};border-radius:14px;padding:8px;background:${t.groupBgTint};box-shadow:${t.groupGlow};">
           <div style="font-size:10px;font-weight:700;color:${t.groupLabel};padding:2px 4px 8px 4px;display:flex;align-items:center;gap:6px;letter-spacing:0.02em;">
             <span style="font-size:11px;opacity:0.85;">📁</span>
             <span style="font-family:'JetBrains Mono',monospace;font-weight:700;">${repoLabel}</span>
@@ -1957,7 +2005,7 @@
        * to be applied here, which meant every keystroke in the search box
        * tore down every card and re-parsed the whole grid -- on a phone with
        * dozens of sessions the box stopped taking characters. */
-      const all = [...sessions].sort(_bySessionOrder(pinned));
+      const all = _railOrder(sessions, getQuadrants());
 
       /* Everything, filtered or not, in the grid's own order — the console's
        * search reads this. The palette must be able to reach a session the
@@ -2001,16 +2049,7 @@
         html += `<div class="matrix-grid">`;
         for (const qid of ['Q1', 'Q2', 'Q3', 'Q4']) {
           const qcfg = QUAD_CONFIG[qid];
-          // e014-T3: stable sort within quadrant by state priority, then recency (newer first)
-          const _qOrd = { working: 0, stuck_after_agent: 1, waiting: 2, error: 3, context_limit: 4, idle: 5, unknown: 6 };
-          const qRaw = (freshQuads[qid] || []).filter(n => sessionMap[n]);
-          const qSessions = qRaw.map((n, i) => ({ s: sessionMap[n], i }));
-          qSessions.sort((a, b) => {
-            const sd = (_qOrd[a.s.state] ?? 5) - (_qOrd[b.s.state] ?? 5);
-            if (sd !== 0) return sd;
-            // Newer (higher updated_at) floats up, older sinks down
-            return (b.s.updated_at || 0) - (a.s.updated_at || 0);
-          });
+          const qSessions = _quadrantOrder(freshQuads[qid] || [], sessionMap);
 
           html += `<div class="quadrant" data-quadrant="${qid}" style="background:${qcfg.tint};border:1px solid ${qcfg.border};">`;
           html += `<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${t.quadLabelColor};margin-bottom:8px;display:flex;align-items:center;gap:6px;">
@@ -2022,7 +2061,7 @@
            * the filter pass shows one or the other, so hiding the last card in
            * a quadrant does not leave an empty box behind. */
           html += `<div class="quadrant-cards">`;
-          const items = groupQuadrantSessions(qSessions.map(({ s }) => s));
+          const items = groupQuadrantSessions(qSessions);
           for (const item of items) {
             html += item.type === 'group'
               ? renderProjectGroup(item, t)
@@ -2136,6 +2175,95 @@
       }
     }
 
+    // Whether a pointer at (x, y) means "before this card". A card alone on
+    // its row (the phone's single column, or a group's full-width box) is
+    // split top/bottom; one that shares its row is split left/right, which is
+    // how the eye reads a wrapped grid. Anything above the card's row is
+    // before it, anything below is after.
+    function _isBeforeCard(r, x, y, alone) {
+      if (y < r.top) return true;
+      if (y >= r.bottom) return false;
+      return alone ? y < r.top + r.height / 2 : x < r.left + r.width / 2;
+    }
+
+    // Where a drop at (x, y) inside `quad` lands: the session it goes just
+    // before, or null to append. Only non-working cards can be the anchor --
+    // working ones are drawn on top regardless of the array, so dropping
+    // above them means "first of the rest", which is the first non-working
+    // card after the pointer. `rect` is what the insertion line is drawn
+    // against.
+    //
+    // Everything is read off the cards as drawn. render() holds still during
+    // a drag while lastSSEData keeps moving, so a card that turned working
+    // mid-drag is still sitting where the user aimed; asking the newer data
+    // skipped it and dropped the card one slot late.
+    //
+    // A repo group is one box to anything outside that repo: its members are
+    // drawn together at the first member's slot, so a non-member aimed
+    // between them is stored before the first member, which is where it will
+    // be drawn. Only the repo's own sessions can be placed among its members.
+    function _dropTarget(quad, x, y, dragged) {
+      const p = parseSessionName(dragged);
+      const draggedRepo = p.isWorktree ? p.parent : p.display;
+      const items = [];
+      const groups = new Set();
+      for (const c of quad.querySelectorAll('[data-session-name]')) {
+        if (!_isCardVisible(c)) continue;
+        const g = c.closest('.project-group');
+        const own = c.dataset.sessionName === dragged;
+        if (g && !own && g.dataset.groupRepo !== draggedRepo) {
+          if (groups.has(g)) continue;
+          groups.add(g);
+          items.push({ name: c.dataset.sessionName, state: c.dataset.state, r: g.getBoundingClientRect() });
+          continue;
+        }
+        items.push({ name: c.dataset.sessionName, state: c.dataset.state, r: c.getBoundingClientRect(), own });
+      }
+      // The dragged card still holds its cell while it is dragged, so it
+      // counts when deciding who shares a row -- leaving it out made its
+      // row-mate look alone and a drop back in place land after it.
+      for (const c of items) {
+        c.alone = !items.some(o => o !== c && o.r.top < c.r.bottom && o.r.bottom > c.r.top);
+      }
+      const cards = items.filter(c => !c.own);
+      const rest = cards.filter(c => c.state !== 'working');
+      for (const c of rest) {
+        if (_isBeforeCard(c.r, x, y, c.alone)) return { before: c.name, rect: c.r, alone: c.alone, edge: 'start' };
+      }
+      // Appending: the line goes after the last non-working card, or after
+      // the working ones when that is all the quadrant holds.
+      const last = rest[rest.length - 1] || cards[cards.length - 1];
+      return last ? { before: null, rect: last.r, alone: last.alone, edge: 'end' }
+                  : { before: null, rect: null };
+    }
+
+    // The insertion line: one fixed element, moved rather than recreated on
+    // every pointermove, and hidden (not removed) between drags.
+    let _dropMarker = null;
+    function _showDropMarker(t) {
+      if (!t || !t.rect) { _hideDropMarker(); return; }
+      if (!_dropMarker) {
+        _dropMarker = document.createElement('div');
+        _dropMarker.setAttribute('data-drop-marker', '');
+        _dropMarker.style.cssText = 'position:fixed;pointer-events:none;z-index:9998;'
+          + 'background:#60a5fa;border-radius:2px;box-shadow:0 0 6px rgba(96,165,250,0.8);';
+        document.body.appendChild(_dropMarker);
+      }
+      const r = t.rect;
+      const m = _dropMarker.style;
+      if (t.alone) {
+        m.left = r.left + 'px'; m.width = r.width + 'px'; m.height = '3px';
+        m.top = ((t.edge === 'start' ? r.top - 4 : r.bottom + 1)) + 'px';
+      } else {
+        m.top = r.top + 'px'; m.height = r.height + 'px'; m.width = '3px';
+        m.left = ((t.edge === 'start' ? r.left - 4 : r.right + 1)) + 'px';
+      }
+      m.display = 'block';
+    }
+    function _hideDropMarker() {
+      if (_dropMarker) _dropMarker.style.display = 'none';
+    }
+
     function activateDrag() {
       if (!_dragState) return;
       isDragging = true;
@@ -2213,9 +2341,12 @@
       _ghostEl.style.display = '';
 
       document.querySelectorAll('.quadrant').forEach(q => q.classList.remove('drag-over'));
-      if (el) {
-        const quad = el.closest('.quadrant');
-        if (quad) quad.classList.add('drag-over');
+      const quad = el && el.closest('.quadrant');
+      if (quad) {
+        quad.classList.add('drag-over');
+        _showDropMarker(_dropTarget(quad, e.clientX, e.clientY, _dragState.sessionName));
+      } else {
+        _hideDropMarker();
       }
       resetDragTimeout();
     }
@@ -2261,9 +2392,10 @@
         if (el && _dragState) {
           const quad = el.closest('[data-quadrant]');
           if (quad) {
-            moveToQuadrant(_dragState.sessionName, quad.dataset.quadrant).then(() => {
-              if (lastSSEData) render(lastSSEData);
-            });
+            const target = _dropTarget(quad, x, y, _dragState.sessionName);
+            // No repaint chained here: _pinChange paints the move itself,
+            // and a move that changed nothing should not repaint at all.
+            moveToQuadrant(_dragState.sessionName, quad.dataset.quadrant, target.before);
           }
         }
       }
@@ -2276,6 +2408,7 @@
       }
 
       document.querySelectorAll('.quadrant').forEach(q => q.classList.remove('drag-over'));
+      _hideDropMarker();
       isDragging = false;
       _dragConfirmed = false;
       _dragState = null;
@@ -2294,6 +2427,7 @@
         }
       }
       document.querySelectorAll('.quadrant').forEach(q => q.classList.remove('drag-over'));
+      _hideDropMarker();
       isDragging = false;
       _dragConfirmed = false;
       _dragState = null;
@@ -2603,6 +2737,9 @@
         return _pinChange((q) => { _removeFromQuads(q, name); return q; });
       }
       if (!QUAD_LABELS[qid]) return Promise.resolve();
+      // Already there: appending would send it to the end of the order the
+      // user set, which picking the same importance never meant.
+      if ((_quadsCache[qid] || []).includes(name)) return Promise.resolve(true);
       return moveToQuadrant(name, qid);
     };
     window.ctbQuadLabels = QUAD_LABELS;
