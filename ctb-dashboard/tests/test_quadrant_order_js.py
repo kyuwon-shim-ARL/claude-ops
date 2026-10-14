@@ -3,9 +3,9 @@
 The queue (`queue` in the pin set) is a list of session names meaning "do
 these in this order". Inside a quadrant, working sessions sit on top, newest
 first; then the queued ones, by their number; then the rest, newest first. The
-console rail walks the queue first -- whatever state its sessions are in --
+console rail puts every working session first, then the queue in queue order,
 then the remaining pinned sessions Q1 to Q4, then everything unpinned the way
-it always was.
+it always was -- so the first chip that is not working is queue #1.
 
 The functions are pure and live inline in index.html, which cannot be
 required as a whole (it is inline script with Jinja placeholders), so each one
@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 INDEX_HTML = Path(__file__).resolve().parents[1] / "src/ctb_dashboard/templates/index.html"
+CONSOLE_JS = Path(__file__).resolve().parents[1] / "src/ctb_dashboard/static/js/session-control.js"
 
 pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 
@@ -40,16 +41,21 @@ def _fn(html: str, name: str) -> str:
     raise AssertionError(f"unbalanced braces in {name}")
 
 
-NAMES = ["parseSessionName", "groupQuadrantSessions", "_bySessionState",
+NAMES = ["_isBusyState", "parseSessionName", "groupQuadrantSessions", "_bySessionState",
          "_byRecency", "_queueNumbers", "_quadrantOrder", "_railOrder",
          "_removeFromQuads", "_cloneQuads", "_queueInsert", "_queueRemove",
-         "_queueSlotAt"]
+         "_queueSlotAt", "_queueDead", "_queuePrune"]
 
 
 def _source(html: str | None = None) -> str:
     html = html if html is not None else INDEX_HTML.read_text()
     state_order = re.search(r"const _STATE_ORDER = \{[^}]*\};", html).group(0)
-    return state_order + "\n" + "\n".join(_fn(html, n) for n in NAMES)
+    # The busy predicate is the console's (index.html reads it off window),
+    # so the real one is cut out of session-control.js and installed there.
+    js = CONSOLE_JS.read_text()
+    busy = (re.search(r"var BUSY_STATES = \{[^}]*\};", js).group(0) + "\n"
+            + _fn(js, "isBusyState") + "\nconst window = { ctbIsBusyState: isBusyState };\n")
+    return busy + state_order + "\n" + "\n".join(_fn(html, n) for n in NAMES)
 
 
 def _run(expr: str, html: str | None = None):
@@ -166,7 +172,7 @@ def _rail(sessions, quads, html=None):
         html)
 
 
-def test_rail_walks_the_queue_then_quadrants_then_unpinned():
+def test_rail_puts_working_first_then_the_queue_then_quadrants_then_unpinned():
     sessions = [
         _s("claude_u_idle", "idle", 999),
         _s("claude_u_work", "working", 1),
@@ -183,15 +189,51 @@ def test_rail_walks_the_queue_then_quadrants_then_unpinned():
              "Q3": ["claude_q3_queued_working"], "Q4": ["claude_q4"],
              "queue": ["claude_q3_queued_working", "claude_u_queued"]}
     assert _rail(sessions, quads) == [
-        # The queue first, whatever state it is in and pinned or not.
-        "claude_q3_queued_working", "claude_u_queued",
-        # Then each quadrant: working first, then newest first.
-        "claude_q1_work", "claude_q1_idle",
+        # Every working session first, in the order the rest of the walk
+        # would have put them: queued, then Q1..Q4, then unpinned.
+        "claude_q3_queued_working", "claude_q1_work", "claude_q4", "claude_u_work",
+        # Then the queue, pinned or not.
+        "claude_u_queued",
+        # Then each quadrant, newest first.
+        "claude_q1_idle",
         "claude_q2_new", "claude_q2_old",
-        "claude_q4",
         # Unpinned keep the old rule: state first, then recency.
-        "claude_u_work", "claude_u_idle",
+        "claude_u_idle",
     ]
+
+
+def test_the_first_chip_not_working_is_queue_number_one():
+    """Ctrl+\\ (the console's firstIdle) lands on the leftmost chip that is
+    not working -- which has to be the most important idle session."""
+    sessions = [
+        _s("claude_free_work", "working", 9),
+        _s("claude_q2nd", "working", 1),
+        _s("claude_q1st", "idle", 1),
+        _s("claude_q3rd", "waiting", 1),
+        _s("claude_other", "idle", 999),
+    ]
+    quads = {"Q1": ["claude_other"], "Q2": [], "Q3": [], "Q4": [],
+             "queue": ["claude_q1st", "claude_q2nd", "claude_q3rd"]}
+    order = _rail(sessions, quads)
+    assert order == ["claude_q2nd", "claude_free_work",
+                     "claude_q1st", "claude_q3rd", "claude_other"]
+    first_idle = next(n for n, st in zip(order, [
+        {s["name"]: s["state"] for s in sessions}[n] for n in order]) if st != "working")
+    assert first_idle == "claude_q1st"
+
+
+@pytest.mark.parametrize("busy", ["working", "overloaded", "scheduled"])
+def test_every_busy_state_goes_to_the_front(busy):
+    sessions = [_s("claude_q", "idle", 1), _s("claude_b", busy, 1)]
+    quads = {"Q1": [], "Q2": [], "Q3": [], "Q4": [], "queue": ["claude_q"]}
+    assert _rail(sessions, quads) == ["claude_b", "claude_q"]
+
+
+@pytest.mark.parametrize("st", ["waiting", "error", "stuck_after_agent", "idle", "unknown"])
+def test_states_that_need_the_user_stay_in_the_queue(st):
+    sessions = [_s("claude_q", st, 1), _s("claude_w", "working", 1)]
+    quads = {"Q1": [], "Q2": [], "Q3": [], "Q4": [], "queue": ["claude_q"]}
+    assert _rail(sessions, quads) == ["claude_w", "claude_q"]
 
 
 def test_rail_without_a_queue_key_is_the_quadrant_walk():
@@ -296,6 +338,46 @@ def test_remove_after_it_was_already_removed_elsewhere():
     assert _run("_queueRemove({Q1: [], Q2: [], Q3: [], Q4: []}, 'x').queue") == []
 
 
+# --- clearing out closed sessions -----------------------------------------------
+
+def test_dead_names_are_the_queued_ones_with_no_session():
+    sessions = [_s("claude_a"), _s("claude_b")]
+    assert _run(f"_queueDead({json.dumps(['claude_x', 'claude_a', 'claude_y', 'claude_x', 'claude_b'])}, "
+                f"{json.dumps(_by_name(sessions))})") == ["claude_x", "claude_y"]
+
+
+def test_no_queue_no_dead():
+    assert _run("_queueDead(undefined, {})") == []
+
+
+def test_prune_removes_exactly_the_dead_names():
+    out = _run("_queuePrune({Q1: ['claude_a'], Q2: [], Q3: [], Q4: [],"
+               " queue: ['claude_x', 'claude_a', 'claude_y', 'claude_new']},"
+               " ['claude_x', 'claude_y'], {claude_a: {}}).queue")
+    # claude_new was added by another client after the click: not dead to us.
+    assert out == ["claude_a", "claude_new"]
+
+
+def test_prune_spares_a_session_restored_in_the_meantime():
+    # claude_x was dead when clicked, but by the time the write is re-applied
+    # it has come back.
+    out = _run("_queuePrune({Q1: [], Q2: [], Q3: [], Q4: [], queue: ['claude_x', 'claude_y']},"
+               " ['claude_x', 'claude_y'], {claude_x: {}}).queue")
+    assert out == ["claude_x"]
+
+
+def test_prune_against_an_empty_snapshot_removes_nothing():
+    out = _run("_queuePrune({Q1: [], Q2: [], Q3: [], Q4: [], queue: ['claude_x', 'claude_y']},"
+               " ['claude_x', 'claude_y'], {}).queue")
+    assert out == ["claude_x", "claude_y"]
+
+
+def test_prune_leaves_the_quadrants_alone():
+    out = _run("_queuePrune({Q1: ['claude_x'], Q2: [], Q3: [], Q4: [], queue: ['claude_x']},"
+               " ['claude_x'], {claude_other: {}})")
+    assert out["Q1"] == ["claude_x"] and out["queue"] == []
+
+
 # --- where a pointer lands among the rows --------------------------------------
 
 def _rect(left, top, width=100, height=30):
@@ -325,6 +407,16 @@ def test_slot_at(rects, x, y, expected):
 
 # --- mutation checks ------------------------------------------------------------
 
+def test_mutation_without_the_working_partition_the_queue_leads_again():
+    html = INDEX_HTML.read_text()
+    fn = _fn(html, "_railOrder")
+    assert "_isBusyState(s.state)" in fn, "expected the busy partition in _railOrder"
+    mutated_fn = fn.replace("!_isBusyState(s.state)", "true").replace("_isBusyState(s.state)", "false")
+    sessions = [_s("claude_w", "working", 1), _s("claude_q", "idle", 1)]
+    quads = {"Q1": [], "Q2": [], "Q3": [], "Q4": [], "queue": ["claude_q"]}
+    assert _rail(sessions, quads, html.replace(fn, mutated_fn)) != ["claude_w", "claude_q"]
+
+
 def test_mutation_queue_order_is_what_orders_the_queued_sessions():
     """Sort the queued sessions by recency instead of their number and the
     queue-order test must fail."""
@@ -349,7 +441,7 @@ def test_mutation_a_clone_that_forgets_the_queue_is_caught():
     assert out != ["x"]
 
 
-def test_mutation_the_rail_puts_the_queue_first():
+def test_mutation_the_rail_puts_the_queue_before_the_quadrants():
     html = INDEX_HTML.read_text()
     fn = _fn(html, "_railOrder")
     mutated_fn = fn.replace("_queueNumbers(", "(() => ({}))(")

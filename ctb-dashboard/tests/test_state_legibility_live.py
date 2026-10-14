@@ -111,11 +111,13 @@ def test_the_rail_follows_a_state_change(board):
     assert "유휴" in chip_text(board, "claude_alpha")
 
 
-def test_the_rail_updates_without_rebuilding_or_reordering(board):
+def test_the_rail_updates_without_rebuilding(board):
     """A chip that is replaced is a chip that moves out from under the hand.
 
     A property set on a live node cannot survive replacement, so it answers
-    the only question that matters: is this the same chip?
+    the only question that matters: is this the same chip? It may MOVE --
+    a session that stops working leaves the working block at the rail's
+    front -- but it is moved, not rebuilt, and only to the board's order.
     """
     open_console(board)
     before = board.eval_on_selector_all(
@@ -127,7 +129,9 @@ def test_the_rail_updates_without_rebuilding_or_reordering(board):
         f'{CHIP}[data-switch-session="claude_alpha"]', "c => c.__probe") == "kept"
     after = board.eval_on_selector_all(
         CHIP, "c => c.map(x => x.dataset.switchSession)")
-    assert after == before, "the rail re-sorted under the user"
+    want = board.evaluate("() => window.ctbSessionOrder.map(x => x.name)")
+    assert sorted(after) == sorted(before)
+    assert after == [n for n in want if n in after], "the rail is not in the board's order"
 
 
 def test_the_open_session_keeps_its_chip_when_it_ends(board):

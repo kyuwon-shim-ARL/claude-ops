@@ -323,9 +323,12 @@ def open_board(theme=None):
                 # Mutable, so a test can change what the board sees next and
                 # then force a refetch -- the only way to assert on what the
                 # console's rail does when a session changes state under it.
+                # A fresh stamp per answer, as the server's poller gives every
+                # poll its own updated_at: the board tells snapshots apart by it.
+                page.ctb_polls = getattr(page, "ctb_polls", 0) + 1
                 return r.fulfill(status=200, content_type="application/json",
                                  body=json.dumps({"sessions": page.ctb_sessions,
-                                                  "updated_at": NOW}))
+                                                  "updated_at": NOW + page.ctb_polls}))
             if path.startswith("/static/"):
                 f = SRC / path.lstrip("/")
                 if not f.exists():

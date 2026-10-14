@@ -375,6 +375,7 @@
 
   <section id="queue-panel" aria-label="처리 순서" style="display:none;padding:12px 20px 0;">
     <div id="queue-list" role="list"></div>
+    <button id="queue-prune" type="button" data-queue-prune style="display:none;margin:6px 0 0 auto;padding:3px 10px;border-radius:99px;font-size:11px;background:transparent;cursor:pointer;" title="닫힌 세션의 자리를 처리 순서에서 지웁니다"></button>
   </section>
 
   <main id="grid" class="p-5 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -991,6 +992,62 @@
       return q;
     }
 
+    // Queued names with no live session, each once. They stay stored on
+    // purpose -- a closed session restored with Alt+Shift+Q comes back in its
+    // place -- but nothing would ever take them out, so the panels offer to.
+    function _queueDead(queue, byName) {
+      const out = [];
+      for (const name of queue || []) {
+        if (!byName[name] && !out.includes(name)) out.push(name);
+      }
+      return out;
+    }
+
+    // Take out the names that were dead when the user asked, unless they have
+    // come back since: `byName` is read when this is re-applied to the
+    // server's copy, not when it was clicked. Names added meanwhile were
+    // never in `dead` and stay.
+    function _queuePrune(q, dead, byName) {
+      // A snapshot with no sessions at all is a missed poll, not every
+      // session ending: it proves nothing about any name, so nothing goes.
+      if (!Object.keys(byName).length) return q;
+      const gone = new Set(dead.filter(n => !byName[n]));
+      q.queue = (q.queue || []).filter(n => !gone.has(n));
+      return q;
+    }
+
+    // How many snapshots in a row each queued name has been missing from.
+    // A name counts as closed only after two: one gap is a poll that missed
+    // it, or a session restored a moment ago that the next poll will show.
+    let _queueMissing = {};
+    let _queueMissingSeen = null;
+
+    function _countQueueMissing(data) {
+      // A snapshot is a server poll, not an object: an SSE reconnect re-sends
+      // the cached state and the poll fallback can return the same poll, and
+      // counting those twice would offer a session as closed after one miss.
+      const stamp = (data && data.updated_at) || data;
+      if (stamp === _queueMissingSeen) return;
+      _queueMissingSeen = stamp;
+      if (!Object.keys(_queueByName).length) return;   // a missed poll proves nothing
+      const next = {};
+      for (const n of _queueDead(_quadsCache.queue, _queueByName)) next[n] = (_queueMissing[n] || 0) + 1;
+      _queueMissing = next;
+    }
+
+    // The closed sessions the panels offer to clear: none while the list is
+    // empty, and only names missing from two snapshots running.
+    function _queueDeadConfirmed() {
+      if (!Object.keys(_queueByName).length) return [];
+      return _queueDead(_quadsCache.queue, _queueByName).filter(n => (_queueMissing[n] || 0) >= 2);
+    }
+
+    function queuePrune() {
+      const dead = _queueDeadConfirmed();
+      if (!dead.length) return Promise.resolve(true);
+      return _pinChange((q) => _queuePrune(q, dead, _queueByName));
+    }
+
     // Both write only when the queue actually changes: a row dropped back in
     // its own slot is not a pin write.
     function _queueChange(edit) {
@@ -1421,11 +1478,21 @@
       return working.concat(inQueue, rest);
     }
 
-    // The rail's order: the queue first, in queue order and whatever state its
-    // sessions are in -- a working one keeps its place, and the leftmost-idle
-    // jump already steps over working chips, so Ctrl+\ lands on the next
-    // thing to do. Then the remaining pinned sessions Q1 to Q4, then
-    // everything unpinned. The grid groups same-repo sessions inside a
+    // Busy is "needs nothing from the user" -- working, overloaded,
+    // scheduled. The one definition lives in session-control.js, which loads
+    // first, so the rail and the console's walks can never disagree on it.
+    function _isBusyState(st) {
+      return window.ctbIsBusyState(st);
+    }
+
+    // The rail's order: every busy session first, then the queue in queue
+    // order, then the remaining pinned sessions Q1 to Q4, then everything
+    // unpinned. Built as one walk (queue, quadrants, unpinned) and then
+    // stably split on busy, so both halves keep that walk's order: the busy
+    // chips sit together at the front, out of the way, and the first chip
+    // that needs something is queue #1 when it is idle or waiting --
+    // which is where Ctrl+\ (the console's leftmost-idle jump) lands. The
+    // grid groups same-repo sessions inside a
     // quadrant, so the two can differ there. Takes the sessions to order --
     // the filtered list for the strip, all of them for the palette -- so a
     // pinned or queued name the filter hid does not come back.
@@ -1443,7 +1510,8 @@
           out.push(s);
         }
       }
-      return out.concat(sessions.filter(s => !placed.has(s.name)).sort(_bySessionState));
+      const all = out.concat(sessions.filter(s => !placed.has(s.name)).sort(_bySessionState));
+      return all.filter(s => _isBusyState(s.state)).concat(all.filter(s => !_isBusyState(s.state)));
     }
 
     function _toOrderItem(s) {
@@ -2110,6 +2178,8 @@
     const queueList = document.getElementById('queue-list');
     const btnQueue = document.getElementById('btn-queue');
     const queueCount = document.getElementById('queue-count');
+    const queuePrune_ = document.getElementById('queue-prune');
+    queuePrune_.addEventListener('click', () => { queuePrune(); });
     let _queueOpen = false;
     try { _queueOpen = localStorage.getItem(QUEUE_OPEN_KEY) === '1'; } catch (_) { /* no storage: closed */ }
 
@@ -2124,6 +2194,7 @@
     function _publishQueue() {
       window.ctbQueue = _queueLive();
       window.ctbQueueOf = Object.assign({}, _queueNum);
+      window.ctbQueueDead = _queueDeadConfirmed().length;
     }
 
     function renderQueuePanel() {
@@ -2139,6 +2210,11 @@
       if (!_queueOpen) return;
 
       const t = getThemeColors();
+      const dead = _queueDeadConfirmed().length;
+      queuePrune_.textContent = `종료된 세션 ${dead}개 정리`;
+      queuePrune_.style.display = dead ? 'block' : 'none';
+      queuePrune_.style.color = t.textSecondary;
+      queuePrune_.style.border = '1px solid ' + t.badgeBorder;
       const STATE_CONFIG = getStateConfig();
       queueList.style.background = t.badgeBg;
       queueList.style.border = '1px solid ' + t.badgeBorder;
@@ -2267,6 +2343,7 @@
         window.ctbQuadOf = _quadOfMap();
         _queueByName = {};
         _queueNum = {};
+        _countQueueMissing(data);
         _publishQueue();
         renderQueuePanel();
         _publishSessions();
@@ -2306,6 +2383,7 @@
       _queueByName = {};
       for (const s of sessions) _queueByName[s.name] = s;
       _queueNum = _queueNumbers(getQuadrants().queue, _queueByName);
+      _countQueueMissing(data);
 
       /* Everything, filtered or not, in the grid's own order — the console's
        * search reads this. The palette must be able to reach a session the
@@ -2435,7 +2513,8 @@
     }
 
     // Cards and the queue's rows lift the same way. A row only moves within
-    // the queue or out of it; a card can go to a quadrant or into the queue.
+    // the queue -- dropped anywhere else it goes back where it was, and × is
+    // the one way out; a card can go to a quadrant or into the queue.
     function initDrag(e) {
       const row = e.target.closest('[data-queue-row]');
       const card = row || e.target.closest('[data-session-name]');
@@ -2614,9 +2693,6 @@
         const quad = !_dragState.fromQueue && el && el.closest('.quadrant');
         if (quad) quad.classList.add('drag-over');
       }
-      // A row carried out of the panel is on its way out of the queue, and
-      // fades to say so before it is let go.
-      if (_dragState.fromQueue) _ghostEl.style.opacity = inQueue ? '' : '0.4';
       resetDragTimeout();
     }
 
@@ -2666,9 +2742,7 @@
           if (_queueOpen && el && el.closest('#queue-list')) {
             const target = _queueDropTarget(x, y, name);
             if (!target.unchanged) queueInsert(name, target.before);
-          } else if (_dragState.fromQueue) {
-            queueRemove(name);
-          } else if (quad) {
+          } else if (quad && !_dragState.fromQueue) {
             moveToQuadrant(name, quad.dataset.quadrant);
           }
         }
@@ -3025,6 +3099,7 @@
     window.ctbQueueInsert = queueInsert;
     window.ctbQueueRemove = queueRemove;
     window.ctbQueueSlotAt = _queueSlotAt;
+    window.ctbQueuePrune = queuePrune;
 
     /* A drag in progress, or a long-press that is about to become one. The
      * board's own render() already refuses to repaint mid-drag; anything that

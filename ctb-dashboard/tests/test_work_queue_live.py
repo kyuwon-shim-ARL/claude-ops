@@ -245,14 +245,103 @@ def test_the_cross_removes(queued):
     assert badge(queued, "claude_two") is None
 
 
-def test_dragging_a_row_out_of_the_panel_removes_it(queued):
+def test_dropping_a_row_outside_the_list_does_nothing(queued):
+    """A long press released a few pixels off the list is a slip, not a
+    decision; the cross is the one way out of the queue."""
     open_panel(queued)
     q4 = box(queued, '[data-quadrant="Q4"]')
     mouse_drag(queued, row("claude_beta"), q4["x"] + 20, q4["y"] + 20)
-    w = last_write(queued)
-    assert w["queue"] == ["claude_two", "claude_gone"]
-    # Out of the queue, not into Q4.
-    assert w["Q4"] == [] and w["Q2"] == ["claude_beta"]
+    assert no_write(queued), queued.ctb_posted
+    assert rows(queued) == ["1:claude_two", "2:claude_beta"]
+
+
+def test_dropping_a_row_on_the_panels_own_padding_does_nothing(queued):
+    open_panel(queued)
+    lst = box(queued, "#queue-list")
+    # The section pads the list by 12px above it.
+    mouse_drag(queued, row("claude_beta"), lst["x"] + 30, lst["y"] - 5)
+    assert no_write(queued), queued.ctb_posted
+
+
+def test_an_unpinned_card_dropped_on_a_quadrant_is_pinned_there(board):
+    """With the panel open an unpinned card lifts; putting it in a quadrant
+    pins it there, the way a quadrant means on the board."""
+    board.set_viewport_size({"width": 1280, "height": 1600})
+    open_panel(board)
+    q3 = box(board, '[data-quadrant="Q3"]')
+    mouse_drag(board, card("claude_loose"), q3["x"] + q3["width"] / 2, q3["y"] + q3["height"] - 10)
+    w = last_write(board)
+    assert w["Q3"] == ["claude_loose"]
+    assert w["queue"] == []
+
+
+# --- closed sessions -------------------------------------------------------------
+
+def prune_text(page):
+    return page.evaluate(
+        "() => { const b = document.querySelector('#queue-panel [data-queue-prune]');"
+        " return b && getComputedStyle(b).display !== 'none' ? b.textContent.trim() : null; }")
+
+
+def refetch(page):
+    """A fresh /api/sessions snapshot, through the board's own refetch path."""
+    page.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
+    page.wait_for_timeout(150)
+
+
+def test_closed_sessions_can_be_cleared_from_the_queue(queued):
+    open_panel(queued)
+    refetch(queued)
+    refetch(queued)
+    assert prune_text(queued) == "종료된 세션 1개 정리"
+    queued.click("#queue-panel [data-queue-prune]")
+    assert last_write(queued)["queue"] == ["claude_two", "claude_beta"]
+    queued.wait_for_timeout(150)
+    assert prune_text(queued) is None
+    assert rows(queued) == ["1:claude_two", "2:claude_beta"]
+
+
+def test_no_clear_control_when_nothing_is_closed(board):
+    open_panel(board)
+    assert prune_text(board) is None
+
+
+def test_a_session_ending_is_offered_only_after_two_snapshots(queued):
+    open_panel(queued)
+    refetch(queued)
+    refetch(queued)
+    queued.ctb_drop_session("claude_two")      # first snapshot without it
+    assert prune_text(queued) == "종료된 세션 1개 정리"
+    refetch(queued)                            # second
+    assert prune_text(queued) == "종료된 세션 2개 정리"
+
+
+def test_one_missing_snapshot_is_not_a_closed_session(queued):
+    open_panel(queued)
+    refetch(queued)
+    refetch(queued)
+    queued.ctb_drop_session("claude_two")
+    # It comes back on the next poll (restored, or the poll just missed it).
+    queued.ctb_sessions.append(live_board._session("claude_two", state="idle"))
+    queued.ctb_gone.discard("claude_two")
+    refetch(queued)
+    refetch(queued)
+    assert prune_text(queued) == "종료된 세션 1개 정리"   # only claude_gone
+
+
+def test_an_empty_snapshot_hides_the_clear_control(queued):
+    """A poll that comes back with no sessions at all is a missed poll; it must
+    not make every queued name look closed."""
+    open_panel(queued)
+    refetch(queued)
+    refetch(queued)
+    assert prune_text(queued) == "종료된 세션 1개 정리"
+    queued.ctb_sessions[:] = []
+    refetch(queued)
+    assert prune_text(queued) is None
+    refetch(queued)
+    assert prune_text(queued) is None
+    assert no_write(queued), queued.ctb_posted
 
 
 def test_tapping_a_row_opens_that_session(queued):

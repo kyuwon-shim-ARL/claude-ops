@@ -425,7 +425,9 @@
       '#ctb-console .con-qrow{display:flex;align-items:center;gap:6px;flex:0 1 auto;max-width:100%;',
       'min-height:34px;padding:0 2px 0 10px;border-radius:999px;cursor:pointer;color:var(--con-text);',
       'background:var(--con-btn);font:500 12px/1 ui-sans-serif,system-ui,sans-serif;',
-      'touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;',
+      /* pan-y: a swipe over the rows scrolls the panel. A finger drags only
+       * from the grip (con-qgrip); a mouse can take the row anywhere. */
+      'touch-action:pan-y;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;',
       '-webkit-tap-highlight-color:transparent}',
       '#ctb-console .con-qrow[aria-current="true"]{font-weight:700;box-shadow:inset 0 0 0 1.5px var(--con-accent)}',
       '#ctb-console .con-qrow:focus-visible{outline:2px solid var(--con-accent);outline-offset:1px}',
@@ -436,6 +438,12 @@
       "#ctb-console .con-qquad[data-quad='Q2']{--q:var(--con-q2)}",
       "#ctb-console .con-qquad[data-quad='Q3']{--q:var(--con-q3)}",
       "#ctb-console .con-qquad[data-quad='Q4']{--q:var(--con-q4)}",
+      /* The grip is the touch drag's one handle: touch-action:none there,
+       * so a long press holds even if the finger drifts, while the rest of
+       * the row keeps pan-y and a swipe scrolls the panel. */
+      '#ctb-console .con-qgrip{display:inline-flex;align-items:center;justify-content:center;',
+      'width:22px;align-self:stretch;margin-left:-6px;flex-shrink:0;color:var(--con-muted);',
+      'touch-action:none;cursor:grab;font-size:12px;letter-spacing:-2px}',
       '#ctb-console .con-qname{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3}',
       '#ctb-console .con-qx{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;',
       'flex-shrink:0;border:0;border-radius:999px;background:transparent;color:var(--con-muted);cursor:pointer;',
@@ -447,6 +455,11 @@
       'touch-action:manipulation}',
       '#ctb-console .con-qadd:disabled{opacity:.4;cursor:default}',
       '#ctb-console .con-qadd:focus-visible{outline:2px solid var(--con-accent);outline-offset:1px}',
+      '#ctb-console .con-qprune{min-height:34px;padding:0 12px;border:0;border-radius:999px;cursor:pointer;',
+      'background:transparent;color:var(--con-muted);font:500 12px/1 ui-sans-serif,system-ui,sans-serif;',
+      'box-shadow:inset 0 0 0 1px var(--con-line);touch-action:manipulation}',
+      '@media(hover:hover){#ctb-console .con-qprune:hover{color:var(--con-text)}}',
+      '#ctb-console .con-qprune:focus-visible{outline:2px solid var(--con-accent);outline-offset:1px}',
       '#ctb-console .con-qhint{font-size:11px;color:var(--con-muted);padding:0 8px}',
       "#ctb-console .con-chip-q{font:700 9px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;",
       'color:var(--con-accent);flex-shrink:0}',
@@ -595,6 +608,11 @@
       'scrollbar-width:none',
     ].join(';');
     makePannable(strip);
+    strip.addEventListener('pointerdown', function () { stripPressed = true; });
+    document.addEventListener('pointerup', function () { stripPressed = false; }, true);
+    document.addEventListener('pointercancel', function () { stripPressed = false; }, true);
+    /* A release outside the window never reaches the document. */
+    window.addEventListener('blur', function () { stripPressed = false; });
 
     /* Back to the first chip, pinned to the rail's right edge.
      *
@@ -1532,6 +1550,18 @@
 
   function stateText(st) { return STATE_TEXT[st] || STATE_TEXT.unknown; }
 
+  /* The states that need nothing from the user: the session is getting on
+   * with it (working), retrying on its own (overloaded) or will be woken by a
+   * cron job (scheduled). Everything else -- waiting, error, stuck, idle,
+   * unknown -- is something to look at. One predicate for every place that
+   * asks: the rail's front block (index.html's _railOrder reads it through
+   * window.ctbIsBusyState), the chips' dimming and Ctrl+\. Not the digits
+   * or ] and [: those visit every chip, busy ones included, because a
+   * session read as working may be stuck or misread and only a look tells. */
+  var BUSY_STATES = { working: true, overloaded: true, scheduled: true };
+  function isBusyState(st) { return BUSY_STATES[st] === true; }
+  window.ctbIsBusyState = isBusyState;
+
   /* Transitions worth interrupting for: the ones that end with the session
    * wanting something from you, plus work finishing. Everything else --
    * 유휴 → 작업중 most of all, which is just the machine getting on with it --
@@ -2175,7 +2205,7 @@
       paintChipName(chip, item);
       paintChipQueue(chip);
       chip.setAttribute('data-chip-state', item.state);
-      if (item.state === 'working') chip.setAttribute('data-busy', '');
+      if (isBusyState(item.state)) chip.setAttribute('data-busy', '');
       else chip.removeAttribute('data-busy');
       var quad = chip.getAttribute('data-quad');
       var ctxW = ctxWord(item.context_percent);
@@ -2198,10 +2228,49 @@
     for (var j = 0; j < railList.length; j++) {
       if (!seen[railList[j].name]) appendChip(railList[j], j);
     }
-    /* States were patched in place above and the rail is deliberately not
-     * re-sorted, so a busy/idle boundary can appear or move anywhere in the
-     * middle of it -- recomputed from the actual DOM order every time,
-     * rather than only at build time. */
+    resortStrip(railList);
+    /* resortStrip holds off while the rail is in use, so until it catches up
+     * a busy/idle boundary can sit anywhere in the middle -- recomputed from
+     * the actual DOM order every time, rather than only at build time. */
+    paintRunDividers();
+  }
+
+  /* The board's order is working sessions first, so a session finishing or
+   * starting work moves -- and a rail that kept its build-time order drifted:
+   * an idle chip stranded inside the working block, a second divider. The
+   * chips are moved, not rebuilt (a moved node is still the node under the
+   * hand), and only while nobody is using the rail: not while the digit
+   * numbers are frozen on it, not while a finger or button is down on it or
+   * the mouse rests over it (a chip moving between aim and click opens the
+   * wrong session), not mid-drag in the queue panel. The next update after that catches up.
+   * A chip the board's list does not hold (the open session, filtered away)
+   * stays at the end. */
+  var stripPressed = false;
+
+  function resortStrip(railList) {
+    if (accelDown || stripPressed || cq.drag || !el.strip) return;
+    /* A mouse resting on the rail, not a finger: a phone leaves :hover on the
+     * last thing tapped, and that would hold the sort off until the next tap
+     * elsewhere. Touch is covered by stripPressed. */
+    if (window.matchMedia && window.matchMedia('(hover: hover)').matches
+        && el.strip.matches(':hover')) return;
+    var chips = el.strip.querySelectorAll('[data-switch-session]');
+    var byName = {};
+    var have = [];
+    for (var i = 0; i < chips.length; i++) {
+      var n = chips[i].getAttribute('data-switch-session');
+      byName[n] = chips[i];
+      have.push(n);
+    }
+    var want = [];
+    var inList = {};
+    for (var j = 0; j < railList.length; j++) {
+      inList[railList[j].name] = true;
+      if (byName[railList[j].name]) want.push(railList[j].name);
+    }
+    for (var k = 0; k < have.length; k++) if (!inList[have[k]]) want.push(have[k]);
+    if (want.join('\n') === have.join('\n')) return;
+    for (var m = 0; m < want.length; m++) el.strip.insertBefore(byName[want[m]], el.railHome || null);
     paintRunDividers();
   }
 
@@ -2254,7 +2323,7 @@
     chip.setAttribute('data-chip-state', item.state);
     /* Recedes the chip via CSS (see .con-chip[data-busy]) -- working needs no
      * attention, so it is the one state the rail now dims instead of lights. */
-    if (item.state === 'working') chip.setAttribute('data-busy', '');
+    if (isBusyState(item.state)) chip.setAttribute('data-busy', '');
     var quad = window.ctbQuadOf && window.ctbQuadOf[item.name];
     if (quad) chip.setAttribute('data-quad', quad);
     chip.title = quad ? item.name + ' · ' + (QUAD_LABELS[quad] || quad) : item.name;
@@ -2352,9 +2421,9 @@
 
   /* Marks every place on the rail where a busy (working) chip sits next to a
    * non-busy one. Walked fresh from the DOM every time rather than tracked
-   * incrementally: syncStrip patches state in place and deliberately never
-   * re-sorts the rail, so a busy/idle boundary can appear or drift anywhere
-   * in the middle of it, not just at the build-time edges. Cheapest correct
+   * incrementally: resortStrip skips its turn while the rail is in use, so
+   * a busy/idle boundary can appear or drift anywhere in the middle of it,
+   * not just at the build-time edges. Cheapest correct
    * approach is to throw the old dividers away and re-walk.
    *
    * Called from the same three spots syncStrip/renderStrip/appendChip always
@@ -2534,11 +2603,12 @@
     var quadOf = window.ctbQuadOf || {};
     var queued = window.ctbQueueOf || {};
     var canWrite = typeof window.ctbQueueInsert === 'function';
+    var dead = typeof window.ctbQueuePrune === 'function' ? (window.ctbQueueDead || 0) : 0;
     /* The board republishes on every update; rebuilding rows that did not
      * change would churn the DOM several times a second for nothing. */
     var key = JSON.stringify([names, names.map(function (n) {
       return [map[n] ? map[n].state : '', quadOf[n] || ''];
-    }), state.session, !!queued[state.session], canWrite]);
+    }), state.session, !!queued[state.session], canWrite, dead]);
     if (key === cq.painted && wasOpen) return;
     cq.painted = key;
 
@@ -2570,6 +2640,13 @@
       x.setAttribute('aria-label', (item.label || name) + ' 처리 순서에서 빼기');
       x.title = '처리 순서에서 빼기';
       x.appendChild(icon('close', 14));
+      var grip = document.createElement('span');
+      grip.className = 'con-qgrip';
+      grip.setAttribute('data-queue-grip', '');
+      grip.setAttribute('aria-hidden', 'true');
+      grip.textContent = '\u22ee\u22ee';
+      grip.title = '길게 눌러 순서 바꾸기';
+      row.appendChild(grip);
       row.appendChild(num);
       row.appendChild(ring);
       row.appendChild(text);
@@ -2592,6 +2669,17 @@
     add.disabled = !state.session || already || !canWrite;
     add.title = already ? '이미 처리 순서에 있습니다' : '지금 보고 있는 세션을 맨 뒤에 추가';
     el.queue.appendChild(add);
+    /* Closed sessions keep their place so a restore puts them back, which
+     * also means nothing ever clears them; this does, on request. */
+    if (dead) {
+      var prune = document.createElement('button');
+      prune.type = 'button';
+      prune.className = 'con-qprune';
+      prune.setAttribute('data-queue-prune', '');
+      prune.textContent = '종료된 세션 ' + dead + '개 정리';
+      prune.title = '닫힌 세션의 자리를 처리 순서에서 지웁니다';
+      el.queue.appendChild(prune);
+    }
     el.queue.style.display = 'flex';
     keepTailFollowing(follow);
   }
@@ -2666,6 +2754,7 @@
     var d = cq.drag;
     cq.drag = null;
     if (d && d.timer) clearTimeout(d.timer);
+    if (d && d.idle) clearTimeout(d.idle);
     if (d && d.row) d.row.style.opacity = '';
     if (cq.ghost) { cq.ghost.remove(); cq.ghost = null; }
     if (cq.marker) cq.marker.style.display = 'none';
@@ -2692,14 +2781,49 @@
     el.root.appendChild(cq.ghost);
     d.row.style.opacity = '.35';
     if (navigator.vibrate) navigator.vibrate(30);
+    armQueueDragTimeout();
   }
 
-  /* Rows reorder by drag: a mouse lifts after a few pixels, a finger after a
-   * long press (so a swipe still scrolls the sheet), the same rule the
-   * board's cards follow. Dropped outside the panel nothing happens -- on a
+  /* A drag nobody finishes -- the mouse let go outside the window, a
+   * pointerup that never arrives -- must not leave a ghost on screen and
+   * the panel refusing to repaint. Blur, Escape and ten quiet seconds all
+   * end it the way the board's card drag ends, dropping nothing. */
+  function cancelQueueDrag() {
+    if (!cq.drag) return false;
+    endQueueDrag();
+    renderQueue();
+    return true;
+  }
+
+  function armQueueDragTimeout() {
+    var d = cq.drag;
+    if (!d) return;
+    if (d.idle) clearTimeout(d.idle);
+    d.idle = setTimeout(cancelQueueDrag, 10000);
+  }
+
+  window.addEventListener('blur', cancelQueueDrag);
+  /* Capture phase, and only while a drag is live: Escape otherwise closes
+   * the console, and here it should only put the row back. */
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape' || !cq.drag || !cq.drag.active) return;
+    e.preventDefault();
+    e.stopPropagation();
+    cancelQueueDrag();
+  }, true);
+
+  /* Rows reorder by drag: a mouse lifts after a few pixels, anywhere on the
+   * row; a finger after a long press on the row's grip, the same timing the
+   * board's cards use. The grip is touch-action:none, so the press survives
+   * a small drift; the rest of the row is pan-y, so a swipe there scrolls
+   * the panel. The touchmove listener below is a backstop that holds the
+   * page still once a drag is live. Dropped outside the panel nothing happens -- on a
    * phone that is a slip of the thumb far more often than a decision, and
    * the cross is right there for removing. */
   function bindQueuePanel(panel) {
+    panel.addEventListener('touchmove', function (e) {
+      if (cq.drag && cq.drag.active) e.preventDefault();
+    }, { passive: false });
     panel.addEventListener('pointerdown', function (e) {
       var row = e.target.closest('[data-queue-open]');
       if (!row || e.target.closest('[data-queue-x]')) return;
@@ -2707,6 +2831,9 @@
       /* Without the board there is no queue to write and no geometry to
        * share; a tap still opens the session. */
       if (typeof window.ctbQueueSlotAt !== 'function') return;
+      /* A finger lifts a row by its grip only: anywhere else on the row a
+       * touch is a tap or the start of a scroll. */
+      if (e.pointerType === 'touch' && !e.target.closest('[data-queue-grip]')) return;
       cq.drag = { name: row.getAttribute('data-queue-open'), row: row, id: e.pointerId,
                   type: e.pointerType, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY,
                   active: false, timer: null };
@@ -2716,6 +2843,9 @@
         }
         cq.drag.timer = setTimeout(startQueueDrag, 450);
       }
+      /* From the press, not from the lift: a button held down and never
+       * moved still holds the panel's repaint off, and has to let go. */
+      armQueueDragTimeout();
     });
 
     panel.addEventListener('click', function (e) {
@@ -2723,6 +2853,11 @@
       if (x) {
         e.stopPropagation();
         queueWrite(window.ctbQueueRemove, [x.getAttribute('data-queue-x')]);
+        return;
+      }
+      if (e.target.closest('[data-queue-prune]')) {
+        e.stopPropagation();
+        queueWrite(window.ctbQueuePrune, []);
         return;
       }
       if (e.target.closest('[data-queue-add]')) {
@@ -2758,6 +2893,7 @@
       startQueueDrag();
     }
     e.preventDefault();
+    armQueueDragTimeout();
     cq.ghost.style.left = (e.clientX - d.dx) + 'px';
     cq.ghost.style.top = (e.clientY - d.dy) + 'px';
     var box = el.queue.getBoundingClientRect();
@@ -3088,16 +3224,15 @@
     show(item.name, true);
   });
 
-  /* Shared by jumpToFirstIdle and railSkip's own dimming (paintRailSkip):
-   * reads live state from the catalogue rather than trusting the item the
+  /* Reads live state from the catalogue rather than trusting the item the
    * walk list is carrying, so a session that just went busy drops out of
    * the candidates immediately, not a poll later. */
-  function notWorkingPredicate() {
+  function notBusyPredicate() {
     var map = catalogMap();
     return function (it) {
       var live = map[it.name];
       var st = live ? live.state : it.state;
-      return st !== 'working';
+      return !isBusyState(st);
     };
   }
 
@@ -3107,10 +3242,20 @@
    * until its state changes. Same list [ and ] walk, so "leftmost" is the
    * rail's own order. */
   function firstIdle() {
-    var list = hintOrder || sessionOrder();
-    var ok = notWorkingPredicate();
+    /* While the accelerator is held the frozen list is the truth, states
+     * and all: judged by live state instead, a chip in the frozen working
+     * block that went idle mid-hold would win over queue #1 behind it. */
+    if (hintOrder) {
+      for (var k = 0; k < hintOrder.length; k++) {
+        var it = hintOrder[k];
+        if (!isBusyState(it.state) && inCatalog(it.name)) return it;
+      }
+      return null;
+    }
+    var list = sessionOrder();
+    var ok = notBusyPredicate();
     for (var i = 0; i < list.length; i++) {
-      if (ok(list[i]) && (!hintOrder || inCatalog(list[i].name))) return list[i];
+      if (ok(list[i])) return list[i];
     }
     return null;
   }
