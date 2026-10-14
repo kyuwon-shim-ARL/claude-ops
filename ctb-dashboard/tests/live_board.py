@@ -110,6 +110,7 @@ def open_board(theme=None):
         page.ctb_stream = STREAM
         page.ctb_hung = []
         page.ctb_pin_reads_to_fail = PIN_READS_TO_FAIL
+        page.ctb_delete_queue = {}
 
         def set_state(name, state):
             """Change a session's state and make the board fetch it now.
@@ -282,6 +283,27 @@ def open_board(theme=None):
                     return
                 return r.fulfill(status=200, content_type="application/json",
                                  body=json.dumps(body))
+            if path.startswith("/api/sessions/") and path.endswith("/delete-check"):
+                # An unsafe worktree, by default: the one case the trash
+                # button still has to ask about.
+                return r.fulfill(status=200, content_type="application/json",
+                                 body=json.dumps({"safe": False, "is_worktree": True,
+                                                  "reasons": ["커밋되지 않은 변경사항이 있습니다"]}))
+            if path.startswith("/api/sessions/") and path.endswith("/delete"):
+                # A test can queue a specific sequence of answers per session
+                # (e.g. 409-plain then 409-worktree, to drive the automatic
+                # retry); otherwise every delete looks like an unsafe
+                # worktree, the one case that still has to ask.
+                who = path.split("/")[3]
+                queue = page.ctb_delete_queue.get(who)
+                if queue:
+                    status, body = queue.pop(0)
+                    return r.fulfill(status=status, content_type="application/json",
+                                     body=json.dumps(body))
+                return r.fulfill(status=409, content_type="application/json",
+                                 body=json.dumps({"status": "blocked",
+                                                  "check": {"is_worktree": True,
+                                                            "reasons": ["커밋되지 않은 변경사항이 있습니다"]}}))
             if path.startswith("/api/sessions/create"):
                 # What the server answers when tmux really did start one.
                 return r.fulfill(status=200, content_type="application/json",

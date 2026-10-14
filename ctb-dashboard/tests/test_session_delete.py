@@ -421,10 +421,12 @@ def test_safe_delete_removes_merged_worktree(repo, monkeypatch):
 
 # --- the force dialog must describe what is actually destroyed ---------------
 #
-# Deleting a regular session kills tmux and leaves every file on disk; only a
-# worktree session has its directory removed. The force confirmation said
-# "저장되지 않은 변경사항이 영구히 사라집니다" for both, which is untrue for the
-# regular case and talks people out of a harmless action.
+# renderForceConfirm is now only ever shown for an unsafe worktree: a plain
+# session's trash-button click retries automatically (force + allow_worktree
+# false), with no dialog, the same way the console's Ctrl+Q does -- its
+# delete only kills tmux and leaves every file on disk. The one remaining
+# modal said "저장되지 않은 변경사항이 영구히 사라집니다" for a worktree force,
+# which is untrue: a force now parks it in the trash, not destroys it.
 
 
 _INDEX = (Path(__file__).resolve().parents[1]
@@ -435,17 +437,6 @@ def _force_confirm() -> str:
     s = _INDEX.read_text()
     fn = s[s.index("function renderForceConfirm"):]
     return fn[:fn.index("\n    }")]
-
-
-def test_the_force_warning_depends_on_the_session_type():
-    assert "is_worktree" in _force_confirm(), (
-        "one warning for both cases means one of them is a lie"
-    )
-
-
-def test_a_regular_session_is_told_its_files_survive():
-    body = _force_confirm()
-    assert "파일" in body and "유지" in body
 
 
 def test_a_worktree_is_told_it_goes_to_the_trash_not_away():

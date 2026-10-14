@@ -75,8 +75,8 @@ function fetchSessions(): Promise<SharedState | null> {
 
 /** Delete a session via the CTB API from the extension host (bypasses the
  *  webview portMapping proxy, which blocks non-GET). Feedback via notifications. */
-function deleteSessionViaApi(session: string, force: boolean): void {
-  const body = JSON.stringify({ force });
+function deleteSessionViaApi(session: string, force: boolean, allowWorktree: boolean): void {
+  const body = JSON.stringify({ force, allow_worktree: allowWorktree });
   const url = `${DASHBOARD_URL}/api/sessions/${encodeURIComponent(session)}/delete`;
   const secret = readControlSecret();
   if (!secret) {
@@ -105,7 +105,7 @@ function deleteSessionViaApi(session: string, force: boolean): void {
           'systemctl --user restart ctb-dashboard 를 실행하세요.');
       } else if (res.statusCode === 409) {
         vscode.window.showWarningMessage(
-          `CTB: '${session}' 삭제 차단 — 미커밋/미푸시/미병합. 강제 삭제를 사용하세요.`);
+          `CTB: '${session}' 삭제 차단 — 미커밋/미푸시/미병합.`);
       } else {
         vscode.window.showErrorMessage(`CTB: '${session}' 삭제 실패 (HTTP ${res.statusCode})`);
       }
@@ -297,13 +297,14 @@ class DashboardPanel {
     DashboardPanel.panel.webview.html = await getWebviewContent(context);
 
     // Handle messages from webview (card click → terminal focus)
-    DashboardPanel.panel.webview.onDidReceiveMessage((message: { type: string; session?: string; url?: string; force?: boolean; requestId?: number; quads?: unknown }) => {
+    DashboardPanel.panel.webview.onDidReceiveMessage((message: { type: string; session?: string; url?: string; force?: boolean; allowWorktree?: boolean; requestId?: number; quads?: unknown }) => {
       if (message.type === 'focusSession' && message.session) {
         focusOrCreateTerminalForSession(message.session);
       } else if (message.type === 'deleteSession' && message.session) {
         // VSCode webview portMapping only proxies GET; POST is blocked. Do the
         // delete from the extension host, which reaches the server directly.
-        deleteSessionViaApi(message.session, !!message.force);
+        deleteSessionViaApi(message.session, !!message.force,
+          message.allowWorktree === undefined ? true : !!message.allowWorktree);
       } else if (message.type === 'setPinned' && message.quads) {
         // Same reason as delete: the webview's proxy forwards only GET, so the
         // pin write has to leave from here. Answer either way -- a silent

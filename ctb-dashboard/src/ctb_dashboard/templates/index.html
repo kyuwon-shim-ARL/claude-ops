@@ -717,20 +717,28 @@
 
     // Say it on screen. alert() would block the queue and stack up on every
     // retry; this is one line that fades.
-    function pinWriteFailed(msg) {
-      let el = document.getElementById('pin-error-toast');
+    // One fixed-position toast, reused for any brief board-level message
+    // (pin write failures, session close results) -- alert() would block
+    // the pin queue and stack up on every retry; this is one line that fades.
+    function showToast(msg, danger) {
+      let el = document.getElementById('board-toast');
       if (!el) {
         el = document.createElement('div');
-        el.id = 'pin-error-toast';
+        el.id = 'board-toast';
         el.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);'
           + 'z-index:9999;max-width:90vw;padding:10px 16px;border-radius:10px;'
-          + 'background:#7f1d1d;color:#fff;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,0.35);';
+          + 'color:#fff;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,0.35);';
         document.body.appendChild(el);
       }
+      el.style.background = danger ? '#7f1d1d' : '#14532d';
       el.textContent = msg;
       el.style.display = 'block';
-      clearTimeout(pinWriteFailed._t);
-      pinWriteFailed._t = setTimeout(() => { el.style.display = 'none'; }, 6000);
+      clearTimeout(showToast._t);
+      showToast._t = setTimeout(() => { el.style.display = 'none'; }, 6000);
+    }
+
+    function pinWriteFailed(msg) {
+      showToast(msg, true);
     }
 
     function _queuePins(job) {
@@ -2671,35 +2679,138 @@
       deleteModalConfirm.addEventListener('click', fn);
     }
 
-    async function performDelete(name, force) {
-      // Inside the VSCode webview a fetch POST is blocked by portMapping (GET
-      // only). Route the delete through the extension host instead; it reports
-      // back via a VSCode notification and the SSE stream removes the card.
-      if (_vscodeApi) {
-        _vscodeApi.postMessage({ type: 'deleteSession', session: name, force: !!force });
-        closeDeleteModal();
-        fetch('/api/sessions', { cache: 'no-store' }).then(r => r.json()).then(render).catch(() => {});
-        return;
+    // Trash-button delete: the same protocol as the console's Ctrl+Q. POST
+    // delete with {force:false, allow_worktree:true}; a plain session that
+    // comes back 409 retries once with {force:true, allow_worktree:false}
+    // (its delete only kills tmux -- files and commits stay, Alt/Option+
+    // Shift+Q restores it); a worktree that comes back 409 needs one
+    // confirmation before a force moves it to the repo's trash.
+    //
+    // Pure decision, exposed for tests the way session-control.js exposes
+    // _closeStep: given the response status/body and whether this was
+    // already the forced retry, decide what to do next.
+    function _boardDeleteDecision(status, body, forced) {
+      if (status === 200 && body && body.status === 'deleted') return 'done';
+      if (status === 409) {
+        if (body && body.check && body.check.is_worktree) return 'confirm-worktree';
+        if (!forced) return 'retry-plain';
       }
-      try {
-        const res = await ctbControl.send(`/api/sessions/${encodeURIComponent(name)}/delete`, {
-          method: 'POST',
-          body: JSON.stringify({ force }),
-        });
-        const data = await res.json();
-        if (res.ok && data.status === 'deleted') {
-          const parts = [];
-          if (data.removed_worktree) parts.push('워크트리 제거됨');
-          if (data.branch_deleted) parts.push('브랜치 삭제됨');
-          closeDeleteModal();
-          fetch('/api/sessions', { cache: 'no-store' }).then(r => r.json()).then(render).catch(() => {});
-        } else if (res.status === 409 || data.status === 'blocked') {
-          renderBlockedModal(name, data.check || {});
+      return 'error';
+    }
+    window.ctbBoardDeleteDecision = _boardDeleteDecision;
+
+    function postSessionDelete(name, force, allowWorktree) {
+      return ctbControl.send(`/api/sessions/${encodeURIComponent(name)}/delete`, {
+        method: 'POST',
+        body: JSON.stringify({ force, allow_worktree: allowWorktree }),
+      }).then(res => res.json().catch(() => ({})).then(body => ({ status: res.status, body })));
+    }
+
+    function _altKeyName() {
+      return /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent) ? 'Option' : 'Alt';
+    }
+
+    function _deleteErrorMsg(r) {
+      return '삭제 실패: ' + ((r.body && (r.body.error || r.body.status)) || `HTTP ${r.status}`);
+    }
+
+    function refreshGrid() {
+      fetch('/api/sessions', { cache: 'no-store' }).then(r => r.json()).then(render).catch(() => {});
+    }
+
+    // Guarded by session name, not by the button element: a card re-render
+    // (the grid redraws on every SSE tick) swaps in a fresh, enabled button
+    // mid-request, and a disabled-element check on that new button would
+    // never see this name as busy.
+    const _deleteInFlight = new Set();
+
+    function performWorktreeDelete(name) {
+      return postSessionDelete(name, true, true).then((r) => {
+        if (r.status === 200 && r.body.status === 'deleted') {
+          refreshGrid();
         } else {
-          deleteModalBody.innerHTML = `<div style="color:#ef4444;">삭제 실패: ${escapeHtml(data.error || data.status || '알 수 없는 오류')}</div>`;
+          showToast(_deleteErrorMsg(r), true);
+        }
+      }).catch(() => showToast('네트워크 오류로 삭제하지 못했습니다.', true));
+    }
+
+    async function handleTrashClick(btn, name) {
+      if (_deleteInFlight.has(name)) return;
+      _deleteInFlight.add(name);
+      btn.disabled = true;
+      btn.style.opacity = '0.4';
+      try {
+        const r = await postSessionDelete(name, false, true);
+        const step = _boardDeleteDecision(r.status, r.body, false);
+        if (step === 'done') {
+          refreshGrid();
+        } else if (step === 'confirm-worktree') {
+          renderForceConfirm(name, r.body.check || {}, () => {
+            closeDeleteModal();
+            performWorktreeDelete(name);
+          });
+        } else if (step === 'retry-plain') {
+          const reasons = (r.body.check && r.body.check.reasons) || [];
+          const r2 = await postSessionDelete(name, true, false);
+          const step2 = _boardDeleteDecision(r2.status, r2.body, true);
+          if (step2 === 'done') {
+            refreshGrid();
+            if (reasons.length) {
+              showToast('닫음 · ' + name + ' · ' + reasons.join(' · ') + ' · 복원은 ' + _altKeyName() + '+Shift+Q', false);
+            }
+          } else if (step2 === 'confirm-worktree') {
+            // The server's own check found a worktree the first answer
+            // missed -- the same thing applies here as a first-answer
+            // confirm-worktree: ask, do not report it as a failure.
+            renderForceConfirm(name, r2.body.check || {}, () => {
+              closeDeleteModal();
+              performWorktreeDelete(name);
+            });
+          } else {
+            showToast(_deleteErrorMsg(r2), true);
+          }
+        } else {
+          showToast(_deleteErrorMsg(r), true);
         }
       } catch (err) {
-        deleteModalBody.innerHTML = `<div style="color:#ef4444;">네트워크 오류로 삭제하지 못했습니다.</div>`;
+        showToast('네트워크 오류로 삭제하지 못했습니다.', true);
+      } finally {
+        _deleteInFlight.delete(name);
+        btn.disabled = false;
+        btn.style.opacity = '';
+      }
+    }
+
+    // Inside the VSCode webview a fetch POST is blocked by portMapping (GET
+    // only), so the safety check alone decides the outcome and the actual
+    // delete is routed through the extension host, which reports back via a
+    // VSCode notification and the SSE stream removes the card.
+    async function handleVscodeDeleteClick(name) {
+      if (_deleteInFlight.has(name)) return;
+      _deleteInFlight.add(name);
+      try {
+        const res = await fetch(`/api/sessions/${encodeURIComponent(name)}/delete-check`, { cache: 'no-store' });
+        if (!res.ok) {
+          showToast('안전성 확인 실패 (HTTP ' + res.status + ')', true);
+          return;
+        }
+        const check = await res.json();
+        if (check.is_worktree && !check.safe) {
+          renderForceConfirm(name, check, () => {
+            closeDeleteModal();
+            _vscodeApi.postMessage({ type: 'deleteSession', session: name, force: true, allowWorktree: true });
+            refreshGrid();
+          });
+          return;
+        }
+        _vscodeApi.postMessage({ type: 'deleteSession', session: name, force: !check.safe, allowWorktree: false });
+        refreshGrid();
+      } catch (err) {
+        showToast('안전성 확인 실패: ' + String(err && err.message || err), true);
+      } finally {
+        // No response to wait for once the message is sent (or the check
+        // itself failed) -- nothing more will come back to clear this.
+        _deleteInFlight.delete(name);
       }
     }
 
@@ -2714,75 +2825,24 @@
       return { disp, rows };
     }
 
-    // Second-confirmation guard for force delete.
-    function renderForceConfirm(name, check) {
-      _themeModal();
-      const { disp } = _checkSummaryHtml(check);
-      deleteModalTitle.textContent = '⚠️ 강제 삭제 확인';
-      // Neither case destroys anything any more: a regular session leaves its
-      // files on disk, and a forced worktree is parked in the repo's trash
-      // (session_delete) with its files and branch. Warning about permanent
-      // loss would talk people out of an action they can undo.
-      const alt = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent) ? 'Option' : 'Alt';
-      const consequence = check.is_worktree
-        ? `작업 디렉토리가 브랜치·변경사항째 <strong style="color:#ef4444;">휴지통</strong>으로 옮겨집니다. <strong>7일</strong> 동안 ${alt}+Shift+Q로 복원할 수 있고, 그 뒤에는 삭제됩니다.`
-        : 'tmux 세션만 종료합니다. <strong>파일은 디스크에 그대로 유지</strong>되며, 커밋되지 않은 변경사항도 남아 있습니다.';
-      deleteModalBody.innerHTML =
-        `<div><strong>${disp}</strong> 세션을 <strong style="color:#ef4444;">강제로</strong> 삭제합니다.</div>` +
-        `<div style="margin-top:8px;">${consequence} 계속하시겠습니까?</div>`;
-      _setConfirmBtn(check.is_worktree ? '휴지통으로' : '강제 삭제', true);
-      _bindConfirm(() => performDelete(name, true));
-    }
-
-    function renderBlockedModal(name, check) {
+    // Single confirmation for the one case the trash button cannot do
+    // without asking: an unsafe worktree, where a force moves the working
+    // directory (branch and changes included) to the repo's trash. A plain
+    // session never reaches this any more -- its retry is automatic and
+    // silent, like the console's Ctrl+Q.
+    function renderForceConfirm(name, check, onConfirm) {
       _themeModal();
       const { disp, rows } = _checkSummaryHtml(check);
-      deleteModalTitle.textContent = '삭제할 수 없음';
+      deleteModalTitle.textContent = '⚠️ 강제 삭제 확인';
+      const alt = _altKeyName();
       deleteModalBody.innerHTML =
-        `<div><strong>${disp}</strong> 은(는) 아직 안전하게 삭제할 수 없습니다:</div>${rows}` +
-        `<div style="margin-top:10px;font-size:12px;opacity:0.7;">커밋·푸시${check.is_worktree ? '·병합' : ''} 후 다시 시도하거나, 강제 삭제할 수 있습니다.</div>`;
-      _setConfirmBtn('강제 삭제…', false);
-      _bindConfirm(() => renderForceConfirm(name, check));
-    }
-
-    function renderSafeConfirm(name, check) {
-      _themeModal();
-      const { disp } = _checkSummaryHtml(check);
-      deleteModalTitle.textContent = '세션 삭제';
-      let detail = '작업이 안전하게 저장되어 있습니다.';
-      if (check.is_worktree) detail = '브랜치가 병합되어 있어 안전합니다. 워크트리와 브랜치가 제거됩니다.';
-      else if (!check.is_git) detail = 'tmux 세션만 종료합니다 (파일은 유지됩니다).';
-      deleteModalBody.innerHTML = `<div><strong>${disp}</strong> 세션을 삭제하시겠습니까?</div><div style="margin-top:8px;color:#86efac;">✓ ${escapeHtml(detail)}</div>`;
-      _setConfirmBtn('삭제', false);
-      _bindConfirm(() => performDelete(name, false));
-    }
-
-    async function openDeleteFlow(name) {
-      _themeModal();
-      deleteModalTitle.textContent = '세션 삭제';
-      deleteModalBody.innerHTML = '<div style="opacity:0.7;">안전성 확인 중…</div>';
-      _setConfirmBtn('…', false);
-      _bindConfirm(() => {});
+        `<div><strong>${disp}</strong> 세션을 <strong style="color:#ef4444;">강제로</strong> 삭제합니다.</div>` +
+        rows +
+        `<div style="margin-top:8px;">작업 디렉토리가 브랜치·변경사항째 <strong style="color:#ef4444;">휴지통</strong>으로 옮겨집니다. ` +
+        `<strong>7일</strong> 동안 ${alt}+Shift+Q로 복원할 수 있고, 그 뒤에는 삭제됩니다. 계속하시겠습니까?</div>`;
+      _setConfirmBtn('휴지통으로', true);
       deleteModal.style.display = 'flex';
-      try {
-        const res = await fetch(`/api/sessions/${encodeURIComponent(name)}/delete-check`, { cache: 'no-store' });
-        if (!res.ok) {
-          const hint = res.status === 404
-            ? '서버가 구버전입니다 — 대시보드를 재시작하세요.'
-            : `HTTP ${res.status}`;
-          deleteModalBody.innerHTML = `<div style="color:#ef4444;">안전성 확인 실패 (${escapeHtml(hint)})</div>`;
-          _setConfirmBtn('닫기', false);
-          _bindConfirm(closeDeleteModal);
-          return;
-        }
-        const check = await res.json();
-        if (check.safe) renderSafeConfirm(name, check);
-        else renderBlockedModal(name, check);
-      } catch (err) {
-        deleteModalBody.innerHTML = `<div style="color:#ef4444;">안전성 확인 실패: ${escapeHtml(String(err && err.message || err))}</div>`;
-        _setConfirmBtn('닫기', false);
-        _bindConfirm(closeDeleteModal);
-      }
+      _bindConfirm(onConfirm);
     }
 
     grid.addEventListener('click', (e) => {
@@ -2791,7 +2851,9 @@
       e.preventDefault();
       e.stopPropagation();
       if (isDragging) return;
-      openDeleteFlow(btn.dataset.deleteSession);
+      const name = btn.dataset.deleteSession;
+      if (_vscodeApi) handleVscodeDeleteClick(name);
+      else handleTrashClick(btn, name);
     });
 
     // Keyboard navigation between cards: arrows move focus, Enter activates
