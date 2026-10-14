@@ -288,6 +288,7 @@
     textSearch: 'M4 6h10M4 10h6M4 14h4M14.5 12.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM21 22l-3.2-3.2',
     clip: 'M15 7l-6.5 6.5a2.5 2.5 0 0 0 3.5 3.5L19 10a4.5 4.5 0 0 0-6.4-6.4L5.5 10.7a6.5 6.5 0 0 0 9.2 9.2L20 14.6',
     mic: 'M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM6 11a6 6 0 0 0 12 0M12 17v4M9 21h6',
+    queue: 'M10 6h10M10 12h10M10 18h10M4 4.5l1.5-.5v4M3.6 14.6a1.4 1.4 0 0 1 2.6.6c0 1-2.6 1.8-2.6 2.8h2.8',
   };
   function icon(name, size) {
     var svgNS = 'http://www.w3.org/2000/svg';
@@ -404,6 +405,52 @@
       '#ctb-console .con-quad-num{font:700 10px/1 ui-sans-serif,system-ui,sans-serif;'
         + 'margin-left:1px;align-self:flex-start;margin-top:11px}',
       '#ctb-console .con-rail{background:var(--con-tray);border-radius:14px;padding:4px}',
+      /* 처리 순서: the toggle sits at the rail's end as a tray of its own, and
+       * the panel under the rail is the same tray, so the two read as one
+       * strip that can open downwards. Rows are chips with a number in
+       * front; the quadrant is a hollow ring in its hue, so it cannot be
+       * mistaken for the state dot beside the name. */
+      '#ctb-console .con-qtoggle{display:inline-flex;align-items:center;justify-content:center;gap:4px;',
+      'flex-shrink:0;min-width:46px;padding:0 10px;border:0;border-radius:14px;cursor:pointer;',
+      'background:var(--con-tray);color:var(--con-muted);touch-action:manipulation;',
+      '-webkit-tap-highlight-color:transparent;transition:background-color .15s ease,color .15s ease}',
+      '#ctb-console .con-qtoggle[aria-expanded="true"]{background:var(--con-btn);color:var(--con-text);',
+      'box-shadow:0 1px 2px rgba(16,24,40,0.10)}',
+      '@media(hover:hover){#ctb-console .con-qtoggle:hover{color:var(--con-text)}}',
+      '#ctb-console .con-qtoggle:focus-visible{outline:2px solid var(--con-accent);outline-offset:2px}',
+      "#ctb-console .con-qcount{font:700 11px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums}",
+      '#ctb-console .con-queue{display:none;flex-wrap:wrap;align-items:center;gap:4px;flex-shrink:0;',
+      'margin-bottom:10px;padding:4px;border-radius:14px;background:var(--con-tray);',
+      'max-height:124px;overflow-y:auto;overscroll-behavior:contain}',
+      '#ctb-console .con-qrow{display:flex;align-items:center;gap:6px;flex:0 1 auto;max-width:100%;',
+      'min-height:34px;padding:0 2px 0 10px;border-radius:999px;cursor:pointer;color:var(--con-text);',
+      'background:var(--con-btn);font:500 12px/1 ui-sans-serif,system-ui,sans-serif;',
+      'touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;',
+      '-webkit-tap-highlight-color:transparent}',
+      '#ctb-console .con-qrow[aria-current="true"]{font-weight:700;box-shadow:inset 0 0 0 1.5px var(--con-accent)}',
+      '#ctb-console .con-qrow:focus-visible{outline:2px solid var(--con-accent);outline-offset:1px}',
+      "#ctb-console .con-qnum{font:700 11px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:var(--con-accent)}",
+      '#ctb-console .con-qquad{width:8px;height:8px;border-radius:50%;flex-shrink:0;',
+      'box-shadow:inset 0 0 0 2px var(--q,transparent)}',
+      "#ctb-console .con-qquad[data-quad='Q1']{--q:var(--con-q1)}",
+      "#ctb-console .con-qquad[data-quad='Q2']{--q:var(--con-q2)}",
+      "#ctb-console .con-qquad[data-quad='Q3']{--q:var(--con-q3)}",
+      "#ctb-console .con-qquad[data-quad='Q4']{--q:var(--con-q4)}",
+      '#ctb-console .con-qname{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3}',
+      '#ctb-console .con-qx{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;',
+      'flex-shrink:0;border:0;border-radius:999px;background:transparent;color:var(--con-muted);cursor:pointer;',
+      'touch-action:manipulation}',
+      '@media(hover:hover){#ctb-console .con-qx:hover{color:var(--con-err);background:var(--con-btn-hover)}}',
+      '#ctb-console .con-qx:focus-visible{outline:2px solid var(--con-accent);outline-offset:-2px}',
+      '#ctb-console .con-qadd{min-height:34px;padding:0 12px;border:0;border-radius:999px;cursor:pointer;',
+      'background:var(--con-accent-soft);color:var(--con-accent);font:600 12px/1 ui-sans-serif,system-ui,sans-serif;',
+      'touch-action:manipulation}',
+      '#ctb-console .con-qadd:disabled{opacity:.4;cursor:default}',
+      '#ctb-console .con-qadd:focus-visible{outline:2px solid var(--con-accent);outline-offset:1px}',
+      '#ctb-console .con-qhint{font-size:11px;color:var(--con-muted);padding:0 8px}',
+      "#ctb-console .con-chip-q{font:700 9px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;",
+      'color:var(--con-accent);flex-shrink:0}',
+      '@media(max-width:480px){#ctb-console .con-queue{max-height:84px}}',
       /* The mic while it listens: a red key, pulsing, so a held finger can
        * see the recording is on without reading the status line. */
       '@keyframes con-listen{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0.45)}50%{box-shadow:0 0 0 6px rgba(239,68,68,0)}}',
@@ -542,7 +589,7 @@
     var strip = document.createElement('div');
     strip.className = 'con-rail';
     strip.style.cssText = [
-      'display:flex', 'gap:4px', 'flex-shrink:0', 'margin-bottom:10px',
+      'display:flex', 'gap:4px', 'flex:1', 'min-width:0',
       'overflow-x:auto', 'overflow-y:hidden', 'overscroll-behavior:contain',
       'scroll-snap-type:x proximity', '-webkit-overflow-scrolling:touch',
       'scrollbar-width:none',
@@ -1141,7 +1188,32 @@
     tailWrap.appendChild(prevPill);
     tailWrap.appendChild(frozen);
 
-    root.appendChild(strip);
+    /* The rail and the 처리 순서 toggle share a row; the queue panel opens
+     * under them. The row carries the spacing the rail used to, so the rail
+     * going dark (no sessions) still leaves the toggle where it was. */
+    var stripRow = document.createElement('div');
+    stripRow.style.cssText = 'display:flex;gap:6px;align-items:stretch;flex-shrink:0;margin-bottom:10px;';
+    var qToggle = document.createElement('button');
+    qToggle.type = 'button';
+    qToggle.className = 'con-qtoggle';
+    qToggle.setAttribute('aria-controls', 'ctb-console-queue');
+    qToggle.setAttribute('aria-label', '처리 순서 열기/닫기');
+    qToggle.appendChild(icon('queue', 16));
+    var qCount = document.createElement('span');
+    qCount.className = 'con-qcount';
+    qToggle.appendChild(qCount);
+    qToggle.addEventListener('click', toggleQueue);
+    stripRow.appendChild(strip);
+    stripRow.appendChild(qToggle);
+    var queuePanel = document.createElement('div');
+    queuePanel.id = 'ctb-console-queue';
+    queuePanel.className = 'con-queue';
+    queuePanel.setAttribute('role', 'list');
+    queuePanel.setAttribute('aria-label', '처리 순서');
+    bindQueuePanel(queuePanel);
+
+    root.appendChild(stripRow);
+    root.appendChild(queuePanel);
     sttInit();
     root.appendChild(header);
     root.appendChild(tailWrap);
@@ -1155,7 +1227,8 @@
     el = { keys: keys, keysMore: more, clip: clip, picker: picker, endPill: endPill, prevPill: prevPill, prevLabel: prevLabel,
            root: root, strip: strip, railHome: railHome, railSkip: railSkip, title: title, status: status, tail: tail, mic: mic,
            frozen: frozen, input: input,
-           send: send, silent: silent, quad: quad, quadNum: quadNum };
+           send: send, silent: silent, quad: quad, quadNum: quadNum,
+           queue: queuePanel, qToggle: qToggle, qCount: qCount };
 
     /* The keyboard shrinks the visual viewport, and iOS does not always fire a
      * resize that brings it back when the keyboard closes without an edit --
@@ -2051,6 +2124,7 @@
     var flash = noticedTransitions();
     syncStrip(flash);
     syncPalette(flash);
+    renderQueue();
   }
 
   function catalogMap() {
@@ -2099,6 +2173,7 @@
       if (lab) paintStateLabel(lab, item.state);
       if (ctxSlot) paintCtxSlot(ctxSlot, item.context_percent);
       paintChipName(chip, item);
+      paintChipQueue(chip);
       chip.setAttribute('data-chip-state', item.state);
       if (item.state === 'working') chip.setAttribute('data-busy', '');
       else chip.removeAttribute('data-busy');
@@ -2207,11 +2282,26 @@
         'display:' + (accelDown ? 'inline-block' : 'none') + ';';
       chip.appendChild(num);
     }
+    /* Its place in 처리 순서, as the board's card shows it. */
+    var qb = document.createElement('b');
+    qb.className = 'con-chip-q';
+    qb.setAttribute('data-queue-num', '');
+    qb.setAttribute('aria-hidden', 'true');
+    chip.appendChild(qb);
+    paintChipQueue(chip);
     chip.appendChild(text);
     chip.appendChild(makeStateLabel(item.state));
     chip.appendChild(makeCtxSlot(item.context_percent));
     paintChipName(chip, item);
     return chip;
+  }
+
+  function paintChipQueue(chip) {
+    var qb = chip.querySelector('[data-queue-num]');
+    if (!qb) return;
+    var n = (window.ctbQueueOf || {})[chip.getAttribute('data-switch-session')];
+    qb.textContent = n ? '#' + n : '';
+    qb.style.display = n ? '' : 'none';
   }
 
   /* Shown only when the rail has somewhere to go back to: with a handful of
@@ -2322,6 +2412,7 @@
   function renderStrip() {
     paintSilentBadge();
     paintQuadBtn();
+    renderQueue();
     if (!el.strip) return;
     var list = sessionOrder();
     el.strip.textContent = '';
@@ -2387,6 +2478,316 @@
     }
     paintRailHome(true);
   }
+
+  /* --- 처리 순서 (the work queue) ------------------------------------------
+   *
+   * The board owns the queue: it is part of the pin set, written through the
+   * board's one pin queue (window.ctbQueueInsert / ctbQueueRemove) and
+   * published back as window.ctbQueue (the live names, in order) and
+   * window.ctbQueueOf (name -> number). This panel only shows that and asks
+   * for changes, so there is one source of truth and the board's optimistic
+   * paint brings the answer back here on the ctb:sessions that follows.
+   *
+   * Hidden by default, and whether it is open is this viewer's choice, kept
+   * in this browser. */
+  var QUEUE_OPEN_KEY = 'ctb_console_queue_open';
+  var cq = { open: false, drag: null, marker: null, ghost: null, painted: null };
+  try { cq.open = localStorage.getItem(QUEUE_OPEN_KEY) === '1'; } catch (e) { /* closed */ }
+
+  function queueNames() {
+    return Array.isArray(window.ctbQueue) ? window.ctbQueue : [];
+  }
+
+  function toggleQueue() {
+    cq.open = !cq.open;
+    try { localStorage.setItem(QUEUE_OPEN_KEY, cq.open ? '1' : '0'); } catch (e) { /* this visit only */ }
+    renderQueue();
+  }
+
+  /* Opening the panel takes height from the pane, and the pane reads its
+   * own height to decide whether the reader is at the bottom. A reader who
+   * was following must still be following afterwards, so the pane is put
+   * back at the bottom and the end pill re-measured (fitViewport). */
+  function keepTailFollowing(follow) {
+    if (follow && el.tail) el.tail.scrollTop = el.tail.scrollHeight;
+    fitViewport();
+  }
+
+  function renderQueue() {
+    if (!el.queue) return;
+    var names = queueNames();
+    el.qCount.textContent = names.length ? String(names.length) : '';
+    el.qToggle.setAttribute('aria-expanded', cq.open ? 'true' : 'false');
+    el.qToggle.title = '처리 순서 ' + names.length + '개 — ' + (cq.open ? '접기' : '펼치기');
+    var follow = state.pinned;
+    var wasOpen = el.queue.style.display === 'flex';
+    if (!cq.open) {
+      el.queue.style.display = 'none';
+      cq.painted = null;
+      if (wasOpen) keepTailFollowing(follow);
+      return;
+    }
+    /* Nothing rebuilt under a finger: a row replaced between pointerdown and
+     * click loses the tap, and one replaced mid-drag loses the drag. */
+    if (cq.drag) return;
+    var map = catalogMap();
+    var quadOf = window.ctbQuadOf || {};
+    var queued = window.ctbQueueOf || {};
+    var canWrite = typeof window.ctbQueueInsert === 'function';
+    /* The board republishes on every update; rebuilding rows that did not
+     * change would churn the DOM several times a second for nothing. */
+    var key = JSON.stringify([names, names.map(function (n) {
+      return [map[n] ? map[n].state : '', quadOf[n] || ''];
+    }), state.session, !!queued[state.session], canWrite]);
+    if (key === cq.painted && wasOpen) return;
+    cq.painted = key;
+
+    el.queue.textContent = '';
+    names.forEach(function (name, i) {
+      var item = map[name] || { name: name, label: shortLabel(name), branch: null, state: 'unknown' };
+      var row = document.createElement('div');
+      row.className = 'con-qrow';
+      row.setAttribute('role', 'listitem');
+      row.setAttribute('tabindex', '0');
+      row.setAttribute('data-queue-open', name);
+      if (name === state.session) row.setAttribute('aria-current', 'true');
+      row.title = name + ' · ' + stateText(item.state)
+        + (quadOf[name] ? ' · ' + (QUAD_LABELS[quadOf[name]] || quadOf[name]) : '');
+      var num = document.createElement('span');
+      num.className = 'con-qnum';
+      num.textContent = String(i + 1);
+      var ring = document.createElement('span');
+      ring.className = 'con-qquad';
+      ring.setAttribute('aria-hidden', 'true');
+      ring.setAttribute('data-quad', quadOf[name] || '');
+      var text = document.createElement('span');
+      text.className = 'con-qname';
+      text.textContent = item.branch ? item.label + ' ⎇' + item.branch : item.label;
+      var x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'con-qx';
+      x.setAttribute('data-queue-x', name);
+      x.setAttribute('aria-label', (item.label || name) + ' 처리 순서에서 빼기');
+      x.title = '처리 순서에서 빼기';
+      x.appendChild(icon('close', 14));
+      row.appendChild(num);
+      row.appendChild(ring);
+      row.appendChild(text);
+      row.appendChild(makeDot(item.state));
+      row.appendChild(x);
+      el.queue.appendChild(row);
+    });
+    if (!names.length) {
+      var hint = document.createElement('span');
+      hint.className = 'con-qhint';
+      hint.textContent = '비어 있음 — 보드에서 카드를 끌어오거나 여기서 추가';
+      el.queue.appendChild(hint);
+    }
+    var add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'con-qadd';
+    add.setAttribute('data-queue-add', '');
+    add.textContent = '+ 현재 세션';
+    var already = !!(state.session && queued[state.session]);
+    add.disabled = !state.session || already || !canWrite;
+    add.title = already ? '이미 처리 순서에 있습니다' : '지금 보고 있는 세션을 맨 뒤에 추가';
+    el.queue.appendChild(add);
+    el.queue.style.display = 'flex';
+    keepTailFollowing(follow);
+  }
+
+  /* A change asked from here: the board paints it at once and reconciles
+   * behind it. The rail is rebuilt afterwards because its order starts with
+   * the queue, and syncStrip deliberately never re-sorts. */
+  function queueWrite(fn, args) {
+    if (typeof fn !== 'function') {
+      setStatus('이 화면에서는 처리 순서를 바꿀 수 없습니다', 'var(--con-err)');
+      return;
+    }
+    var pending = fn.apply(null, args);
+    renderStrip();
+    Promise.resolve(pending).then(function (ok) {
+      renderStrip();
+      if (ok === false) setStatus('처리 순서를 바꾸지 못했습니다', 'var(--con-err)');
+    }, function () {
+      setStatus('처리 순서를 바꾸지 못했습니다', 'var(--con-err)');
+    });
+  }
+
+  function openQueued(name) {
+    if (name && name !== state.session) show(name, false);
+  }
+
+  /* Where a drop at (x, y) lands among the rows: the session it goes before
+   * (null for the end), whether that is where the row already is, and where
+   * the insertion line goes. Same geometry the board's panel uses
+   * (ctbQueueSlotAt), read off the rows as drawn. */
+  function queueDropTarget(x, y, dragged) {
+    var rows = Array.prototype.slice.call(el.queue.querySelectorAll('[data-queue-open]'));
+    var rects = rows.map(function (r) { return r.getBoundingClientRect(); });
+    var own = -1;
+    for (var k = 0; k < rows.length; k++) {
+      if (rows[k].getAttribute('data-queue-open') === dragged) own = k;
+    }
+    var i = window.ctbQueueSlotAt(rects, x, y);
+    if (i === own) i++;
+    var at = i < rows.length ? i : rows.length - 1;
+    var r = rects[at];
+    var alone = !rects.some(function (o, j) { return j !== at && o.top < r.bottom && o.bottom > r.top; });
+    return {
+      before: i < rows.length ? rows[i].getAttribute('data-queue-open') : null,
+      unchanged: own !== -1 && i === own + 1,
+      rect: r, alone: alone, edge: i < rows.length ? 'start' : 'end',
+    };
+  }
+
+  function paintQueueMarker(t) {
+    if (!cq.marker) {
+      cq.marker = document.createElement('div');
+      cq.marker.setAttribute('data-con-queue-marker', '');
+      cq.marker.style.cssText = 'position:fixed;pointer-events:none;z-index:72;border-radius:2px;'
+        + 'background:var(--con-accent);';
+      document.body.appendChild(cq.marker);
+    }
+    var m = cq.marker.style;
+    if (!t || !t.rect) { m.display = 'none'; return; }
+    var r = t.rect;
+    if (t.alone) {
+      m.left = r.left + 'px'; m.width = r.width + 'px'; m.height = '3px';
+      m.top = (t.edge === 'start' ? r.top - 3 : r.bottom) + 'px';
+    } else {
+      m.top = r.top + 'px'; m.height = r.height + 'px'; m.width = '3px';
+      m.left = (t.edge === 'start' ? r.left - 3 : r.right) + 'px';
+    }
+    m.display = 'block';
+  }
+
+  function endQueueDrag() {
+    var d = cq.drag;
+    cq.drag = null;
+    if (d && d.timer) clearTimeout(d.timer);
+    if (d && d.row) d.row.style.opacity = '';
+    if (cq.ghost) { cq.ghost.remove(); cq.ghost = null; }
+    if (cq.marker) cq.marker.style.display = 'none';
+    if (d && d.type === 'touch' && d.row.releasePointerCapture) {
+      try { d.row.releasePointerCapture(d.id); } catch (e) { /* already gone */ }
+    }
+    return d;
+  }
+
+  function startQueueDrag() {
+    var d = cq.drag;
+    if (!d) return;
+    d.active = true;
+    d.timer = null;
+    var r = d.row.getBoundingClientRect();
+    d.dx = d.x - r.left;
+    d.dy = d.y - r.top;
+    cq.ghost = d.row.cloneNode(true);
+    cq.ghost.style.cssText += ';position:fixed;z-index:71;pointer-events:none;opacity:.9;'
+      + 'width:' + r.width + 'px;left:' + r.left + 'px;top:' + r.top + 'px;'
+      + 'box-shadow:0 8px 24px rgba(16,24,40,0.28);';
+    /* Not inside #ctb-console its rules would not reach it; the sheet is
+     * the one place they apply. */
+    el.root.appendChild(cq.ghost);
+    d.row.style.opacity = '.35';
+    if (navigator.vibrate) navigator.vibrate(30);
+  }
+
+  /* Rows reorder by drag: a mouse lifts after a few pixels, a finger after a
+   * long press (so a swipe still scrolls the sheet), the same rule the
+   * board's cards follow. Dropped outside the panel nothing happens -- on a
+   * phone that is a slip of the thumb far more often than a decision, and
+   * the cross is right there for removing. */
+  function bindQueuePanel(panel) {
+    panel.addEventListener('pointerdown', function (e) {
+      var row = e.target.closest('[data-queue-open]');
+      if (!row || e.target.closest('[data-queue-x]')) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      /* Without the board there is no queue to write and no geometry to
+       * share; a tap still opens the session. */
+      if (typeof window.ctbQueueSlotAt !== 'function') return;
+      cq.drag = { name: row.getAttribute('data-queue-open'), row: row, id: e.pointerId,
+                  type: e.pointerType, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY,
+                  active: false, timer: null };
+      if (e.pointerType === 'touch') {
+        if (row.setPointerCapture) {
+          try { row.setPointerCapture(e.pointerId); } catch (err) { /* fine without */ }
+        }
+        cq.drag.timer = setTimeout(startQueueDrag, 450);
+      }
+    });
+
+    panel.addEventListener('click', function (e) {
+      var x = e.target.closest('[data-queue-x]');
+      if (x) {
+        e.stopPropagation();
+        queueWrite(window.ctbQueueRemove, [x.getAttribute('data-queue-x')]);
+        return;
+      }
+      if (e.target.closest('[data-queue-add]')) {
+        e.stopPropagation();
+        if (state.session) queueWrite(window.ctbQueueInsert, [state.session, null]);
+        return;
+      }
+      var row = e.target.closest('[data-queue-open]');
+      if (row) openQueued(row.getAttribute('data-queue-open'));
+    });
+
+    panel.addEventListener('keydown', function (e) {
+      var row = e.target.closest && e.target.closest('[data-queue-open]');
+      if (!row || e.target !== row || e.key !== 'Enter') return;
+      e.preventDefault();
+      e.stopPropagation();
+      openQueued(row.getAttribute('data-queue-open'));
+    });
+  }
+
+  document.addEventListener('pointermove', function (e) {
+    var d = cq.drag;
+    if (!d || e.pointerId !== d.id) return;
+    d.x = e.clientX;
+    d.y = e.clientY;
+    var moved = Math.hypot(e.clientX - d.x0, e.clientY - d.y0);
+    if (!d.active) {
+      if (d.type === 'touch') {
+        if (moved > 10) endQueueDrag();
+        return;
+      }
+      if (moved < DRAG_SLOP) return;
+      startQueueDrag();
+    }
+    e.preventDefault();
+    cq.ghost.style.left = (e.clientX - d.dx) + 'px';
+    cq.ghost.style.top = (e.clientY - d.dy) + 'px';
+    var box = el.queue.getBoundingClientRect();
+    var inside = e.clientX >= box.left && e.clientX <= box.right
+      && e.clientY >= box.top && e.clientY <= box.bottom;
+    paintQueueMarker(inside ? queueDropTarget(e.clientX, e.clientY, d.name) : null);
+  }, { passive: false });
+
+  document.addEventListener('pointerup', function (e) {
+    var d = cq.drag;
+    if (!d || e.pointerId !== d.id) return;
+    if (!d.active) { endQueueDrag(); return; }
+    var box = el.queue.getBoundingClientRect();
+    var inside = e.clientX >= box.left && e.clientX <= box.right
+      && e.clientY >= box.top && e.clientY <= box.bottom;
+    var t = inside ? queueDropTarget(e.clientX, e.clientY, d.name) : null;
+    endQueueDrag();
+    /* The click that follows this pointerup belongs to the drag, not to a
+     * tap on whatever row it ended over. */
+    var swallow = function (ev) { ev.stopPropagation(); ev.preventDefault(); done(); };
+    var done = function () { window.removeEventListener('click', swallow, true); clearTimeout(timer); };
+    var timer = setTimeout(done, 300);
+    window.addEventListener('click', swallow, true);
+    if (t && !t.unchanged) queueWrite(window.ctbQueueInsert, [d.name, t.before]);
+    else renderQueue();
+  });
+
+  document.addEventListener('pointercancel', function (e) {
+    if (cq.drag && e.pointerId === cq.drag.id) { endQueueDrag(); renderQueue(); }
+  });
 
   /* --- number shortcuts -------------------------------------------------- */
 

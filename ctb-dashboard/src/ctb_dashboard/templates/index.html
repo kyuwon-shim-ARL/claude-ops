@@ -203,6 +203,83 @@
       .project-group-cards { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
     }
 
+    /* 처리 순서: the work queue, above the matrix. Rows wrap left to right on a
+       wide screen and stack on a phone; the number is the order, read the
+       way the rows are laid out. Colours come from the theme in render. */
+    #queue-list {
+      display: grid;
+      gap: 6px;
+      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+      padding: 8px;
+      border-radius: 16px;
+      transition: box-shadow 0.2s;
+    }
+    @media (max-width: 640px) {
+      #queue-list { grid-template-columns: 1fr; }
+    }
+    #queue-list.drag-over { box-shadow: inset 0 0 0 2px rgba(129,140,248,0.55); }
+    .queue-row {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 38px;
+      padding: 4px 4px 4px 10px;
+      border-radius: 12px;
+      font-size: 13px;
+      cursor: grab;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+      touch-action: none;
+    }
+    .queue-row:focus-visible { outline: 2px solid rgba(129,140,248,0.85); outline-offset: 2px; }
+    .queue-num {
+      font-family: 'JetBrains Mono', monospace;
+      font-variant-numeric: tabular-nums;
+      font-size: 12px;
+      font-weight: 700;
+      min-width: 1.5em;
+      text-align: right;
+    }
+    .queue-name {
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-family: 'JetBrains Mono', monospace;
+      letter-spacing: -0.01em;
+    }
+    .queue-remove {
+      width: 30px; height: 30px;
+      flex-shrink: 0;
+      border: 0;
+      border-radius: 9px;
+      background: transparent;
+      color: inherit;
+      font-size: 17px;
+      line-height: 1;
+      opacity: 0.45;
+      cursor: pointer;
+      touch-action: manipulation;
+      transition: opacity 0.15s, background-color 0.15s;
+    }
+    .queue-remove:hover, .queue-remove:focus-visible { opacity: 1; background: rgba(239,68,68,0.18); }
+    .queue-slot {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
+      border-radius: 12px;
+      border: 1px dashed;
+      font-size: 11px;
+    }
+    #btn-queue[aria-expanded="true"] {
+      background: rgba(129,140,248,0.14) !important;
+      border-color: rgba(129,140,248,0.45) !important;
+    }
+
     .drag-ghost {
       position: fixed;
       pointer-events: none;
@@ -291,9 +368,14 @@
   <div id="filter-bar" class="px-5 pt-3 flex flex-wrap items-center gap-2">
     <button id="btn-new-session" class="hover:bg-white/10 text-xs px-2.5 py-0.5 rounded-full transition-colors cursor-pointer flex-shrink-0" style="background: rgba(129,140,248,0.18); border: 1px solid rgba(129,140,248,0.45);" title="새 세션 시작 (N / Ctrl+N) — 프로젝트 / 워크트리 선택">+ 새 세션</button>
     <button id="btn-find-session" class="hover:bg-white/10 text-xs px-2.5 py-0.5 rounded-full transition-colors cursor-pointer flex-shrink-0" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);" title="세션 검색 (F / Ctrl+F) — 고르면 그 세션 콘솔이 열립니다">🔎 세션 검색</button>
+    <button id="btn-queue" type="button" aria-expanded="false" aria-controls="queue-panel" class="hover:bg-white/10 text-xs px-2.5 py-0.5 rounded-full transition-colors cursor-pointer flex-shrink-0" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);">처리 순서<span id="queue-count" style="display:none;margin-left:6px;min-width:1.6em;padding:0 5px;border-radius:99px;background:rgba(129,140,248,0.24);font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;font-weight:700;text-align:center;"></span></button>
     <div id="filter-age" class="flex items-center gap-1"></div>
     <span id="filter-count" class="text-xs" style="color:#8b85a0;"></span>
   </div>
+
+  <section id="queue-panel" aria-label="처리 순서" style="display:none;padding:12px 20px 0;">
+    <div id="queue-list" role="list"></div>
+  </section>
 
   <main id="grid" class="p-5 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
     <div class="col-span-full text-center py-20 text-sm" id="empty-state" style="color: #8b85a0;">
@@ -373,6 +455,9 @@
           groupBgTint: 'rgba(56,189,248,0.06)',
           groupGlow: '0 0 0 1px rgba(56,189,248,0.25), 0 0 16px rgba(56,189,248,0.18)',
           groupLabel: 'rgba(186,230,253,0.95)',
+          queueText: '#c7d2fe',
+          queueBadgeBg: 'rgba(129,140,248,0.18)',
+          queueBadgeBorder: 'rgba(129,140,248,0.45)',
         };
       }
       if (isParchment()) {
@@ -420,6 +505,9 @@
           groupBgTint: 'rgba(63,111,94,0.06)',
           groupGlow: '0 0 0 1px rgba(63,111,94,0.22), 0 0 14px rgba(63,111,94,0.16)',
           groupLabel: 'rgba(38,70,58,0.95)',
+          queueText: '#7b2d26',
+          queueBadgeBg: 'rgba(123,45,38,0.08)',
+          queueBadgeBorder: 'rgba(123,45,38,0.35)',
         };
       }
       /* Light: a cool, near-monochrome ground with one blue accent. The
@@ -465,6 +553,9 @@
         groupBgTint: 'rgba(37,99,235,0.05)',
         groupGlow: '0 0 0 1px rgba(37,99,235,0.18), 0 0 14px rgba(37,99,235,0.14)',
         groupLabel: 'rgba(30,64,175,0.95)',
+        queueText: '#3730a3',
+        queueBadgeBg: 'rgba(79,70,229,0.08)',
+        queueBadgeBorder: 'rgba(79,70,229,0.30)',
       };
     }
 
@@ -613,12 +704,22 @@
     const QUAD_LABELS = {
       Q1: '긴급+중요', Q2: '중요', Q3: '긴급', Q4: '일반'
     };
+    const QUAD_DOTS = { Q1: '🔴', Q2: '🟡', Q3: '🔵', Q4: '⚪' };
 
-    let _quadsCache = { Q1: [], Q2: [], Q3: [], Q4: [] };
+    // `queue` rides along with the quadrants: the order the user means to
+    // deal with sessions in, one list for the whole board. Anything that
+    // copies the set has to copy it too -- a copy without it is a set with
+    // an empty queue, and the next pin change would write that back.
+    let _quadsCache = { Q1: [], Q2: [], Q3: [], Q4: [], queue: [] };
     let _pinnedLoaded = false;
+    // Set by render(): every live session by name, and the number each queued
+    // one wears (_queueNumbers). The panel, the cards and the console all
+    // read these, so the numbers agree everywhere.
+    let _queueByName = {};
+    let _queueNum = {};
 
     function _cloneQuads(q) {
-      return { Q1: [...q.Q1], Q2: [...q.Q2], Q3: [...q.Q3], Q4: [...q.Q4] };
+      return { Q1: [...q.Q1], Q2: [...q.Q2], Q3: [...q.Q3], Q4: [...q.Q4], queue: [...(q.queue || [])] };
     }
 
     function getQuadrants() {
@@ -783,16 +884,20 @@
       return out;
     }
 
+    // The quadrants by name, never Object.keys: the set also holds the
+    // queue, and a session can be queued without being pinned.
     function getSessionQuadrant(name) {
-      for (const [qid, names] of Object.entries(_quadsCache)) {
-        if (names.includes(name)) return qid;
+      for (const qid of ['Q1', 'Q2', 'Q3', 'Q4']) {
+        if ((_quadsCache[qid] || []).includes(name)) return qid;
       }
       return null;
     }
 
+    // Unpinning or moving a session leaves its place in the queue alone:
+    // importance and order are separate decisions.
     function _removeFromQuads(q, name) {
       let found = false;
-      for (const qid of Object.keys(q)) {
+      for (const qid of ['Q1', 'Q2', 'Q3', 'Q4']) {
         const idx = q[qid].indexOf(name);
         if (idx !== -1) { q[qid].splice(idx, 1); found = true; }
       }
@@ -852,27 +957,54 @@
       });
     }
 
-    // The array order is the quadrant's order, so a drop is "put X just before
-    // Y in Q" -- or at the end when there is no Y. Anchored to a name rather
-    // than an index: re-applied to a set another client has changed since,
-    // an index points at whatever slid into that slot, while the name still
-    // means the card the user dropped it above. An anchor that has gone
-    // (unpinned elsewhere) falls back to appending.
-    function _moveBefore(q, name, targetQ, before) {
-      _removeFromQuads(q, name);
-      if (!q[targetQ]) q[targetQ] = [];
-      const at = before ? q[targetQ].indexOf(before) : -1;
-      if (at === -1) q[targetQ].push(name);
-      else q[targetQ].splice(at, 0, name);
+    // A session already in that quadrant stays where it is: a card dropped
+    // back on its own quadrant, or the console re-picking the importance it
+    // already has, changes nothing and so writes nothing. The array order
+    // inside a quadrant means nothing any more -- the queue is the order.
+    function moveToQuadrant(name, targetQ) {
+      if ((_quadsCache[targetQ] || []).includes(name)) return Promise.resolve(true);
+      return _pinChange((q) => {
+        _removeFromQuads(q, name);
+        q[targetQ].push(name);
+        return q;
+      });
+    }
+
+    // Put `name` in the queue just before `before`, or at the end when there
+    // is no `before`. Anchored to a name rather than an index, for the reason
+    // _pinChange re-applies intents at all: by the time the write goes out
+    // another client may have changed the queue, and an index would point at
+    // whatever slid into that slot. An anchor that has gone appends. Names of
+    // sessions that no longer exist keep their places -- a closed session can
+    // be restored, and it comes back where it was.
+    function _queueInsert(q, name, before) {
+      const queue = (q.queue || []).filter(n => n !== name);
+      const at = before && before !== name ? queue.indexOf(before) : -1;
+      if (at === -1) queue.push(name);
+      else queue.splice(at, 0, name);
+      q.queue = queue;
       return q;
     }
 
-    // A move that leaves every quadrant as it was -- a card dropped back
-    // where it started -- writes nothing and repaints nothing.
-    function moveToQuadrant(name, targetQ, before) {
-      const next = _moveBefore(_cloneQuads(_quadsCache), name, targetQ, before);
-      if (JSON.stringify(next) === JSON.stringify(_quadsCache)) return Promise.resolve(true);
-      return _pinChange((q) => _moveBefore(q, name, targetQ, before));
+    function _queueRemove(q, name) {
+      q.queue = (q.queue || []).filter(n => n !== name);
+      return q;
+    }
+
+    // Both write only when the queue actually changes: a row dropped back in
+    // its own slot is not a pin write.
+    function _queueChange(edit) {
+      const next = edit(_cloneQuads(_quadsCache));
+      if (JSON.stringify(next.queue) === JSON.stringify(_quadsCache.queue || [])) return Promise.resolve(true);
+      return _pinChange(edit);
+    }
+
+    function queueInsert(name, before) {
+      return _queueChange((q) => _queueInsert(q, name, before));
+    }
+
+    function queueRemove(name) {
+      return _queueChange((q) => _queueRemove(q, name));
     }
 
     // --- Notification system ---
@@ -1247,39 +1379,65 @@
       return (b.updated_at || 0) - (a.updated_at || 0);
     }
 
-    // One quadrant, in display order. Working sessions sit on top, newest
-    // first: they are the ones moving, and nothing needs doing about them.
-    // Everything else keeps its place in the stored pin array, which is the
-    // order the user dragged it into. Waiting is not lifted over idle any
-    // more -- a state sort reshuffled the quadrant every time a session
-    // finished, and the user could never make a session stay where they put
-    // it. Names with no live session are skipped, not dropped from the array.
-    function _quadrantOrder(names, byName) {
+    function _byRecency(a, b) {
+      return (b.updated_at || 0) - (a.updated_at || 0);
+    }
+
+    // Each queued name that still has a session, numbered from 1 in queue
+    // order -- the number its card and its row show. A name with no session
+    // is skipped rather than counted, so the numbers on screen run 1, 2, 3
+    // with no hole where a closed session used to be.
+    function _queueNumbers(queue, byName) {
+      const out = {};
+      let n = 0;
+      for (const name of queue || []) {
+        if (!byName[name] || out[name]) continue;
+        out[name] = ++n;
+      }
+      return out;
+    }
+
+    // One quadrant, in display order. Working sessions on top, newest first:
+    // they are the ones moving, and nothing needs doing about them yet. Then
+    // the queued ones, in queue order -- the user said what comes next. Then
+    // everything else, newest first. `queued` is _queueNumbers' map. Names
+    // with no live session are skipped, not dropped from the array.
+    function _quadrantOrder(names, byName, queued) {
       const seen = new Set();
       const working = [];
+      const inQueue = [];
       const rest = [];
       for (const n of names) {
         const s = byName[n];
         if (!s || seen.has(n)) continue;
         seen.add(n);
-        (s.state === 'working' ? working : rest).push(s);
+        if (s.state === 'working') working.push(s);
+        else if (queued[n]) inQueue.push(s);
+        else rest.push(s);
       }
-      working.sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
-      return working.concat(rest);
+      working.sort(_byRecency);
+      inQueue.sort((a, b) => queued[a.name] - queued[b.name]);
+      rest.sort(_byRecency);
+      return working.concat(inQueue, rest);
     }
 
-    // The rail's order: Q1 to Q4 each in its own order, then everything
-    // unpinned. The grid starts from the same order but groups same-repo
-    // sessions inside a quadrant, so the two can differ there. Takes the sessions to order -- the filtered list
-    // for the strip, all of them for the palette -- so a pinned name the
-    // filter hid does not come back through the pin arrays.
+    // The rail's order: the queue first, in queue order and whatever state its
+    // sessions are in -- a working one keeps its place, and the leftmost-idle
+    // jump already steps over working chips, so Ctrl+\ lands on the next
+    // thing to do. Then the remaining pinned sessions Q1 to Q4, then
+    // everything unpinned. The grid groups same-repo sessions inside a
+    // quadrant, so the two can differ there. Takes the sessions to order --
+    // the filtered list for the strip, all of them for the palette -- so a
+    // pinned or queued name the filter hid does not come back.
     function _railOrder(sessions, quads) {
       const byName = {};
       for (const s of sessions) byName[s.name] = s;
-      const out = [];
-      const placed = new Set();
+      const queued = _queueNumbers(quads && quads.queue, byName);
+      const out = sessions.filter(s => queued[s.name])
+        .sort((a, b) => queued[a.name] - queued[b.name]);
+      const placed = new Set(out.map(s => s.name));
       for (const qid of ['Q1', 'Q2', 'Q3', 'Q4']) {
-        for (const s of _quadrantOrder((quads && quads[qid]) || [], byName)) {
+        for (const s of _quadrantOrder((quads && quads[qid]) || [], byName, {})) {
           if (placed.has(s.name)) continue;
           placed.add(s.name);
           out.push(s);
@@ -1816,6 +1974,13 @@
             return `<span style="color:${color};font-weight:500;">${stateLabel} ${dur}</span>`;
           })();
 
+      // Its place in 처리 순서, when it has one -- the same number its row in
+      // the panel shows.
+      const qn = _queueNum[session.name];
+      const queueBadge = qn
+        ? `<span data-queue-badge style="display:inline-block;margin-right:6px;padding:0 6px;border-radius:99px;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;font-size:11px;font-weight:700;line-height:16px;vertical-align:1px;color:${t.queueText};background:${t.queueBadgeBg};border:1px solid ${t.queueBadgeBorder};" title="처리 순서 ${qn}번째">#${qn}</span>`
+        : '';
+
       const pinIcon = isPinned ? '📌' : '📍';
       const pinOpacity = isPinned ? '1' : '0.3';
 
@@ -1851,7 +2016,7 @@
 
       return `
         <div class="group relative overflow-hidden ${cfg.border} draggable-card${freshClass}"
-             data-session-name="${name}" data-state="${escapeHtml(session.state || '')}" tabindex="0"
+             data-session-name="${name}" tabindex="0"
              style="border-radius:20px 20px 16px 20px;background:${wtCardBg};border:1px solid;padding:${cardPadding};box-shadow:${cfg.glow},${t.cardShadowBase};${borderStyle}${wtStripe}${staleOpacity}transition:all 0.3s ease;">
           ${freshBar}
           <div class="long-press-ring"></div>
@@ -1860,7 +2025,7 @@
           <button data-delete-session="${name}" class="del-btn" style="position:absolute;bottom:6px;right:6px;width:24px;height:24px;border-radius:8px;background:${t.pinBtnBg};display:flex;align-items:center;justify-content:center;font-size:12px;border:1px solid ${t.pinBtnBorder};cursor:pointer;touch-action:manipulation;z-index:6;" title="세션 삭제" aria-label="세션 삭제">🗑</button>
           <div class="flex items-center justify-between" style="flex-wrap:wrap;row-gap:2px;">
             <div style="flex:1;min-width:min(100%, 8rem);">
-              <span class="font-mono text-sm font-medium session-title" style="color:${t.textPrimary};letter-spacing:-0.01em;" title="${name}">${display}</span>
+              <span class="font-mono text-sm font-medium session-title" style="color:${t.textPrimary};letter-spacing:-0.01em;" title="${name}">${queueBadge}${display}</span>
               ${wtBranchLabel}
             </div>
             <span class="flex items-center gap-1.5 text-xs" style="color:${t.textSecondary};flex-shrink:0;margin-left:auto;justify-content:flex-end;">
@@ -1922,7 +2087,7 @@
       const count = group.sessions.length;
       const cardsHtml = group.sessions.map(s => renderCard(s, true)).join('');
       return `
-        <div class="project-group" data-group-repo="${repoLabel}" style="border:1.5px solid ${t.groupBorder};border-radius:14px;padding:8px;background:${t.groupBgTint};box-shadow:${t.groupGlow};">
+        <div class="project-group" style="border:1.5px solid ${t.groupBorder};border-radius:14px;padding:8px;background:${t.groupBgTint};box-shadow:${t.groupGlow};">
           <div style="font-size:10px;font-weight:700;color:${t.groupLabel};padding:2px 4px 8px 4px;display:flex;align-items:center;gap:6px;letter-spacing:0.02em;">
             <span style="font-size:11px;opacity:0.85;">📁</span>
             <span style="font-family:'JetBrains Mono',monospace;font-weight:700;">${repoLabel}</span>
@@ -1932,6 +2097,134 @@
           <div class="project-group-cards">${cardsHtml}</div>
         </div>
       `;
+    }
+
+    // =============================================
+    // 처리 순서 -- the work queue panel
+    // =============================================
+    // Collapsed by default: the board is the board, and the queue is a tool
+    // you open when you are lining work up. Whether it is open is this
+    // viewer's business, so it lives in this browser, not on the server.
+    const QUEUE_OPEN_KEY = 'ctb_queue_open';
+    const queuePanel = document.getElementById('queue-panel');
+    const queueList = document.getElementById('queue-list');
+    const btnQueue = document.getElementById('btn-queue');
+    const queueCount = document.getElementById('queue-count');
+    let _queueOpen = false;
+    try { _queueOpen = localStorage.getItem(QUEUE_OPEN_KEY) === '1'; } catch (_) { /* no storage: closed */ }
+
+    // The queued sessions that exist, in queue order.
+    function _queueLive() {
+      return Object.keys(_queueNum).sort((a, b) => _queueNum[a] - _queueNum[b]);
+    }
+
+    // For the console, which has no reach into this scope: the live queue in
+    // order and each one's number. Republished with every render, and the
+    // console repaints on the ctb:sessions that follows.
+    function _publishQueue() {
+      window.ctbQueue = _queueLive();
+      window.ctbQueueOf = Object.assign({}, _queueNum);
+    }
+
+    function renderQueuePanel() {
+      const names = _queueLive();
+      // The count stays on the button while the panel is shut, so a queue
+      // that is hidden is not a queue that is forgotten.
+      queueCount.textContent = names.length ? String(names.length) : '';
+      queueCount.style.display = names.length ? 'inline-block' : 'none';
+      btnQueue.setAttribute('aria-expanded', _queueOpen ? 'true' : 'false');
+      btnQueue.title = `처리 순서 ${names.length}개 — ${_queueOpen ? '접기' : '펼치기'}`
+        + ' · 카드를 끌어와 다음에 할 일을 줄 세웁니다';
+      queuePanel.style.display = _queueOpen ? '' : 'none';
+      if (!_queueOpen) return;
+
+      const t = getThemeColors();
+      const STATE_CONFIG = getStateConfig();
+      queueList.style.background = t.badgeBg;
+      queueList.style.border = '1px solid ' + t.badgeBorder;
+      let html = '';
+      names.forEach((name, i) => {
+        const s = _queueByName[name];
+        const cfg = STATE_CONFIG[s.state] || STATE_CONFIG.unknown;
+        const p = parseSessionName(name);
+        const quad = getSessionQuadrant(name);
+        const esc = escapeHtml(name);
+        const branch = p.isWorktree
+          ? ` <span style="color:${t.wtBranch};">⎇ ${escapeHtml(p.branch)}</span>` : '';
+        html += `<div class="queue-row" role="listitem" tabindex="0" data-queue-row="${esc}"
+             title="${esc} · ${escapeHtml(cfg.label)}${quad ? ' · ' + QUAD_LABELS[quad] : ''}"
+             style="background:${t.cardBg};border:1px solid ${t.cardBorder};color:${t.textPrimary};">
+          <div class="long-press-ring"></div>
+          <span class="queue-num" style="color:${t.queueText};">${i + 1}</span>
+          <span aria-hidden="true" style="width:1.2em;font-size:11px;text-align:center;flex-shrink:0;">${quad ? QUAD_DOTS[quad] : ''}</span>
+          <span class="queue-name">${escapeHtml(p.display)}${branch}</span>
+          <span class="inline-block w-2 h-2 rounded-full ${cfg.dot}" data-queue-state="${escapeHtml(s.state || '')}" style="flex-shrink:0;box-shadow:${t.dotGlowColor};" aria-label="${escapeHtml(cfg.label)}"></span>
+          <button type="button" class="queue-remove" data-queue-remove="${esc}" title="처리 순서에서 빼기" aria-label="${escapeHtml(p.display)} 처리 순서에서 빼기">×</button>
+        </div>`;
+      });
+      html += `<div class="queue-slot" data-queue-end style="border-color:${t.emptyBorder};color:${t.emptyText};">여기로 끌어놓기</div>`;
+      queueList.innerHTML = html;
+    }
+
+    btnQueue.addEventListener('click', () => {
+      _queueOpen = !_queueOpen;
+      try { localStorage.setItem(QUEUE_OPEN_KEY, _queueOpen ? '1' : '0'); } catch (_) { /* this visit only */ }
+      renderQueuePanel();
+    });
+    // Before the first data arrives, so a panel left open opens with the page.
+    renderQueuePanel();
+
+    // A row is a session: tapping it does what tapping its card does --
+    // the console on a phone, the terminal on a desktop.
+    function _openFromQueue(name) {
+      if (isMobile() || !window.ctbFocusSession(name)) window.ctbConsole.open(name);
+    }
+
+    queueList.addEventListener('click', (e) => {
+      if (_dragConfirmed) return;
+      const rm = e.target.closest('[data-queue-remove]');
+      if (rm) {
+        e.stopPropagation();
+        queueRemove(rm.dataset.queueRemove);
+        return;
+      }
+      const row = e.target.closest('[data-queue-row]');
+      if (row) _openFromQueue(row.dataset.queueRow);
+    });
+
+    queueList.addEventListener('keydown', (e) => {
+      const row = e.target.closest('[data-queue-row]');
+      if (!row || e.target !== row) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        _openFromQueue(row.dataset.queueRow);
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        queueRemove(row.dataset.queueRow);
+      }
+    });
+
+    // Where a drop at (x, y) in the panel lands: the queued session it goes
+    // just before (null for the end), and where to draw the insertion line.
+    // Read off the rows as drawn -- render() holds still during a drag. The
+    // dragged row still holds its cell, so it counts for the layout; a drop
+    // on its own slot means "before the next one", which is where it is.
+    //
+    // `unchanged` says a row would land where it already is. The stored
+    // queue cannot tell: re-inserting it before its visible neighbour would
+    // hop it over a hidden entry for a closed session in between, and that
+    // is a write for nothing anyone can see.
+    function _queueDropTarget(x, y, dragged) {
+      const rows = Array.from(queueList.querySelectorAll('[data-queue-row]'));
+      const items = rows.concat(Array.from(queueList.querySelectorAll('[data-queue-end]')));
+      const rects = items.map(r => r.getBoundingClientRect());
+      const own = rows.findIndex(r => r.dataset.queueRow === dragged);
+      let i = _queueSlotAt(rects.slice(0, rows.length), x, y);
+      if (i === own) i++;
+      const r = rects[i];
+      const alone = !!r && !rects.some((o, j) => j !== i && o.top < r.bottom && o.bottom > r.top);
+      return { before: rows[i] ? rows[i].dataset.queueRow : null, rect: r, alone, edge: 'start',
+               unchanged: own !== -1 && i === own + 1 };
     }
 
     // =============================================
@@ -1972,6 +2265,10 @@
         window.ctbSessionOrder = [];
         window.ctbPinned = [...pinned];
         window.ctbQuadOf = _quadOfMap();
+        _queueByName = {};
+        _queueNum = {};
+        _publishQueue();
+        renderQueuePanel();
         _publishSessions();
         emptyState.classList.remove('hidden');
         btnCopyNames.classList.add('hidden');
@@ -2006,6 +2303,9 @@
        * tore down every card and re-parsed the whole grid -- on a phone with
        * dozens of sessions the box stopped taking characters. */
       const all = _railOrder(sessions, getQuadrants());
+      _queueByName = {};
+      for (const s of sessions) _queueByName[s.name] = s;
+      _queueNum = _queueNumbers(getQuadrants().queue, _queueByName);
 
       /* Everything, filtered or not, in the grid's own order — the console's
        * search reads this. The palette must be able to reach a session the
@@ -2024,6 +2324,8 @@
       // importance, and the console rail paints its chips the same hue, so
       // the urgent session can be told apart above the terminal too.
       window.ctbQuadOf = _quadOfMap();
+      _publishQueue();
+      renderQueuePanel();
 
       const pinnedSessions = all.filter(s => pinned.has(s.name));
       const normalSessions = all.filter(s => !pinned.has(s.name));
@@ -2049,11 +2351,11 @@
         html += `<div class="matrix-grid">`;
         for (const qid of ['Q1', 'Q2', 'Q3', 'Q4']) {
           const qcfg = QUAD_CONFIG[qid];
-          const qSessions = _quadrantOrder(freshQuads[qid] || [], sessionMap);
+          const qSessions = _quadrantOrder(freshQuads[qid] || [], sessionMap, _queueNum);
 
           html += `<div class="quadrant" data-quadrant="${qid}" style="background:${qcfg.tint};border:1px solid ${qcfg.border};">`;
           html += `<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${t.quadLabelColor};margin-bottom:8px;display:flex;align-items:center;gap:6px;">
-            <span style="font-size:12px;opacity:0.6;">${qid === 'Q1' ? '🔴' : qid === 'Q2' ? '🟡' : qid === 'Q3' ? '🔵' : '⚪'}</span>
+            <span style="font-size:12px;opacity:0.6;">${QUAD_DOTS[qid]}</span>
             ${QUAD_LABELS[qid]}
           </div>`;
 
@@ -2132,14 +2434,20 @@
       }
     }
 
+    // Cards and the queue's rows lift the same way. A row only moves within
+    // the queue or out of it; a card can go to a quadrant or into the queue.
     function initDrag(e) {
-      const card = e.target.closest('[data-session-name]');
+      const row = e.target.closest('[data-queue-row]');
+      const card = row || e.target.closest('[data-session-name]');
       if (!card) return;
       if (e.target.closest('[data-pin-session]')) return;
       if (e.target.closest('[data-delete-session]')) return;
+      if (e.target.closest('[data-queue-remove]')) return;
 
-      const sessionName = card.dataset.sessionName;
-      if (!getPinned().has(sessionName)) return;
+      const sessionName = row ? row.dataset.queueRow : card.dataset.sessionName;
+      // An unpinned card used to stay put. With the queue open it has
+      // somewhere to go, so it lifts too.
+      if (!row && !getPinned().has(sessionName) && !_queueOpen) return;
 
       const rect = card.getBoundingClientRect();
       const ptype = e.pointerType; // 'mouse', 'pen', or 'touch'
@@ -2155,6 +2463,7 @@
         pointerId: e.pointerId,
         pointerType: ptype,
         downTime: Date.now(),
+        fromQueue: !!row,
         card
       };
 
@@ -2175,66 +2484,21 @@
       }
     }
 
-    // Whether a pointer at (x, y) means "before this card". A card alone on
-    // its row (the phone's single column, or a group's full-width box) is
-    // split top/bottom; one that shares its row is split left/right, which is
-    // how the eye reads a wrapped grid. Anything above the card's row is
-    // before it, anything below is after.
-    function _isBeforeCard(r, x, y, alone) {
-      if (y < r.top) return true;
-      if (y >= r.bottom) return false;
-      return alone ? y < r.top + r.height / 2 : x < r.left + r.width / 2;
-    }
-
-    // Where a drop at (x, y) inside `quad` lands: the session it goes just
-    // before, or null to append. Only non-working cards can be the anchor --
-    // working ones are drawn on top regardless of the array, so dropping
-    // above them means "first of the rest", which is the first non-working
-    // card after the pointer. `rect` is what the insertion line is drawn
-    // against.
-    //
-    // Everything is read off the cards as drawn. render() holds still during
-    // a drag while lastSSEData keeps moving, so a card that turned working
-    // mid-drag is still sitting where the user aimed; asking the newer data
-    // skipped it and dropped the card one slot late.
-    //
-    // A repo group is one box to anything outside that repo: its members are
-    // drawn together at the first member's slot, so a non-member aimed
-    // between them is stored before the first member, which is where it will
-    // be drawn. Only the repo's own sessions can be placed among its members.
-    function _dropTarget(quad, x, y, dragged) {
-      const p = parseSessionName(dragged);
-      const draggedRepo = p.isWorktree ? p.parent : p.display;
-      const items = [];
-      const groups = new Set();
-      for (const c of quad.querySelectorAll('[data-session-name]')) {
-        if (!_isCardVisible(c)) continue;
-        const g = c.closest('.project-group');
-        const own = c.dataset.sessionName === dragged;
-        if (g && !own && g.dataset.groupRepo !== draggedRepo) {
-          if (groups.has(g)) continue;
-          groups.add(g);
-          items.push({ name: c.dataset.sessionName, state: c.dataset.state, r: g.getBoundingClientRect() });
-          continue;
-        }
-        items.push({ name: c.dataset.sessionName, state: c.dataset.state, r: c.getBoundingClientRect(), own });
+    // Which slot of the queue a pointer at (x, y) means: the index of the
+    // row it lands before, or rects.length for the end. `rects` are the rows
+    // as drawn, in order. A row alone on its line (the phone's single column)
+    // is split top/bottom; one that shares its line is split left/right, which
+    // is how the eye reads a wrapped list. Anything above a row's line is
+    // before it. Shared with the console's queue panel (ctbQueueSlotAt).
+    function _queueSlotAt(rects, x, y) {
+      for (let i = 0; i < rects.length; i++) {
+        const r = rects[i];
+        if (y < r.top) return i;
+        if (y >= r.bottom) continue;
+        const alone = !rects.some((o, j) => j !== i && o.top < r.bottom && o.bottom > r.top);
+        if (alone ? y < r.top + r.height / 2 : x < r.left + r.width / 2) return i;
       }
-      // The dragged card still holds its cell while it is dragged, so it
-      // counts when deciding who shares a row -- leaving it out made its
-      // row-mate look alone and a drop back in place land after it.
-      for (const c of items) {
-        c.alone = !items.some(o => o !== c && o.r.top < c.r.bottom && o.r.bottom > c.r.top);
-      }
-      const cards = items.filter(c => !c.own);
-      const rest = cards.filter(c => c.state !== 'working');
-      for (const c of rest) {
-        if (_isBeforeCard(c.r, x, y, c.alone)) return { before: c.name, rect: c.r, alone: c.alone, edge: 'start' };
-      }
-      // Appending: the line goes after the last non-working card, or after
-      // the working ones when that is all the quadrant holds.
-      const last = rest[rest.length - 1] || cards[cards.length - 1];
-      return last ? { before: null, rect: last.r, alone: last.alone, edge: 'end' }
-                  : { before: null, rect: null };
+      return rects.length;
     }
 
     // The insertion line: one fixed element, moved rather than recreated on
@@ -2341,13 +2605,18 @@
       _ghostEl.style.display = '';
 
       document.querySelectorAll('.quadrant').forEach(q => q.classList.remove('drag-over'));
-      const quad = el && el.closest('.quadrant');
-      if (quad) {
-        quad.classList.add('drag-over');
-        _showDropMarker(_dropTarget(quad, e.clientX, e.clientY, _dragState.sessionName));
+      const inQueue = !!(_queueOpen && el && el.closest('#queue-list'));
+      queueList.classList.toggle('drag-over', inQueue);
+      if (inQueue) {
+        _showDropMarker(_queueDropTarget(e.clientX, e.clientY, _dragState.sessionName));
       } else {
         _hideDropMarker();
+        const quad = !_dragState.fromQueue && el && el.closest('.quadrant');
+        if (quad) quad.classList.add('drag-over');
       }
+      // A row carried out of the panel is on its way out of the queue, and
+      // fades to say so before it is let go.
+      if (_dragState.fromQueue) _ghostEl.style.opacity = inQueue ? '' : '0.4';
       resetDragTimeout();
     }
 
@@ -2389,13 +2658,18 @@
         _ghostEl.remove();
         _ghostEl = null;
 
-        if (el && _dragState) {
-          const quad = el.closest('[data-quadrant]');
-          if (quad) {
-            const target = _dropTarget(quad, x, y, _dragState.sessionName);
-            // No repaint chained here: _pinChange paints the move itself,
-            // and a move that changed nothing should not repaint at all.
-            moveToQuadrant(_dragState.sessionName, quad.dataset.quadrant, target.before);
+        // No repaint chained here: _pinChange paints the change itself, and
+        // one that changed nothing should not repaint at all.
+        if (_dragState) {
+          const name = _dragState.sessionName;
+          const quad = el && el.closest('[data-quadrant]');
+          if (_queueOpen && el && el.closest('#queue-list')) {
+            const target = _queueDropTarget(x, y, name);
+            if (!target.unchanged) queueInsert(name, target.before);
+          } else if (_dragState.fromQueue) {
+            queueRemove(name);
+          } else if (quad) {
+            moveToQuadrant(name, quad.dataset.quadrant);
           }
         }
       }
@@ -2408,6 +2682,7 @@
       }
 
       document.querySelectorAll('.quadrant').forEach(q => q.classList.remove('drag-over'));
+      queueList.classList.remove('drag-over');
       _hideDropMarker();
       isDragging = false;
       _dragConfirmed = false;
@@ -2427,6 +2702,7 @@
         }
       }
       document.querySelectorAll('.quadrant').forEach(q => q.classList.remove('drag-over'));
+      queueList.classList.remove('drag-over');
       _hideDropMarker();
       isDragging = false;
       _dragConfirmed = false;
@@ -2455,6 +2731,7 @@
     });
 
     grid.addEventListener('pointerdown', initDrag);
+    queueList.addEventListener('pointerdown', initDrag);
     document.addEventListener('pointermove', onPointerMove);
     document.addEventListener('pointerup', onPointerUp);
     document.addEventListener('pointercancel', () => { cancelDrag(); });
@@ -2737,12 +3014,17 @@
         return _pinChange((q) => { _removeFromQuads(q, name); return q; });
       }
       if (!QUAD_LABELS[qid]) return Promise.resolve();
-      // Already there: appending would send it to the end of the order the
-      // user set, which picking the same importance never meant.
-      if ((_quadsCache[qid] || []).includes(name)) return Promise.resolve(true);
       return moveToQuadrant(name, qid);
     };
     window.ctbQuadLabels = QUAD_LABELS;
+
+    /* 처리 순서 from inside the console: the same writes the panel makes,
+     * through the same pin queue, so the board's set stays the one source of
+     * truth. `before` is a session name or null for the end. Each resolves
+     * to whether the write landed, like ctbSetQuadrant. */
+    window.ctbQueueInsert = queueInsert;
+    window.ctbQueueRemove = queueRemove;
+    window.ctbQueueSlotAt = _queueSlotAt;
 
     /* A drag in progress, or a long-press that is about to become one. The
      * board's own render() already refuses to repaint mid-drag; anything that

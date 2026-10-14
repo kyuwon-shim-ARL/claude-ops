@@ -244,6 +244,10 @@ class PinnedRequest(BaseModel):
     Q2: list[str] = []
     Q3: list[str] = []
     Q4: list[str] = []
+    # The work queue: session names in the order they are to be dealt with.
+    # Not a fifth quadrant -- a session can be queued and in any quadrant, or
+    # in none -- so nothing that asks "is this pinned" may read it.
+    queue: list[str] = []
 
 
 # --- Session Poller (reuses SessionStateAnalyzer for accurate detection) ---
@@ -1993,7 +1997,11 @@ async def session_ticket_links(response: Response):
 def pinned_session_names() -> set:
     """Every pinned session, flattened out of the quadrants."""
     names = set()
-    for value in (_pinned_state or {}).values():
+    state = _pinned_state or {}
+    # The quadrants only: the queue is a list too, and reading it here would
+    # turn on completion alerts for a session nobody pinned.
+    for qid in ("Q1", "Q2", "Q3", "Q4"):
+        value = state.get(qid)
         if isinstance(value, list):
             names.update(v for v in value if isinstance(v, str))
     return names
@@ -2376,13 +2384,21 @@ async def stt_eval_rebuild(request: Request):
 
 @app.get("/api/pinned")
 async def get_pinned():
-    return _pinned_state
+    # A pin file from before the queue existed has no key for it; answer with
+    # an empty one so every reader sees the same shape.
+    return {"queue": [], **_pinned_state}
 
 
 @app.post("/api/pinned", dependencies=[Depends(require_control_token)])
 async def post_pinned(req: PinnedRequest):
     global _pinned_state
-    _pinned_state = req.model_dump()
+    new_state = req.model_dump()
+    # A tab loaded before the queue existed posts the quadrants alone. Taking
+    # that as "the queue is empty" would wipe it on that tab's every pin
+    # change, so a set that does not mention the queue leaves it as it was.
+    if "queue" not in req.model_fields_set:
+        new_state["queue"] = list((_pinned_state or {}).get("queue") or [])
+    _pinned_state = new_state
     _atomic_json_write(_PINNED_PERSIST_PATH, _pinned_state)
     return _pinned_state
 
