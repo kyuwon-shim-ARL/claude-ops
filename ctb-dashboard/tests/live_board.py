@@ -77,11 +77,13 @@ PIN_READS_TO_FAIL = 0
 
 
 @contextlib.contextmanager
-def open_board(theme=None):
+def open_board(theme=None, init=None):
     """The real dashboard page, fed canned sessions, in a real browser.
 
     `theme` picks one of the console's three palettes ('dark', 'light',
     'parchment'); the default follows the headless browser, which is light.
+    `init` is script run before the page's own, for what has to exist from
+    the first line -- acquireVsCodeApi, to be the VSCode webview.
     """
     with sync_api.sync_playwright() as p:
         try:
@@ -153,6 +155,8 @@ def open_board(theme=None):
         # A control token the page already has: without one the first write
         # opens a window.prompt(), which a headless browser dismisses.
         page.add_init_script("localStorage.setItem('ctb.controlToken', 'test-token')")
+        if init:
+            page.add_init_script(init)
         if theme:
             page.add_init_script(
                 "localStorage.setItem('ctb_theme', %s)" % json.dumps(theme))

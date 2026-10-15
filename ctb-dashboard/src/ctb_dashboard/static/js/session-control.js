@@ -289,6 +289,10 @@
     clip: 'M15 7l-6.5 6.5a2.5 2.5 0 0 0 3.5 3.5L19 10a4.5 4.5 0 0 0-6.4-6.4L5.5 10.7a6.5 6.5 0 0 0 9.2 9.2L20 14.6',
     mic: 'M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM6 11a6 6 0 0 0 12 0M12 17v4M9 21h6',
     queue: 'M10 6h10M10 12h10M10 18h10M4 4.5l1.5-.5v4M3.6 14.6a1.4 1.4 0 0 1 2.6.6c0 1-2.6 1.8-2.6 2.8h2.8',
+    /* "Skip ahead to the next one": two chevrons with no shaft, then a ring
+     * for the session it lands on. Shaftless on purpose -- the tray's arrow
+     * keys all have shafts, and this must not read as one of them. */
+    next: 'M3 7.5l4.5 4.5L3 16.5M9.5 7.5l4.5 4.5-4.5 4.5M18.5 12m-3.25 0a3.25 3.25 0 1 0 6.5 0a3.25 3.25 0 1 0-6.5 0',
   };
   function icon(name, size) {
     var svgNS = 'http://www.w3.org/2000/svg';
@@ -489,8 +493,8 @@
       '#ctb-console .con-tray .con-btn svg{width:16px;height:16px}',
       /* Icon only on a phone: with the word it was a third row by itself. */
       '#ctb-console .con-key-label{display:none}',
-      /* The input row: two 40px keys, the rest is the box. */
-      '#ctb-console .con-mic,#ctb-console .con-clip,#ctb-console .con-send{min-width:40px!important;width:40px;padding:0!important;justify-content:center}',
+      /* The input row: 40px keys, the rest is the box. */
+      '#ctb-console .con-mic,#ctb-console .con-clip,#ctb-console .con-send,#ctb-console .con-next{min-width:40px!important;width:40px;padding:0!important;justify-content:center}',
       '}',
       /* A key that changed the input box: the box line pulses once so the
        * eye lands on what the key did, not only on the status text. */
@@ -672,11 +676,7 @@
      * when no candidate exists. Sticky to the rail's own left edge, first
      * child rather than last, with its opaque ground and fade mirrored to
      * its right side so a chip's name dissolves under it on its way past. */
-    var railSkip = document.createElement('button');
-    railSkip.type = 'button';
-    railSkip.appendChild(icon('right', 15));
-    railSkip.title = '가장 앞 유휴 세션으로 (' + (IS_MAC ? '⌘' : 'Ctrl') + '+\\)';
-    railSkip.setAttribute('aria-label', '작업중이 아닌 가장 앞 세션으로 이동');
+    var railSkip = makeJumpKey(15);
     railSkip.className = 'con-rail-skip';
     railSkip.style.cssText = [
       'position:sticky', 'left:0', 'flex-shrink:0', 'z-index:2',
@@ -698,7 +698,6 @@
     railSkip.addEventListener('mouseleave', function () {
       railSkip.style.color = 'var(--con-muted)';
     });
-    railSkip.addEventListener('click', jumpToFirstIdle);
 
     var header = document.createElement('div');
     header.style.cssText =
@@ -1062,7 +1061,6 @@
     /* The word on a desktop, the arrow alone on a phone: with the mic beside
      * it the row was three controls wide and the box had shrunk to a slot.
      * Both keys are 40px on a phone, so the box keeps most of its width. */
-    send.className = 'con-send';
     send.appendChild(icon('enter', 16));
     var sendLabel = document.createElement('span');
     sendLabel.className = 'con-key-label';
@@ -1071,10 +1069,30 @@
     send.setAttribute('aria-label', '프롬프트 전송');
     send.title = '전송 (Enter)';
     styleBtn(send, 'primary');
+    /* After styleBtn, which rewrites className: set before it, the class was
+     * wiped and the phone's 40px rule never reached this key. */
+    send.classList.add('con-send');
     send.style.display = 'inline-flex';
     send.style.alignItems = 'center';
     send.style.gap = '6px';
     send.addEventListener('click', function () { submit('button'); });
+
+    /* railSkip again, where the thumb already is. On a phone the gesture is
+     * type, 전송, move on -- and the rail's left edge is the far end of the
+     * screen from the input row. Right of 전송, at the edge: the filled key
+     * stays the one the eye finds first, and this plain one is the step after
+     * it. Hidden in the VSCode webview with the clip, whose console is read-
+     * only; railSkip stays there, since walking the rail still works. */
+    var next = makeJumpKey(16);
+    var nextLabel = document.createElement('span');
+    nextLabel.className = 'con-key-label';
+    nextLabel.textContent = '다음';
+    next.appendChild(nextLabel);
+    styleBtn(next, '');
+    next.classList.add('con-next');   /* after styleBtn -- it rewrites className */
+    next.style.display = IS_VSCODE ? 'none' : 'inline-flex';
+    next.style.alignItems = 'center';
+    next.style.gap = '6px';
 
     /* Push-to-talk. Hidden until /api/stt/config says there is a key, and
      * never in the VSCode webview, whose proxy forwards only GET. What comes
@@ -1121,6 +1139,7 @@
     row.appendChild(clip);
     row.appendChild(mic);
     row.appendChild(send);
+    row.appendChild(next);
 
 
     /* The pause a selection causes was invisible: the tail simply stopped
@@ -1245,7 +1264,7 @@
     el = { keys: keys, keysMore: more, clip: clip, picker: picker, endPill: endPill, prevPill: prevPill, prevLabel: prevLabel,
            root: root, strip: strip, railHome: railHome, railSkip: railSkip, title: title, status: status, tail: tail, mic: mic,
            frozen: frozen, input: input,
-           send: send, silent: silent, quad: quad, quadNum: quadNum,
+           send: send, next: next, silent: silent, quad: quad, quadNum: quadNum,
            queue: queuePanel, qToggle: qToggle, qCount: qCount };
 
     /* The keyboard shrinks the visual viewport, and iOS does not always fire a
@@ -2152,6 +2171,7 @@
      * the same sessions, and the reckoning also records what was seen, so it
      * can only happen once per publication. */
     var flash = noticedTransitions();
+    settleJustSent();
     syncStrip(flash);
     syncPalette(flash);
     renderQueue();
@@ -2404,19 +2424,35 @@
     paintRunDividers();
   }
 
-  /* railSkip's own paint: shown whenever the rail is, dimmed rather than
-   * removed when the jump it fires (jumpToFirstIdle) has nowhere to go --
-   * no idle chip at all, or the console already on it. Asks firstIdle the
-   * same question rather than keeping a second copy of "is anything idle". */
-  function paintRailSkip() {
-    var btn = el.railSkip;
-    if (!btn || !el.strip) return;
-    if (el.strip.style.display === 'none') { btn.style.display = 'none'; return; }
-    btn.style.display = 'flex';
+  /* The paint for both jump keys, railSkip and the input row's 다음: dimmed
+   * rather than removed when the jump they fire (jumpToFirstIdle) has
+   * nowhere to go -- no idle chip at all, or the console already on it.
+   * Asks firstIdle the same question rather than keeping a second copy of
+   * "is anything idle", so the two keys cannot disagree. railSkip shows
+   * whenever the rail does; 다음 belongs to the input row, which is there
+   * whether or not the rail is (and never in the VSCode webview). */
+  function paintJumpKeys() {
+    var skip = el.railSkip;
+    var next = el.next;
+    if (!skip && !next) return;
     var first = firstIdle();
     var candidate = !!first && first.name !== state.session;
-    btn.style.opacity = candidate ? '1' : '.3';
-    btn.style.pointerEvents = candidate ? 'auto' : 'none';
+    var dim = function (btn) {
+      btn.style.opacity = candidate ? '1' : '.3';
+      btn.style.pointerEvents = candidate ? 'auto' : 'none';
+    };
+    if (skip && el.strip) {
+      if (el.strip.style.display === 'none') {
+        skip.style.display = 'none';
+      } else {
+        skip.style.display = 'flex';
+        dim(skip);
+      }
+    }
+    if (next) {
+      next.style.display = IS_VSCODE ? 'none' : 'inline-flex';
+      dim(next);
+    }
   }
 
   /* Marks every place on the rail where a busy (working) chip sits next to a
@@ -2427,10 +2463,10 @@
    * approach is to throw the old dividers away and re-walk.
    *
    * Called from the same three spots syncStrip/renderStrip/appendChip always
-   * called it from, so railSkip's dimmed state rides along and tracks live
-   * state without a fourth call site to remember. */
+   * called it from, so the jump keys' dimmed state rides along and tracks
+   * live state without a fourth call site to remember. */
   function paintRunDividers() {
-    paintRailSkip();
+    paintJumpKeys();
     if (!el.strip) return;
     var olds = el.strip.querySelectorAll('[data-ctb-divider]');
     for (var i = 0; i < olds.length; i++) {
@@ -3224,12 +3260,62 @@
     show(item.name, true);
   });
 
+  /* Sessions this console has just sent something to, by name, each holding
+   * the timer that lets it go.
+   *
+   * A send makes a session busy, but the board does not hear of it until its
+   * next poll (two seconds on the server, longer through the board), and
+   * until then the session still reads idle. Send, then 다음, was landing
+   * straight back on the session just sent to -- or saying it was already
+   * there. Marked locally, the jump counts it as busy at once.
+   *
+   * Private to this file: not written into the board's state or its order.
+   * The chip must not move under the thumb that just pressed 전송; it stays
+   * where it is until the board itself says busy, which is a few seconds.
+   *
+   * Let go on the first of: the send refused (nothing went in), the board
+   * reporting the session busy (the real signal has arrived, and the next
+   * idle it reports means the work is done), or the timeout -- a slash
+   * command can finish without the session ever reading working. */
+  var JUST_SENT_MS = 8000;
+  var justSent = {};
+
+  /* Set when the send starts, not when it is answered: the next tap often
+   * comes while the request is still in flight. */
+  var ANSWER_KEY_RE = /^(?:[yYnN1-9]|Enter)$/;   /* not Space: in a multi-select menu it only toggles */
+
+  function markJustSent(name) {
+    if (!name) return;
+    if (justSent[name]) clearTimeout(justSent[name]);
+    justSent[name] = setTimeout(function () { clearJustSent(name); }, JUST_SENT_MS);
+    /* Nothing on the board changed, so no board event will repaint. */
+    paintJumpKeys();
+  }
+
+  function clearJustSent(name) {
+    if (!justSent[name]) return;
+    clearTimeout(justSent[name]);
+    delete justSent[name];
+    paintJumpKeys();
+  }
+
+  /* Run on every board publication. A session that has gone is let go too:
+   * nothing is left to skip. */
+  function settleJustSent() {
+    var map = catalogMap();
+    for (var name in justSent) {
+      var live = map[name];
+      if (!live || isBusyState(live.state)) clearJustSent(name);
+    }
+  }
+
   /* Reads live state from the catalogue rather than trusting the item the
    * walk list is carrying, so a session that just went busy drops out of
    * the candidates immediately, not a poll later. */
   function notBusyPredicate() {
     var map = catalogMap();
     return function (it) {
+      if (justSent[it.name]) return false;
       var live = map[it.name];
       var st = live ? live.state : it.state;
       return !isBusyState(st);
@@ -3248,7 +3334,7 @@
     if (hintOrder) {
       for (var k = 0; k < hintOrder.length; k++) {
         var it = hintOrder[k];
-        if (!isBusyState(it.state) && inCatalog(it.name)) return it;
+        if (!isBusyState(it.state) && !justSent[it.name] && inCatalog(it.name)) return it;
       }
       return null;
     }
@@ -3260,8 +3346,8 @@
     return null;
   }
 
-  /* Behind Ctrl/Cmd+Backslash and its rail-button mirror (con-rail-skip,
-   * built alongside railHome). */
+  /* Behind Ctrl/Cmd+Backslash and its two button mirrors: con-rail-skip,
+   * built alongside railHome, and con-next beside 전송. */
   function jumpToFirstIdle() {
     var item = firstIdle();
     if (!item) {
@@ -3274,7 +3360,25 @@
     }
     if (!state.session && IS_VSCODE && window.ctbFocusSession
         && window.ctbFocusSession(item.name)) return;
+    /* show() parks what is in the box as the left session's draft. Said out
+     * loud: 다음 sits right beside 전송, and a thumb that meant one and hit
+     * the other would otherwise leave a prompt unsent with no sign of it. */
+    var left = state.session;
+    var parked = left && el.input && el.input.value.trim() ? left : null;
     show(item.name, true);
+    if (parked) setStatus('초안 보관됨 · ' + parked.replace(/^claude[_-]/, ''), 'var(--con-warn)');
+  }
+
+  /* The jump as a button. One factory for railSkip and 다음 so the two say
+   * and do exactly the same thing; each caller styles its own. */
+  function makeJumpKey(size) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.appendChild(icon('next', size));
+    btn.title = '가장 앞 유휴 세션으로 (' + (IS_MAC ? '⌘' : 'Ctrl') + '+\\)';
+    btn.setAttribute('aria-label', '작업중이 아닌 가장 앞 세션으로 이동');
+    btn.addEventListener('click', jumpToFirstIdle);
+    return btn;
   }
 
   /* Ctrl/Cmd+Backslash. Korean layouts print the key as ₩, so it is picked
@@ -6550,6 +6654,7 @@
      * that went in, and a longer history would let an old send claim a line
      * that is no longer the same text. */
     state.sent = { session: sent, text: text };
+    markJustSent(sent);
 
     post('/prompt', shell ? { text: text, shell: true } : { text: text })
       .then(function (res) {
@@ -6558,6 +6663,9 @@
         });
       })
       .then(function (r) {
+        /* Refused, whatever the reason: nothing went in, so the session is
+         * as idle as it reads. A bash resend below marks it again. */
+        if (r.status !== 200) clearJustSent(sent);
         if (r.status === 200) {
           state.sentAt = Date.now();
           delete state.drafts[sent];
@@ -6615,7 +6723,10 @@
           if (r.body.detail) window.alert(String(r.body.detail));
         }
       })
-      .catch(function () { say('네트워크 오류', 'var(--con-err)'); })
+      .catch(function () {
+        clearJustSent(sent);
+        say('네트워크 오류', 'var(--con-err)');
+      })
       .then(function () {
         state.busy = false;
         el.send.disabled = false;
@@ -6635,9 +6746,18 @@
     var what = label || ('키 ' + key);
     var before = { text: state.pending ? state.pending.text : '', ghost: state.ghost };
     setStatus(what + ' 전송…', 'var(--con-muted)');
+    /* Answering a choice from the tray and moving on is the phone's other
+     * send-then-next; the same mark keeps 다음 off the session just answered.
+     * Only for keys that answer: an arrow, Backspace or Tab is the user still
+     * at work in this session, and marking those for eight seconds pushed
+     * Ctrl+\ and 다음 off a menu that was not answered yet. Escape stops
+     * whatever a send started, so it takes the mark away instead. */
+    if (ANSWER_KEY_RE.test(key)) markJustSent(name);
+    else if (key === 'Escape') clearJustSent(name);
     post('/key', via ? { key: key, via: String(via).slice(0, 40) } : { key: key })
       .then(function (res) {
         if (!res.ok) {
+          clearJustSent(name);
           setStatus(what + ' 전송 실패 (' + res.status + ')', 'var(--con-err)');
           return;
         }
@@ -6645,7 +6765,10 @@
         pollTail();
         keyEffect(name, what, before);
       })
-      .catch(function () { setStatus('네트워크 오류', 'var(--con-err)'); });
+      .catch(function () {
+        clearJustSent(name);
+        setStatus('네트워크 오류', 'var(--con-err)');
+      });
   }
 
   /* What the key DID, not only that it went. "전송됨" says tmux took it; it
@@ -6979,6 +7102,9 @@
     el.root.style.display = 'flex';
     lockPage();
     renderStrip();
+    /* renderStrip paints the jump keys only when it draws a rail; 다음 is
+     * on screen either way, and "already here" just changed. */
+    paintJumpKeys();
     fetchOrder();
     fitViewport();
     fitKeys();
@@ -7147,6 +7273,7 @@
     _openFind: openFind,
     _sttDraft: sttDraft,
     _setStatus: setStatus,
+    _setJustSentMs: function (ms) { JUST_SENT_MS = ms; },
     /* Two pieces of in-flight state busy() reads, reachable so a test can put
      * the console in that state without a microphone or a live tmux. */
     _stt: function () { return stt; },
