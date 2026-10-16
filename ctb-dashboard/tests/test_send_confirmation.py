@@ -183,6 +183,9 @@ class FakeAnalyzer:
     def get_screen_content(self, name, use_cache=True):
         return self.screens.pop(0) if len(self.screens) > 1 else self.screens[0]
 
+    def invalidate(self, name):
+        pass
+
 
 @pytest.fixture
 def wire(monkeypatch):

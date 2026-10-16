@@ -26,6 +26,9 @@ class _ReadyAnalyzer:
     def get_screen_content(self, name, use_cache=True):
         return _READY_SCREEN
 
+    def invalidate(self, name):
+        pass
+
 
 @pytest.fixture
 def sent(monkeypatch):

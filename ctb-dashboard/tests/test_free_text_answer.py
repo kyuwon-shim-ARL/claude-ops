@@ -110,6 +110,9 @@ class _ChooserAnalyzer:
     def get_screen_content(self, name, use_cache=True):
         return self.screen
 
+    def invalidate(self, name):
+        pass
+
 
 @pytest.fixture
 def wired(monkeypatch):

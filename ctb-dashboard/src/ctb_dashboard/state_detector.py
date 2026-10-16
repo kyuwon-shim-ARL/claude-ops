@@ -369,6 +369,14 @@ class SessionStateAnalyzer:
         self._state_cache: Dict[str, tuple[SessionState, datetime]] = {}
         self._state_cache_ttl_seconds = 0.5
 
+        # When invalidate(name) last ran. A capture that was already in
+        # flight when invalidate() landed can still finish afterward and
+        # write its now-stale result back into the cache, silently undoing
+        # the invalidation -- get_screen_content/get_state compare the time
+        # they started against this before writing, and skip the write if
+        # invalidate() happened after they started.
+        self._invalidated_at: Dict[str, datetime] = {}
+
         # Track screen stability for quiet completion detection
         self._last_screen_hash: Dict[str, str] = {}
         self._screen_stable_count: Dict[str, int] = {}
@@ -399,11 +407,15 @@ class SessionStateAnalyzer:
         """
         now = datetime.now()
 
-        # Check cache first
-        if use_cache and session_name in self._screen_cache:
-            content, timestamp = self._screen_cache[session_name]
-            if (now - timestamp).total_seconds() < self._cache_ttl_seconds:
-                return content
+        # Check cache first. .get() rather than `in` + index: another thread's
+        # invalidate() can pop the entry between the two, and that race would
+        # otherwise raise KeyError here.
+        if use_cache:
+            entry = self._screen_cache.get(session_name)
+            if entry is not None:
+                content, timestamp = entry
+                if (now - timestamp).total_seconds() < self._cache_ttl_seconds:
+                    return content
 
         try:
             log_lines = 200
@@ -418,7 +430,11 @@ class SessionStateAnalyzer:
 
             if result.returncode == 0:
                 content = result.stdout
-                self._screen_cache[session_name] = (content, now)
+                # Don't let a capture that started before an invalidate()
+                # write its stale result back in after the fact.
+                invalidated_at = self._invalidated_at.get(session_name)
+                if invalidated_at is None or invalidated_at <= now:
+                    self._screen_cache[session_name] = (content, now)
                 return content
             else:
                 logger.warning(f"Failed to capture tmux pane for {session_name}: {result.stderr}")
@@ -430,6 +446,14 @@ class SessionStateAnalyzer:
         except Exception as e:
             logger.error(f"Error getting screen content for {session_name}: {e}")
             return None
+
+    def invalidate(self, session_name: str) -> None:
+        """Drop cached screen/state for a session right after we send it
+        input -- otherwise the next poll inside cache_ttl would read what
+        tmux looked like *before* the send and the board would lag."""
+        self._screen_cache.pop(session_name, None)
+        self._state_cache.pop(session_name, None)
+        self._invalidated_at[session_name] = datetime.now()
 
     @staticmethod
     def _collapse_sub_output(lines: list) -> list:
@@ -980,11 +1004,13 @@ class SessionStateAnalyzer:
         """
         now = datetime.now()
 
-        # Check state cache first
-        if use_cache and session_name in self._state_cache:
-            cached_state, timestamp = self._state_cache[session_name]
-            if (now - timestamp).total_seconds() < self._state_cache_ttl_seconds:
-                return cached_state
+        # Check state cache first. Same .get() race-safety as get_screen_content.
+        if use_cache:
+            entry = self._state_cache.get(session_name)
+            if entry is not None:
+                cached_state, timestamp = entry
+                if (now - timestamp).total_seconds() < self._state_cache_ttl_seconds:
+                    return cached_state
 
         screen_content = self.get_screen_content(session_name, use_cache=use_cache)
 
@@ -992,10 +1018,8 @@ class SessionStateAnalyzer:
             # Prefer stale cached state over UNKNOWN when screen is unreadable —
             # avoids stuck sessions dropping below idle just because tmux had a
             # momentary read failure.
-            if session_name in self._state_cache:
-                state = self._state_cache[session_name][0]
-            else:
-                state = SessionState.UNKNOWN
+            stale = self._state_cache.get(session_name)
+            state = stale[0] if stale is not None else SessionState.UNKNOWN
         elif not screen_content.strip():
             state = SessionState.IDLE
         else:
@@ -1022,9 +1046,13 @@ class SessionStateAnalyzer:
 
             state = min(detected_states, key=lambda s: self.STATE_PRIORITY[s])
 
-        # Update state cache
+        # Update state cache -- same invalidate-vs-in-flight-capture guard as
+        # get_screen_content: an invalidate() that landed after this call
+        # started must not be undone by this call's own stale write.
         if use_cache:
-            self._state_cache[session_name] = (state, now)
+            invalidated_at = self._invalidated_at.get(session_name)
+            if invalidated_at is None or invalidated_at <= now:
+                self._state_cache[session_name] = (state, now)
 
         return state
 

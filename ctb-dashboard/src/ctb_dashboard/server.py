@@ -109,6 +109,12 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 2  # seconds between state refreshes
+# A kick (right after a tmux send) runs the poller at FAST_FLOOR cadence for
+# FAST_WINDOW seconds, so idle->working shows up in ~1s instead of waiting
+# out the full POLL_INTERVAL. No cap on kicks themselves: the shared control
+# rate limiter and the control secret already bound how often one can land.
+FAST_WINDOW = 3.0
+FAST_FLOOR = 1.0
 # Default stays 0.0.0.0 (reachable over Tailscale). Narrowing the listener is
 # opt-in via CTB_BIND_HOST because this runs under systemd Restart=always:
 # hard-binding to an interface that is not up yet at boot would loop forever.
@@ -282,6 +288,42 @@ def _state_event() -> asyncio.Event:
     if _state_changed is None:
         _state_changed = asyncio.Event()
     return _state_changed
+
+
+# Wakes the background poller immediately after a send, instead of it sitting
+# out the rest of POLL_INTERVAL. Lazy for the same reason as _state_changed:
+# module import happens before uvicorn's loop exists.
+_poll_kick: Optional[asyncio.Event] = None
+_fast_until: float = 0.0  # monotonic deadline; poller runs at FAST_FLOOR cadence until then
+_hold_clear_pending: set = set()  # session names whose WORKING hold clears on the next poll
+
+
+def _kick_event() -> asyncio.Event:
+    global _poll_kick
+    if _poll_kick is None:
+        _poll_kick = asyncio.Event()
+    return _poll_kick
+
+
+def _kick_poller() -> None:
+    """Call right after a tmux send succeeds. Wakes the poller now and keeps
+    it at FAST_FLOOR cadence for FAST_WINDOW seconds -- long enough to catch
+    the idle->working transition without running fast indefinitely."""
+    global _fast_until
+    _fast_until = max(_fast_until, time.monotonic() + FAST_WINDOW)
+    _kick_event().set()
+
+
+def _next_poll_delay(now: float, last_start: float, fast_until: float) -> float:
+    """How long the poller should wait before starting its next poll.
+
+    Inside the fast window: floored to FAST_FLOOR seconds after the *last*
+    poll started (not after now), so a kick that lands mid-poll doesn't
+    restart the clock. Outside it: the normal POLL_INTERVAL.
+    """
+    if now < fast_until:
+        return max(0.0, last_start + FAST_FLOOR - now)
+    return POLL_INTERVAL
 # Not /tmp. This host sweeps it (`q /tmp ... 10d`), and pins are configuration,
 # not scratch: they gate every completion alert, so losing them turns alerts off
 # silently and permanently. That is exactly how "notifications used to come and
@@ -371,17 +413,21 @@ def _probe_session(name: str) -> tuple:
         _working_hold[name] = now
         # Clear previous completion so next completion can be detected
         _completion_times.pop(name, None)
-    elif raw_state in (SessionState.IDLE, SessionState.WAITING_INPUT) and name in _working_hold:
-        elapsed = now - _working_hold[name]
-        # Was recently WORKING -> work just completed (IDLE or WAITING)
-        if name not in _completion_times:
-            _completion_times[name] = now
-            logger.info(f"Fresh completion: {name}")
-        if raw_state == SessionState.IDLE and elapsed < _WORKING_HOLD_SECONDS:
-            logger.debug(f"Hold WORKING for {name} ({elapsed:.1f}s < {_WORKING_HOLD_SECONDS}s)")
-            state = SessionState.WORKING
-        else:
-            del _working_hold[name]
+    elif raw_state in (SessionState.IDLE, SessionState.WAITING_INPUT):
+        held_since = _working_hold.get(name)
+        if held_since is not None:
+            elapsed = now - held_since
+            # Was recently WORKING -> work just completed (IDLE or WAITING)
+            if name not in _completion_times:
+                _completion_times[name] = now
+                logger.info(f"Fresh completion: {name}")
+            if raw_state == SessionState.IDLE and elapsed < _WORKING_HOLD_SECONDS:
+                logger.debug(f"Hold WORKING for {name} ({elapsed:.1f}s < {_WORKING_HOLD_SECONDS}s)")
+                state = SessionState.WORKING
+            else:
+                # .pop rather than del, defensively: the _hold_clear_pending
+                # drain runs before any probe starts, so it cannot race this.
+                _working_hold.pop(name, None)
 
     # Hold timer: keep STUCK_AFTER_AGENT stable through brief detection gaps
     if raw_state == SessionState.STUCK_AFTER_AGENT:
@@ -644,6 +690,22 @@ def _content_hash(session_list: list) -> str:
 def _poll_sessions() -> Dict[str, Any]:
     """Poll all tmux sessions and return state dict using SessionStateAnalyzer."""
     global _prev_session_timestamps
+    # Escape/C-c/interrupt queue a hold-clear instead of touching
+    # _working_hold directly from the request handler -- drained here, right
+    # before probing, so a poll already mid-flight (its _probe_session
+    # threads already running) is unaffected and only a poll that *starts*
+    # after the request lands consumes it. The drain itself can't race with
+    # this same function's probes -- it runs to completion, single-threaded,
+    # before the ThreadPoolExecutor below is created -- but a request
+    # handler can add to the set at any moment, including while this while
+    # loop is running; .pop() in a loop (not a frozen copy) picks up
+    # anything added before the set empties instead of losing it, and the
+    # .pop(name, None) on _working_hold is defensive against
+    # _probe_session's own reader/writer for the same key.
+    while _hold_clear_pending:
+        name = _hold_clear_pending.pop()
+        _working_hold.pop(name, None)
+
     sessions = get_all_claude_sessions()
     now = time.time()
     activity_map = get_sessions_activity()
@@ -885,14 +947,17 @@ async def _purge_consumed_loop() -> None:
 
 
 async def _background_poller():
-    """Background task that polls sessions every POLL_INTERVAL seconds."""
+    """Background task that polls sessions every POLL_INTERVAL seconds,
+    or faster for a few seconds after a kick (see _kick_poller)."""
     logger.info("Background poller started")
     while True:
+        kick_event = _kick_event()
+        kick_event.clear()
+        last_start = time.monotonic()
         try:
             loop = asyncio.get_running_loop()
-            t0 = time.monotonic()
             snapshot = await loop.run_in_executor(None, _poll_sessions)
-            poll_ms = int((time.monotonic() - t0) * 1000)
+            poll_ms = int((time.monotonic() - last_start) * 1000)
             await _publish_state(snapshot, poll_ms)
             if poll_ms > SLOW_POLL_WARN_MS:
                 logger.warning("Slow poll: %dms for %d sessions (pushes and persistence included)",
@@ -900,7 +965,18 @@ async def _background_poller():
             logger.debug(f"Polled {len(snapshot.get('sessions', []))} sessions in {poll_ms}ms")
         except Exception as e:
             logger.warning(f"Poller error: {e}", exc_info=True)
-        await asyncio.sleep(POLL_INTERVAL)
+
+        delay = _next_poll_delay(time.monotonic(), last_start, _fast_until)
+        try:
+            await asyncio.wait_for(kick_event.wait(), timeout=delay)
+        except asyncio.TimeoutError:
+            continue
+        # Woken early by a kick: sleep out whatever floor remains instead of
+        # looping back to wait on the event again (it may still be set,
+        # which would otherwise spin with no delay at all).
+        remaining = _next_poll_delay(time.monotonic(), last_start, _fast_until)
+        if remaining > 0:
+            await asyncio.sleep(remaining)
 
 
 # --- FastAPI App ---
@@ -1432,6 +1508,11 @@ async def _shell_prompt(name: str, req: "PromptRequest", client: str | None) -> 
         _audit("prompt", name, client, False, "tmux_failed")
         raise HTTPException(status_code=502, detail=str(e))
 
+    # The `before` capture above is now stale -- without this, the poller
+    # could read it back out of cache instead of what tmux shows now.
+    analyzer.invalidate(name)
+    _kick_poller()
+
     await asyncio.sleep(_SEND_CONFIRM_DELAY)
     after = await loop.run_in_executor(
         None, lambda: analyzer.get_screen_content(name, use_cache=False)
@@ -1531,6 +1612,10 @@ async def session_prompt(name: str, req: PromptRequest, request: Request):
         _audit("prompt", name, client, False, "tmux_failed")
         raise HTTPException(status_code=502, detail=str(e))
 
+    # Same reason as _shell_prompt: `before` is now stale.
+    analyzer.invalidate(name)
+    _kick_poller()
+
     # Confirm something actually changed on screen. tmux reports success for a
     # send that landed nowhere, so this is the only evidence we have.
     await asyncio.sleep(_SEND_CONFIRM_DELAY)
@@ -1609,6 +1694,13 @@ async def session_key(name: str, req: KeyRequest, request: Request):
     except RuntimeError as e:
         _audit("key", name, client, False, "tmux_failed")
         raise HTTPException(status_code=502, detail=str(e))
+    _state_analyzer.invalidate(name)
+    if req.key in ("Escape", "C-c"):
+        # These two can end a WORKING turn; clear the hold so the next poll
+        # is free to show IDLE instead of riding out _WORKING_HOLD_SECONDS.
+        # If work is actually still going, the next raw WORKING re-sets it.
+        _hold_clear_pending.add(name)
+    _kick_poller()
     via = (req.via or "")[:40]
     _audit("key", name, client, True, f"{req.key}|{via}" if via else req.key)
     return {"session": name, "status": "sent", "key": req.key}
@@ -1632,6 +1724,9 @@ async def session_interrupt(name: str, request: Request):
     except RuntimeError as e:
         _audit("interrupt", name, client, False, "tmux_failed")
         raise HTTPException(status_code=502, detail=str(e))
+    _state_analyzer.invalidate(name)
+    _hold_clear_pending.add(name)  # same reasoning as Escape/C-c in session_key
+    _kick_poller()
     _audit("interrupt", name, client, True)
     return {"session": name, "status": "interrupted"}
 

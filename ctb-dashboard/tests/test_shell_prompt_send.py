@@ -32,6 +32,9 @@ def sent(monkeypatch):
             screens["n"] += 1
             return f"$ {screens['n']}"
 
+        def invalidate(self, name):
+            pass
+
     monkeypatch.setattr(_srv, "_state_analyzer", _Analyzer())
     return calls
 
