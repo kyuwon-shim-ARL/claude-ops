@@ -1770,7 +1770,12 @@
   /* The board tells us it has new session data; both surfaces take it from
    * the globals it has just republished. Kept passive: the console asks for
    * nothing here and repaints nothing that is not already on screen. */
-  window.addEventListener('ctb:sessions', function () { syncSurfaces(); });
+  window.addEventListener('ctb:sessions', function () {
+    syncSurfaces();
+    /* The board's own 다음 key is on screen with the console closed, when
+     * nothing else repaints the jump keys. */
+    paintJumpKeys();
+  });
 
   function fetchOrder() {
     if (Array.isArray(window.ctbSessionOrder) && window.ctbSessionOrder.length) return;
@@ -2504,13 +2509,15 @@
   function paintJumpKeys() {
     var skip = el.railSkip;
     var next = el.next;
-    if (!skip && !next) return;
+    var board = document.getElementById('btn-next-idle');
+    if (!skip && !next && !board) return;
     var first = firstIdle();
     var candidate = !!first && first.name !== state.session;
     var dim = function (btn) {
       btn.style.opacity = candidate ? '1' : '.3';
       btn.style.pointerEvents = candidate ? 'auto' : 'none';
     };
+    if (board) dim(board);
     if (skip && el.strip) {
       if (el.strip.style.display === 'none') {
         skip.style.display = 'none';
@@ -3451,6 +3458,13 @@
     btn.addEventListener('click', jumpToFirstIdle);
     return btn;
   }
+
+  /* The board's copy, beside 세션 검색: the same jump from the board itself,
+   * for a phone with no Ctrl to press. Opens the console on that session.
+   * Delegated: this file loads in <head>, before the button exists. */
+  document.addEventListener('click', function (e) {
+    if (e.target && e.target.closest && e.target.closest('#btn-next-idle')) jumpToFirstIdle();
+  });
 
   /* Ctrl/Cmd+Backslash. Korean layouts print the key as ₩, so it is picked
    * up by `code`, with `key` as a fallback for a layout this does not
