@@ -818,13 +818,43 @@
     styleBtn(close, 'icon');
     close.addEventListener('click', hide);
 
+    /* On a phone the row of tools left the session's own name a few pixels
+     * -- "u…" on an iPhone 12. When the name would be cut, everything but
+     * session search and close folds behind one key (fitHead), and a tap
+     * there lays them out on a row of their own under the name -- in line
+     * they would squeeze it to nothing. Two groups, so a wide screen keeps
+     * the order it always had. */
+    var headTools = document.createElement('span');
+    headTools.style.cssText = 'display:flex;align-items:center;gap:8px;flex-shrink:0;';
+    headTools.appendChild(silent);
+    headTools.appendChild(quad);
+    var headTools2 = document.createElement('span');
+    headTools2.style.cssText = headTools.style.cssText;
+    headTools2.appendChild(findText);
+    headTools2.appendChild(copy);
+    headTools2.appendChild(helpBtn);
+
+    var headMore = document.createElement('button');
+    headMore.type = 'button';
+    headMore.textContent = '\u22ef';
+    headMore.setAttribute('aria-expanded', 'false');
+    styleBtn(headMore, 'icon');
+    headMore.className += ' con-head-more';
+    headMore.style.cssText = 'display:none;font-weight:700;font-size:18px;';
+    headMore.addEventListener('click', function () {
+      state.headOpen = !state.headOpen;
+      fitHead();
+    });
+
+    var headBreak = document.createElement('span');
+    headBreak.style.cssText = 'display:none;flex-basis:100%;height:0;';
+
     header.appendChild(title);
-    header.appendChild(silent);
-    header.appendChild(quad);
+    header.appendChild(headBreak);
+    header.appendChild(headTools);
+    header.appendChild(headMore);
     header.appendChild(find);
-    header.appendChild(findText);
-    header.appendChild(copy);
-    header.appendChild(helpBtn);
+    header.appendChild(headTools2);
     header.appendChild(close);
 
     var tail = document.createElement('pre');
@@ -1265,6 +1295,7 @@
            root: root, strip: strip, railHome: railHome, railSkip: railSkip, title: title, status: status, tail: tail, mic: mic,
            frozen: frozen, input: input,
            send: send, next: next, silent: silent, quad: quad, quadNum: quadNum,
+           headTools: headTools, headTools2: headTools2, headMore: headMore, headBreak: headBreak,
            queue: queuePanel, qToggle: qToggle, qCount: qCount };
 
     /* The keyboard shrinks the visual viewport, and iOS does not always fire a
@@ -1290,6 +1321,7 @@
         fitKeys();
         updateEndPill();
         paintRailHome(true);   /* a narrower window can start the rail scrolling */
+        fitHead();
       });
     });
     window.addEventListener('orientationchange', function () {
@@ -1764,6 +1796,44 @@
         renderStrip();
       })
       .catch(function () { /* the strip just stays empty */ });
+  }
+
+  /* Measured with every tool laid out: if the name still fits, nothing folds.
+   * Synchronous, so the trial layout is never painted. The badge and the pin
+   * key come and go on their own (paintSilentBadge, paintQuadBtn), which is
+   * why renderStrip runs this right after them. */
+  function fitHead() {
+    if (!el.title || !el.headMore) return;
+    el.headTools.style.display = 'flex';
+    el.headTools2.style.display = 'flex';
+    el.headMore.style.display = 'none';
+    el.headBreak.style.display = 'none';
+    el.headBreak.parentNode.style.flexWrap = 'nowrap';
+    var cut = el.title.scrollWidth > el.title.clientWidth + 1;
+    if (!cut) state.headOpen = false;
+    var fold = cut && !state.headOpen;
+    if (fold) {
+      /* A menu anchored to the pin key, or focus on a tool, must not be left
+       * on something that is about to fold away. */
+      if (quadMenuOpen()) closeQuadMenu();
+      var f = document.activeElement;
+      if (f && (el.headTools.contains(f) || el.headTools2.contains(f))) el.headMore.focus();
+    }
+    el.headTools.style.display = fold ? 'none' : 'flex';
+    el.headTools2.style.display = fold ? 'none' : 'flex';
+    el.headMore.style.display = cut ? '' : 'none';
+    /* Open on a narrow screen: name, ⋯, search and close stay on the first
+     * row; the break and both tool groups are ordered after them. */
+    var row = cut && state.headOpen;
+    el.headBreak.style.display = row ? 'block' : 'none';
+    el.headBreak.parentNode.style.flexWrap = row ? 'wrap' : 'nowrap';
+    el.headBreak.parentNode.style.rowGap = row ? '6px' : '';
+    el.headBreak.style.order = row ? '1' : '';
+    el.headTools.style.order = row ? '2' : '';
+    el.headTools2.style.order = row ? '2' : '';
+    el.headMore.setAttribute('aria-expanded', state.headOpen ? 'true' : 'false');
+    el.headMore.title = state.headOpen ? '\ub3c4\uad6c \uc811\uae30' : '\ub3c4\uad6c \ub354 \ubcf4\uae30';
+    el.headMore.setAttribute('aria-label', el.headMore.title);
   }
 
   /* Pinned is server state the board re-reads on a timer, so this is checked on
@@ -2517,6 +2587,7 @@
   function renderStrip() {
     paintSilentBadge();
     paintQuadBtn();
+    fitHead();
     renderQueue();
     if (!el.strip) return;
     var list = sessionOrder();
@@ -7071,6 +7142,9 @@
     state.pinned = true;
     setFrozen(false);
     el.title.textContent = name.replace(/^claude[_-]/, '');
+    /* Folded again for each session: opened, the tools are what cut the name. */
+    state.headOpen = false;
+    fitHead();
     /* The one visible sign that a send here goes to bash, not Claude --
      * everything else about the box (Enter to send, Shift+Enter for a
      * newline) is unchanged. */
