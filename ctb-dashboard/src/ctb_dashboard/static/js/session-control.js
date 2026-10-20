@@ -2674,7 +2674,7 @@
    * Hidden by default, and whether it is open is this viewer's choice, kept
    * in this browser. */
   var QUEUE_OPEN_KEY = 'ctb_console_queue_open';
-  var cq = { open: false, drag: null, marker: null, ghost: null, painted: null };
+  var cq = { open: false, drag: null, marker: null, ghost: null, painted: null, scrollRaf: 0 };
   try { cq.open = localStorage.getItem(QUEUE_OPEN_KEY) === '1'; } catch (e) { /* closed */ }
 
   function queueNames() {
@@ -2854,6 +2854,10 @@
     var m = cq.marker.style;
     if (!t || !t.rect) { m.display = 'none'; return; }
     var r = t.rect;
+    /* Fixed to the page, so the panel's scroll does not clip it: a slot on
+     * a row scrolled out of view is not drawn over what lies outside. */
+    var pb = el.queue.getBoundingClientRect();
+    if (r.bottom <= pb.top || r.top >= pb.bottom) { m.display = 'none'; return; }
     if (t.alone) {
       m.left = r.left + 'px'; m.width = r.width + 'px'; m.height = '3px';
       m.top = (t.edge === 'start' ? r.top - 3 : r.bottom) + 'px';
@@ -2864,9 +2868,57 @@
     m.display = 'block';
   }
 
+  /* The panel is a few rows tall on a phone (84px), so a row could only be
+   * dragged as far as the rows already in view. Held near the panel's top or
+   * bottom edge -- or past it -- the drag scrolls the panel that way, slowly
+   * at the inner edge of the band and at full speed at or beyond the panel's
+   * own edge, and keeps scrolling while the finger rests there.
+   *
+   * The band is thin: the panel is two lines of chips, and a wide band
+   * would scroll the lower line out from under a finger aiming at it. A
+   * finger well past the edge has left to abandon the drag (a drop outside
+   * does nothing), so that stops scrolling too. */
+  var QUEUE_SCROLL_MAX = 8;     /* px per frame, about 480px/s */
+  var QUEUE_PAST = 48;          /* px beyond the edge that still scroll */
+
+  function queueScrollStep(box, x, y) {
+    if (x < box.left || x > box.right) return 0;
+    var edge = Math.min(14, box.height * 0.15);
+    if (y < box.top - QUEUE_PAST || y > box.bottom + QUEUE_PAST) return 0;
+    var top = box.top + edge;
+    var bottom = box.bottom - edge;
+    var depth = y < top ? y - top : y > bottom ? y - bottom : 0;
+    if (!depth) return 0;
+    var f = Math.min(1, Math.abs(depth) / edge);
+    return (depth < 0 ? -1 : 1) * Math.max(1, Math.round(QUEUE_SCROLL_MAX * f));
+  }
+
+  function stepQueueScroll() {
+    cq.scrollRaf = 0;
+    var d = cq.drag;
+    if (!d || !d.active || !el.queue) return;
+    var box = el.queue.getBoundingClientRect();
+    var v = queueScrollStep(box, d.x, d.y);
+    if (!v) return;
+    var before = el.queue.scrollTop;
+    el.queue.scrollTop = before + v;
+    if (el.queue.scrollTop === before) return;     /* at the end: stop */
+    /* Resting a finger at the edge is still dragging. */
+    armQueueDragTimeout();
+    var inside = d.x >= box.left && d.x <= box.right
+      && d.y >= box.top && d.y <= box.bottom;
+    paintQueueMarker(inside ? queueDropTarget(d.x, d.y, d.name) : null);
+    cq.scrollRaf = requestAnimationFrame(stepQueueScroll);
+  }
+
+  function kickQueueScroll() {
+    if (!cq.scrollRaf) cq.scrollRaf = requestAnimationFrame(stepQueueScroll);
+  }
+
   function endQueueDrag() {
     var d = cq.drag;
     cq.drag = null;
+    if (cq.scrollRaf) { cancelAnimationFrame(cq.scrollRaf); cq.scrollRaf = 0; }
     if (d && d.timer) clearTimeout(d.timer);
     if (d && d.idle) clearTimeout(d.idle);
     if (d && d.row) d.row.style.opacity = '';
@@ -3014,6 +3066,7 @@
     var inside = e.clientX >= box.left && e.clientX <= box.right
       && e.clientY >= box.top && e.clientY <= box.bottom;
     paintQueueMarker(inside ? queueDropTarget(e.clientX, e.clientY, d.name) : null);
+    kickQueueScroll();
   }, { passive: false });
 
   document.addEventListener('pointerup', function (e) {
