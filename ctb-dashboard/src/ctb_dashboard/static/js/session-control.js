@@ -6508,40 +6508,99 @@
    * on a phone, and a switch while it is open would otherwise drop another
    * project's path into the box in front of you.
    */
-  function uploadOne(session, file) {
+  function uploadOne(session, file, onProgress) {
     var url = window.ctbControl.api(
       '/api/sessions/' + encodeURIComponent(session) +
       '/upload?filename=' + encodeURIComponent(file.name || 'upload'));
-    /* iOS suspends a backgrounded PWA mid-request: without this the spinner
-     * stays up forever on a phone that was put in a pocket. */
-    var ctl = ('AbortController' in window) ? new AbortController() : null;
     /* Scaled to the file, at ~250 KB/s, between 2 and 15 minutes: a flat 2
      * minutes aborted a large zip that was still arriving. 15 minutes is the
-     * server's own receive deadline (CTB_UPLOAD_TIMEOUT in this deployment). */
-    var wait = Math.max(120000, Math.min(900000, (file.size || 0) / 250));
-    var timer = setTimeout(function () { if (ctl) ctl.abort(); }, wait);
-    var opts = {
-      method: 'POST',
-      body: file,
-      headers: { 'X-CTB-Secret': window.ctbControl.token() || '' },
-    };
-    if (ctl) opts.signal = ctl.signal;
-    return fetch(url, opts).then(function (res) {
-      if (res.status === 403 || res.status === 503) {
-        if (!window.ctbControl.recover(res)) return res;
-        var retry = {
-          method: 'POST', body: file,
-          headers: { 'X-CTB-Secret': window.ctbControl.token() || '' },
+     * server's own receive deadline (CTB_UPLOAD_TIMEOUT in this deployment).
+     * One deadline for the file, a 403 retry included. It also bounds a
+     * request iOS suspended in a backgrounded PWA, which never answers. */
+    var deadline = Date.now() + Math.max(120000, Math.min(900000, (file.size || 0) / 250));
+
+    /* XHR, not fetch: fetch says nothing until the response arrives, so a
+     * phone sending a long video showed the same "업로드 중…" for minutes.
+     * Only XHR reports how much of the body has gone. */
+    function attempt() {
+      return new Promise(function (resolve, reject) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', url);
+        xhr.setRequestHeader('X-CTB-Secret', window.ctbControl.token() || '');
+        xhr.timeout = Math.max(1, deadline - Date.now());
+        if (onProgress && xhr.upload) {
+          xhr.upload.onprogress = function (e) { onProgress(e.loaded); };
+        }
+        xhr.onload = function () {
+          var body = {};
+          try { body = JSON.parse(xhr.responseText) || {}; } catch (e) { /* not JSON */ }
+          resolve({ status: xhr.status, body: body });
         };
-        if (ctl) retry.signal = ctl.signal;
-        return fetch(url, retry);
-      }
-      return res;
-    }).then(function (res) {
-      return res.json().catch(function () { return {}; }).then(function (body) {
-        return { status: res.status, body: body };
+        /* A browser can abort it itself (a suspended PWA on resume); that
+         * is a failed send too, not a promise left hanging. */
+        xhr.onerror = xhr.onabort = function () { reject(new TypeError('network')); };
+        xhr.ontimeout = function () {
+          var e = new Error('timeout');
+          e.name = 'AbortError';
+          reject(e);
+        };
+        xhr.send(file);
       });
-    }).finally(function () { clearTimeout(timer); });
+    }
+
+    return attempt().then(function (r) {
+      if (r.status === 403 || r.status === 503) {
+        if (!window.ctbControl.recover(r)) return r;
+        if (onProgress) onProgress(0, true);
+        return attempt();
+      }
+      return r;
+    });
+  }
+
+  /* The unit is picked after rounding, so 1023.9KB reads 1.0MB, not 1024KB. */
+  function fmtBytes(n) {
+    var kb = Math.round(n / 1024);
+    if (kb < 1024) return kb + 'KB';
+    var mb = n / (1024 * 1024);
+    if (mb < 9.95) return mb.toFixed(1) + 'MB';
+    if (Math.round(mb) < 1024) return Math.round(mb) + 'MB';
+    return (mb / 1024).toFixed(1) + 'GB';
+  }
+
+  function fmtLeft(ms) {
+    var sec = Math.max(1, Math.round(ms / 1000));
+    if (sec < 60) return sec + '초';
+    var min = Math.ceil(sec / 60);
+    if (min < 60) return min + '분';
+    /* Whole hours: at this scale the minutes are noise, and "11시간 18분"
+     * pushed the line onto a second row on a phone. */
+    return Math.round(sec / 3600) + '시간';
+  }
+
+  /* The status line while files go: which file of how many and how far it
+   * is, how far the whole batch is, and -- once there is a second of data
+   * to go on -- how long the rest should take at the rate so far.
+   *   업로드 2/5 · 43% · 전체 31% 12/40MB · 2분 남음
+   * Short enough for one line on an iPhone 12: the status line holds its
+   * height so the pane above it does not move, and a second line would --
+   * which is also why the file's name is not in it; its number is.
+   * Pure, so the words are tested without a network. */
+  function uploadProgressText(i, n, loaded, size, sentBefore, total, elapsedMs) {
+    var mine = Math.min(loaded, size);
+    var filePct = size ? Math.floor(mine * 100 / size) : 0;
+    var sent = sentBefore + mine;
+    var parts = ['업로드 ' + (i + 1) + '/' + n + ' · ' + filePct + '%'];
+    var a = fmtBytes(sent), b = fmtBytes(total);
+    if (a.slice(-2) === b.slice(-2)) a = a.slice(0, -2);    /* 12/40MB */
+    var bytes = a + '/' + b;
+    parts.push(n > 1
+      ? '전체 ' + (total ? Math.floor(sent * 100 / total) : 0) + '% ' + bytes
+      : bytes);
+    if (elapsedMs >= 1000 && sent > 0 && sent < total) {
+      parts.push(fmtLeft((total - sent) / (sent / elapsedMs)) + ' 남음');
+    }
+    return parts.join(' · ');
   }
 
   /* Files go in one at a time rather than all at once: a phone on a hotel
@@ -6554,12 +6613,29 @@
     var say = function (text, color) {
       if (state.session === session) setStatus(text, color);
     };
-    say('업로드 중… (0/' + list.length + ')', 'var(--con-muted)');
+    var total = 0;
+    list.forEach(function (f) { total += f.size || 0; });
+    var sentBefore = 0;       /* bytes of the files already through, failed or not */
+    var t0 = Date.now();
+    var paintedAt = 0;
+    var progress = function (i, loaded, force) {
+      var now = Date.now();
+      /* Progress events come many times a second; the line is read, not
+       * watched frame by frame. */
+      if (!force && now - paintedAt < 250) return;
+      paintedAt = now;
+      var f = list[i];
+      say(uploadProgressText(i, list.length, loaded, f.size || 0,
+                             sentBefore, total, now - t0), 'var(--con-muted)');
+    };
 
     var chain = Promise.resolve();
     list.forEach(function (file, i) {
       chain = chain.then(function () {
-        return uploadOne(session, file).then(function (r) {
+        progress(i, 0, true);
+        return uploadOne(session, file, function (loaded, force) {
+          progress(i, loaded, !!force);
+        }).then(function (r) {
           if (r.status === 200 && r.body.path) done.push(r.body);
           /* A refusal mid-body comes back with the connection closed under
            * it, so the server's reason is often lost; 413 still means size. */
@@ -6567,10 +6643,11 @@
                            (r.body.detail || (r.status === 413
                              ? '파일이 너무 큽니다 (서버 업로드 한도 초과)'
                              : 'HTTP ' + r.status)));
-          say('업로드 중… (' + (i + 1) + '/' + list.length + ')', 'var(--con-muted)');
         }).catch(function (e) {
           failed.push((file.name || '파일') + ': ' +
                       (e && e.name === 'AbortError' ? '시간 초과' : '전송 실패'));
+        }).then(function () {
+          sentBefore += file.size || 0;
         });
       });
     });
@@ -7376,6 +7453,7 @@
     _state: state,
     _openFromQuery: openFromQuery,
     _cleanLines: cleanLines,
+    _uploadProgressText: uploadProgressText,
     _splitLinks: splitLinks,
     _findPendingInput: findPendingInput,
     _findLastSubmitted: findLastSubmitted,
