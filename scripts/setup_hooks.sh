@@ -19,7 +19,7 @@ HOOKS_SCRIPT="${SCRIPT_DIR}/../claude_ctb/hooks/notify_telegram.sh"
 if [ -z "$1" ]; then
     echo "Usage: $0 /path/to/project"
     echo ""
-    echo "This script sets up Claude Code hooks for Notification events (idle_prompt, permission_prompt)."
+    echo "This script sets up Claude Code hooks for Notification events (permission_prompt; idle_prompt is left to the screen monitor)."
     exit 1
 fi
 
@@ -60,16 +60,6 @@ HOOKS_CONFIG=$(cat <<EOF
   "hooks": {
     "Notification": [
       {
-        "matcher": "idle_prompt",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${HOOKS_SCRIPT}",
-            "timeout": 10
-          }
-        ]
-      },
-      {
         "matcher": "permission_prompt",
         "hooks": [
           {
@@ -96,7 +86,6 @@ echo ""
 echo "Settings file: $SETTINGS_FILE"
 echo ""
 echo "Configured hooks:"
-echo "  - Notification (idle_prompt): Telegram notification after 60s idle"
 echo "  - Notification (permission_prompt): Telegram notification on permission request"
 echo ""
 echo "⚠️  Restart Claude Code session to apply changes"

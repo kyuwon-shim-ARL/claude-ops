@@ -1,10 +1,11 @@
 #!/bin/bash
 # Claude Code Hook → Telegram Notification
-# Usage: Called by Claude Code hooks (idle_prompt/permission_prompt only)
+# Usage: Called by Claude Code hooks (permission_prompt only)
 # stdin: JSON from Claude Code hook system
 #
 # Purpose: Send Telegram notification when Claude needs user input
-# - idle_prompt: Fires after 60s idle, signals task completion
+# - idle_prompt: no longer registered — it duplicated the screen monitor and fired
+#   while background agents were still running (2026-10-27)
 # - permission_prompt: Fires when permission needed
 #
 # This script delegates to hook_notify.py which uses
