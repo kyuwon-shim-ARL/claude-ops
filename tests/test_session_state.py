@@ -1109,18 +1109,25 @@ class TestWideWindowAndOMCSignals:
 
 
 class TestSkillBarWrappedHud:
-    """PRIORITY 1b-2: OMC HUD wraps/truncates so ⚡N lands on a different line.
+    """GitHub #24: the OMC HUD's `skill:name(args)` field is not a liveness
+    signal. Per OMC 5.5.0 source (dist/hud/transcript.js:465-472,
+    elements/call-counts.js) it is simply the LAST Skill tool call recorded in
+    the transcript and persists for the whole session; `⚡N` is a cumulative
+    call count, not a count of running tasks. The detector no longer has any
+    skill-bar-specific rule (PRIORITY 1b-2 was deleted outright, 2026-10-27).
 
-    Real incident (2026-08-03): sessions stuck in WORKING for 3 days because
-    the skill: bar rule only looked for ⚡N on the same line, but the OMC HUD
-    now wraps `skill:...` and `⚡N` onto separate lines (or truncates with …).
+    These tests are now plain over-notification regression guards: a
+    `skill:...`/`⚡N` field — wrapped, truncated, zero, or otherwise — sitting
+    anywhere in the HUD must never, by itself, turn an otherwise-idle screen
+    (❯ prompt visible, no active spinner/interrupt string) into WORKING.
     """
 
     def setup_method(self):
         self.analyzer = SessionStateAnalyzer()
 
     def test_skill_bar_with_active_counter_on_next_line_and_prompt_is_idle(self):
-        """claude_multica pattern: ⚡1 on the line AFTER skill:, ❯ visible → idle."""
+        """claude_multica pattern: ⚡1 on the line AFTER skill:, ❯ visible → idle
+        regardless of the (now-ignored) skill:/⚡ HUD fields."""
         screen = (
             "───\n"
             "❯ \n"
@@ -1132,7 +1139,8 @@ class TestSkillBarWrappedHud:
         assert self.analyzer._detect_working_state(screen) is False
 
     def test_skill_bar_truncated_no_lightning_anywhere_with_prompt_is_idle(self):
-        """claude_CAMDA pattern: HUD truncated with …, ⚡ never visible, ❯ visible → idle."""
+        """claude_CAMDA pattern: HUD truncated with …, ⚡ never visible, ❯ visible → idle
+        (skill:/⚡ fields are ignored outright; this was never evidence of work)."""
         screen = (
             "  ⎿  Bye!\n"
             "───\n"
@@ -1144,7 +1152,8 @@ class TestSkillBarWrappedHud:
         assert self.analyzer._detect_working_state(screen) is False
 
     def test_skill_bar_wrapped_counter_two_lines_below_with_prompt_is_idle(self):
-        """claude_spark_setup pattern: ⚡7 two lines below skill:, ❯ visible → idle."""
+        """claude_spark_setup pattern: ⚡7 two lines below skill:, ❯ visible → idle
+        (no skill-bar rule exists anymore to be fooled by the wrap)."""
         screen = (
             "───\n"
             "❯ \n"
@@ -1155,22 +1164,56 @@ class TestSkillBarWrappedHud:
         )
         assert self.analyzer._detect_working_state(screen) is False
 
-    def test_skill_bar_without_prompt_still_working(self):
-        """No ❯ prompt visible + active skill bar → keep WORKING verdict."""
+    def test_skill_bar_without_prompt_is_idle(self):
+        """PRIORITY 1b-2 removed: a `skill:name(args)` HUD field is just the
+        LAST Skill tool call recorded in the transcript (OMC 5.5.0
+        dist/hud/transcript.js:465-472, elements/skills.js) — it persists for
+        the whole session and is not evidence anything is still running. A
+        past-tense completion line with no active spinner/interrupt string
+        is idle regardless of what the skill: field says."""
         screen = (
             "✻ Cooked for 3m\n"
             "───\n"
             "  [OMC#4.14.1] | Model: Opus 4.8 | skill:external-context(검색...) | ctx:56%\n"
         )
-        assert self.analyzer._detect_working_state(screen) is True
+        assert self.analyzer._detect_working_state(screen) is False
 
     def test_skill_bar_zero_counter_same_line_is_idle(self):
-        """GUARD B unchanged: ⚡0 on the skill line → idle."""
+        """GUARD B is gone along with the rest of PRIORITY 1b-2 — this is now a
+        plain regression guard: ⚡0 on the skill line is still idle (trivially,
+        since no code path reads ⚡N as a liveness signal anymore)."""
         screen = (
             "───\n"
             "  [OMC#4.14.1] | skill:rpt(--fast) | ctx:16% | ⚡0\n"
         )
         assert self.analyzer._detect_working_state(screen) is False
+
+    def test_prompt_suggestion_text_on_prompt_line_is_idle(self):
+        """GitHub #24: a few seconds after a turn ends, Claude Code renders a
+        dim prompt suggestion on the ❯ line (e.g. "❯ 아직 만드는 중이야?").
+        GUARD A only recognized a bare `❯` as the idle prompt, so this
+        released and the session read WORKING until the user typed."""
+        screen = (
+            "✻ Brewed for 3h 1m 27s · done 4:42 PM\n"
+            "────────────────────────────────────────\n"
+            "❯\xa0아직 만드는 중이야?\n"
+            "────────────────────────────────────────\n"
+            "  [OMC#5.5.0L] | 5h:[##--]20% | skill:hyperframes(e069 render) | ctx:[########--]81% | 🔧125 🤖8 ⚡1\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is False
+
+    def test_prompt_suggestion_text_with_active_spinner_still_working(self):
+        """Control: the same screen, but the completion line is replaced by
+        an active spinner — a genuinely working session must still read
+        WORKING even with suggestion text sitting on the ❯ line."""
+        screen = (
+            "✽ Transfiguring… (12s · esc to interrupt)\n"
+            "────────────────────────────────────────\n"
+            "❯\xa0아직 만드는 중이야?\n"
+            "────────────────────────────────────────\n"
+            "  [OMC#5.5.0L] | 5h:[##--]20% | skill:hyperframes(e069 render) | ctx:[########--]81% | 🔧125 🤖8 ⚡1\n"
+        )
+        assert self.analyzer._detect_working_state(screen) is True
 
 
 class TestErrorHandling:

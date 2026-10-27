@@ -191,3 +191,147 @@ class TestNotificationSequences:
             self.monitor.last_notification_time[self.session] = 0
             assert self._poll(SessionState.IDLE, screen, 600) is False
 
+
+class TestCompletionInsideCooldownIsHeldNotLost:
+    """
+    GitHub #25, mechanism A: a completion that happens within NOTIFICATION_COOLDOWN
+    (180s) of the previous notification used to be lost forever, even if the session
+    then stayed idle for hours. previous_state is consumed (set to current_state) at
+    the top of should_send_completion_notification, so once the notification_sent /
+    cooldown guards returned early without recording a hold, the next poll could never
+    see a WORKING -> terminal transition for that episode again.
+
+    These tests drive a real wall-clock timeline via patched time.time(), mirroring
+    the actual poll cadence rather than only the screen-stability deltas used above.
+    """
+
+    def setup_method(self):
+        self.monitor = MultiSessionMonitor()
+        self.session = "cooldown_session"
+        self.monitor.notification_sent[self.session] = False
+        self.monitor.last_notification_time[self.session] = 0
+        self.monitor.last_state[self.session] = SessionState.UNKNOWN
+        self.t0 = 1_000_000.0
+
+    def _poll_at(self, offset, state, screen, settle=600):
+        """One poll at wall-clock self.t0 + offset. settle = seconds the pane has
+        been stable for (independent of the wall clock used for cooldown math)."""
+        now = self.t0 + offset
+        self.monitor.last_screen_change_time[self.session] = now - settle
+        with patch("claude_ctb.monitoring.multi_monitor.time.time", return_value=now), \
+             patch.object(self.monitor, "get_session_state", return_value=state), \
+             patch.object(self.monitor.state_analyzer, "get_current_screen_only",
+                          return_value=screen), \
+             patch.object(self.monitor.state_analyzer, "detect_quiet_completion",
+                          return_value=False), \
+             patch.object(self.monitor.state_analyzer, "has_completion_indicators",
+                          return_value=False):
+            should_notify, _ = self.monitor.should_send_completion_notification(self.session)
+        return should_notify
+
+    def test_completion_inside_cooldown_is_delivered_once_after_cooldown_if_still_idle(self):
+        """W(t0) -> I(t30)=True -> W(t80) -> I(t140)=False (inside cooldown, held) ->
+        I(t215, screen stable)=True (cooldown elapsed, hold released) -> I(t230)=False."""
+        assert self._poll_at(0, SessionState.WORKING, "working...") is False
+        assert self._poll_at(30, SessionState.IDLE, "done\n") is True
+        assert self._poll_at(80, SessionState.WORKING, "working again...") is False
+        assert self._poll_at(140, SessionState.IDLE, "done\n") is False
+        assert self.session in self.monitor._pending_completion
+        assert self._poll_at(215, SessionState.IDLE, "done\n") is True
+        assert self._poll_at(230, SessionState.IDLE, "done\n") is False
+
+    def test_hold_is_not_released_if_session_goes_back_to_working_before_cooldown_ends(self):
+        """Regression guard: if WORKING resumes before the cooldown elapses, the
+        stale hold must not fire later out of nowhere — only the NEXT real
+        completion should notify."""
+        assert self._poll_at(0, SessionState.WORKING, "working...") is False
+        assert self._poll_at(30, SessionState.IDLE, "done\n") is True
+        assert self._poll_at(80, SessionState.WORKING, "working again...") is False
+        assert self._poll_at(140, SessionState.IDLE, "done\n") is False
+        # Session goes back to WORKING before the cooldown (t30+180=t210) ends.
+        assert self._poll_at(150, SessionState.WORKING, "working yet again...") is False
+        # The stale hold must not fire while WORKING, nor right after.
+        assert self._poll_at(215, SessionState.WORKING, "working yet again...") is False
+        assert self._poll_at(230, SessionState.WORKING, "still working...") is False
+        # Only the next real completion notifies.
+        assert self._poll_at(260, SessionState.IDLE, "done\n") is True
+
+    def test_micro_gap_guard_still_holds(self):
+        """Mechanism B is out of scope: a brief, unstable IDLE followed by a
+        return to WORKING within seconds must still not notify."""
+        assert self._poll_at(0, SessionState.WORKING, "working...") is False
+        assert self._poll_at(3, SessionState.IDLE, "done\n", settle=0) is False
+        assert self._poll_at(6, SessionState.WORKING, "working...", settle=0) is False
+
+
+class TestContextLimitRestartLoop:
+    """
+    GitHub #25 follow-up (adversarial review MAJOR finding): _auto_restart_session
+    force-sets last_state=WORKING and notification_sent=True right after restarting a
+    session on CONTEXT_LIMIT (multi_monitor.py ~L778-781). If the next poll still shows
+    CONTEXT_LIMIT (e.g. a stale screen after a /exit that did not take), branch 0 is
+    blocked by the 60s restart_cooldown, but the always-re-arm fix for #25 mechanism A
+    let this fake WORKING->CONTEXT_LIMIT read as `is_completion_transition`, so a hold
+    got recorded; once the cooldown re-arm fallback cleared notification_sent, branch 3
+    (which did not exclude CONTEXT_LIMIT) released that hold, should_notify=True, and
+    send_completion_notification (seeing last_state==CONTEXT_LIMIT) called
+    send_context_limit_notification -> auto-restart again, looping roughly every
+    notification_cooldown seconds.
+    """
+
+    def setup_method(self):
+        self.monitor = MultiSessionMonitor()
+        self.session = "ctx_limit_session"
+        self.t0 = 1_000_000.0
+
+    def _poll_at(self, offset, state, screen="Context limit reached", settle=600):
+        now = self.t0 + offset
+        self.monitor.last_screen_change_time[self.session] = now - settle
+        with patch("claude_ctb.monitoring.multi_monitor.time.time", return_value=now), \
+             patch.object(self.monitor, "get_session_state", return_value=state), \
+             patch.object(self.monitor.state_analyzer, "get_current_screen_only",
+                          return_value=screen), \
+             patch.object(self.monitor.state_analyzer, "detect_quiet_completion",
+                          return_value=False), \
+             patch.object(self.monitor.state_analyzer, "has_completion_indicators",
+                          return_value=False):
+            should_notify, _ = self.monitor.should_send_completion_notification(self.session)
+        return should_notify
+
+    def _simulate_auto_restart(self, restart_offset):
+        """What _auto_restart_session does to monitor state after restarting."""
+        self.monitor.last_state[self.session] = SessionState.WORKING
+        self.monitor.notification_sent[self.session] = True
+        self.monitor._context_limit_restart_time[self.session] = self.t0 + restart_offset
+
+    def test_residual_context_limit_after_restart_does_not_loop(self):
+        """Screen still shows CONTEXT_LIMIT after the restart (stale /exit): no
+        notification, and no second restart, across several minutes of polling."""
+        # First real detection and restart.
+        assert self._poll_at(0, SessionState.WORKING, "working...") is False
+        assert self._poll_at(10, SessionState.CONTEXT_LIMIT) is True
+        self._simulate_auto_restart(restart_offset=20)
+        # Screen is still CONTEXT_LIMIT (restart's /exit didn't take). Poll for 400s.
+        fired = [
+            offset for offset in range(23, 400, 3)
+            if self._poll_at(offset, SessionState.CONTEXT_LIMIT)
+        ]
+        assert fired == [], f"context-limit loop fired at offsets {fired}"
+        # last_state is CONTEXT_LIMIT throughout -> branch 0 cannot see a fresh
+        # transition into CONTEXT_LIMIT, so a second restart cannot be triggered.
+        assert self.monitor.last_state[self.session] == SessionState.CONTEXT_LIMIT
+
+    def test_auto_restart_then_idle_does_not_fire_deferred_work_completed(self):
+        """After a successful restart (handoff never actually starts new work and
+        the session settles into IDLE), no stale 'Work completed (deferred -> idle)'
+        notification should fire — that hold belongs to the already-handled
+        context-limit episode, not a new completion."""
+        assert self._poll_at(0, SessionState.WORKING, "working...") is False
+        assert self._poll_at(10, SessionState.CONTEXT_LIMIT) is True
+        self._simulate_auto_restart(restart_offset=20)
+        fired = [
+            offset for offset in range(23, 400, 3)
+            if self._poll_at(offset, SessionState.IDLE, screen="done\n")
+        ]
+        assert fired == [], f"deferred 'Work completed' fired at offsets {fired}"
+

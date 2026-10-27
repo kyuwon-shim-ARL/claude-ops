@@ -315,14 +315,14 @@ class MultiSessionMonitor:
         
         # Reset notification flag if currently working
         if current_state == SessionState.WORKING:
-            # Only re-arm notification if enough time has passed since last notification.
-            # This prevents the repeated false alarm cycle:
-            #   WORKING → micro-gap(notify) → WORKING(re-arm) → micro-gap(notify again)
-            # By keeping notification_sent=True for 30s after a notification,
-            # micro-gaps within that window are suppressed.
-            last_notif = self.last_notification_time.get(session_name, 0)
-            if current_time - last_notif > self.config.notification_cooldown:
-                self.notification_sent[session_name] = False
+            # Always re-arm: a genuinely new WORKING episode means whatever was
+            # notified before is done and gone, so notification_sent must not
+            # keep blocking the next completion. Rate limiting is still
+            # enforced independently by the cooldown guard below, and any
+            # completion held in _pending_completion is popped right below
+            # (WORKING means the hold is stale), so re-arming here cannot
+            # cause a duplicate notification for the same completion.
+            self.notification_sent[session_name] = False
             if previous_state != SessionState.WORKING:
                 self.tracker.reset_session(session_name)
                 # working-stall: WORKING 진입 시간 기록
@@ -380,7 +380,32 @@ class MultiSessionMonitor:
                 self.notification_sent[session_name] = False
                 logger.debug(f"Re-armed notification for {session_name} after context-limit cooldown expired")
 
-        # Enhanced duplicate prevention (does not apply to CONTEXT_LIMIT above)
+        # Is this call itself a completion transition? If the cooldown guard below
+        # returns early, this must still be recorded in _pending_completion —
+        # otherwise a completion that lands inside the cooldown window is lost
+        # forever instead of being deferred, since previous_state is already
+        # consumed (set to current_state) at the top of this method and will not
+        # be WORKING again on the next poll. Branch 3 releases the hold once the
+        # cooldown has elapsed and the screen has settled, as long as the
+        # session is still non-WORKING at that time.
+        # CONTEXT_LIMIT is excluded: _auto_restart_session force-sets
+        # last_state=WORKING right after restarting (to block notifications
+        # during its own cooldown), so a residual/stale CONTEXT_LIMIT screen on
+        # the next poll would otherwise read as a genuine WORKING->CONTEXT_LIMIT
+        # completion and get held — and later released by branch 3, which calls
+        # send_context_limit_notification again, looping the auto-restart.
+        is_completion_transition = (
+            previous_state == SessionState.WORKING
+            and current_state not in (SessionState.WORKING, SessionState.SCHEDULED,
+                                       SessionState.CONTEXT_LIMIT)
+        )
+
+        # Enhanced duplicate prevention (does not apply to CONTEXT_LIMIT above).
+        # Do NOT record a hold here: with always-re-arm (see above), the only way
+        # to reach this guard on a completion transition is the fake WORKING
+        # state _auto_restart_session sets, and holding that would feed the
+        # context-limit restart loop. A hold is instead recorded only in the
+        # cooldown guard below, which is reached on genuine completions.
         if self.notification_sent.get(session_name, False):
             return False, None
 
@@ -388,6 +413,8 @@ class MultiSessionMonitor:
         last_notification_time = self.last_notification_time.get(session_name, 0)
         if current_time - last_notification_time < self.config.notification_cooldown:
             logger.debug(f"Notification cooldown active for {session_name}")
+            if is_completion_transition:
+                self._pending_completion[session_name] = current_time
             return False, None
 
         # Check for task-specific completions
@@ -452,10 +479,15 @@ class MultiSessionMonitor:
         # 3. A completion we deferred earlier, now that the screen has settled.
         # OVERLOADED and UNKNOWN do not release a hold: OVERLOADED means the monitor is
         # retrying a 529 on its own (nothing finished, nothing is being asked of the user),
-        # and UNKNOWN means we cannot tell — neither establishes completion.
+        # and UNKNOWN means we cannot tell — neither establishes completion. CONTEXT_LIMIT
+        # does not release a hold either: it is handled exclusively via branch 0's
+        # auto-restart path, and releasing a hold here would let
+        # send_completion_notification (which special-cases last_state==CONTEXT_LIMIT)
+        # call send_context_limit_notification again, looping the auto-restart.
         elif session_name in self._pending_completion and current_state not in (
                 SessionState.WORKING, SessionState.SCHEDULED,
-                SessionState.OVERLOADED, SessionState.UNKNOWN):
+                SessionState.OVERLOADED, SessionState.UNKNOWN,
+                SessionState.CONTEXT_LIMIT):
             if screen_stable_duration >= min_stability:
                 should_notify = True
                 notification_reason = f"Work completed (deferred → {current_state})"

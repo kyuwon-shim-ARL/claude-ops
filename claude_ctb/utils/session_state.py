@@ -594,43 +594,15 @@ class SessionStateAnalyzer:
                 logger.debug("🎯 WORKING: OMC background task '(running)' detected")
                 return True
 
-        # PRIORITY 1b-2: OMC status bar shows active skill execution
-        # e.g. "skill:external-context(다음 키워드...)" in the OMC bar means
-        # a background skill sub-agent is still running, even if the main Claude
-        # prompt shows "✻ Cooked for Xm" (past-tense) and ❯ is visible.
-        #
-        # The OMC HUD wraps and truncates on narrow terminals, so ⚡N can land
-        # on the line(s) BELOW the skill: line, or be cut off entirely. The ⚡
-        # counter is therefore searched across the HUD block (skill line + next
-        # 2 lines), not just the skill line itself.
-        #
-        # Guard cases:
-        # GUARD A — ❯ prompt visible → idle. Covers both the stale-⚡N-counter
-        #   pattern (MC_reanalysis) and the truncated-HUD pattern (2026-08-03
-        #   incident: sessions stuck WORKING for 3 days because a truncated
-        #   `skill:...` bar with ❯ visible was treated as WORKING forever,
-        #   permanently suppressing completion notifications). A false idle
-        #   costs one early notification; a false WORKING suppresses them
-        #   permanently — so with ❯ visible we prefer idle.
-        # GUARD B — ⚡0 explicit in the HUD block → all tasks finished → skip.
+        # PRIORITY 1b-2 removed (GitHub #24): a `skill:name(args)` field in the
+        # OMC status bar is NOT evidence that a skill is currently running.
+        # Per OMC 5.5.0 source (dist/hud/transcript.js:465-472, elements/skills.js)
+        # it is simply the LAST Skill tool call found in the transcript, so it
+        # persists for the whole session; `⚡N` is a cumulative Skill call
+        # count (elements/call-counts.js:27,38), not a count of running tasks.
+        # Treating it as "still running" caused WORKING to stick indefinitely
+        # on sessions idling with a leftover skill: field in the HUD.
         _prompt_visible = any(l.strip() in ('❯', '❯\xa0', '❯ ') for l in recent_lines)
-        _skill_bar_re = re.compile(r'\bskill:[A-Za-z0-9_:\-]+\([^)]+\)')
-        _zero_tasks_re = re.compile(r'⚡0\b')            # ⚡0 = explicitly done
-        for i, line in enumerate(recent_lines):
-            if not _skill_bar_re.search(line):
-                continue
-            hud_block = '\n'.join(recent_lines[i:i + 3])
-            if _prompt_visible:
-                # GUARD A: ❯ = idle; skill bar is stale/truncated HUD → skip
-                logger.debug("⏭ SKIP 1b-2: ❯ visible — skill bar treated as stale HUD (GUARD A)")
-                continue
-            if _zero_tasks_re.search(hud_block):
-                # GUARD B: ⚡0 = all tasks done → skip
-                logger.debug("⏭ SKIP 1b-2: ⚡0 explicit in HUD block — tasks finished (GUARD B)")
-                continue
-            # skill: found, no ❯ prompt, ⚡0 not confirmed → still working
-            logger.debug(f"🎯 WORKING: OMC status bar shows active skill: {line.strip()[:80]}")
-            return True
 
         # PRIORITY 1c: Check for Claude Code background tasks still running
         # "N background task(s) still running" appears on the completion summary
