@@ -320,15 +320,16 @@ def test_the_enter_waits_for_the_text_to_land(stubborn):
     assert first_enter_at >= 3, "Enter went before the text was seen in the box"
 
 
-def test_prompt_cap_is_three_times_the_old_64k():
-    """Raised 64 KiB -> 192 KiB. Prompts travel through load-buffer on stdin,
-    so the 128 KiB argv ceiling (MAX_ARG_STRLEN) does not bind them; a 192 KiB
-    bracketed paste was checked arriving byte-for-byte in a raw-mode pane."""
-    assert session_input.MAX_PROMPT_BYTES == 192 * 1024
+def test_prompt_cap_is_384k():
+    """Raised 64 KiB -> 192 KiB -> 384 KiB. Prompts travel through load-buffer
+    on stdin, so the 128 KiB argv ceiling (MAX_ARG_STRLEN) does not bind them;
+    a 384 KiB bracketed paste was checked arriving byte-for-byte in a raw-mode
+    pane."""
+    assert session_input.MAX_PROMPT_BYTES == 384 * 1024
 
 
 def test_prompt_between_old_and_new_cap_is_accepted():
-    text = "a" * (100 * 1024)
+    text = "a" * (300 * 1024)
     assert session_input._validate(text) == text
 
 
