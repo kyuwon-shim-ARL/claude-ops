@@ -67,6 +67,7 @@ from .session_create import (
 from .session_input import (
     ALLOWED_KEYS,
     MAX_PROMPT_BYTES as _MAX_PROMPT_BYTES,
+    MAX_SHELL_LINE_BYTES as _MAX_SHELL_LINE_BYTES,
     is_shell_session,
     pane_command,
     pane_has_claude,
@@ -1491,6 +1492,15 @@ async def _shell_prompt(name: str, req: "PromptRequest", client: str | None) -> 
     if not text or "\n" in text or "\r" in text:
         _audit("prompt", name, client, False, "invalid_text")
         raise HTTPException(status_code=422, detail="Shell text must be a single line")
+    # Lower than the prompt cap the caller already passed -- see
+    # MAX_SHELL_LINE_BYTES for why this path has its own.
+    size = len(text.encode("utf-8"))
+    if size > _MAX_SHELL_LINE_BYTES:
+        _audit("prompt", name, client, False, "too_long")
+        raise HTTPException(
+            status_code=413,
+            detail=f"Shell text too long: {size} bytes (limit {_MAX_SHELL_LINE_BYTES})",
+        )
     # Control characters (other than the trailing line ending already
     # stripped above) have no business in a line that is typed, not pasted
     # -- send-keys -l would type them as raw bytes into the pane.

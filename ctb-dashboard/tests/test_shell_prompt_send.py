@@ -179,3 +179,17 @@ def test_non_shell_path_still_refuses_at_a_real_shell(client, sent, monkeypatch)
                     json={"text": "정리해줘"}, headers=AUTH)
     assert r.status_code == 409
     assert r.json()["reason"] == "shell"
+
+
+def test_shell_text_over_the_shell_cap_is_a_clean_413(client, sent, monkeypatch):
+    """Over the shell cap but under the prompt cap: the shared prompt check
+    lets it through, so the shell path must refuse it itself, before tmux."""
+    monkeypatch.setattr(_srv, "pane_command", lambda name: "bash")
+    monkeypatch.setattr(_srv, "pane_has_claude", lambda name: False)
+    from ctb_dashboard import session_input
+    text = "a" * (session_input.MAX_SHELL_LINE_BYTES + 1)
+    assert len(text) < _srv._MAX_PROMPT_BYTES
+    r = client.post("/api/sessions/claude_demo_sh/prompt",
+                    json={"text": text, "shell": True}, headers=AUTH)
+    assert r.status_code == 413
+    assert sent == []

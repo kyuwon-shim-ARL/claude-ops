@@ -23,14 +23,16 @@ from .session_readiness import free_text_row
 
 logger = logging.getLogger(__name__)
 
-# tmux send-keys passes the body as a single argv element, and Linux caps one
-# argument at MAX_ARG_STRLEN (128 KiB), so oversize text fails at execve
-# instead of arriving. That is the binding path: load-buffer (used for
-# multi-line prompts, below) takes text over stdin and is not subject to it.
-# 64 KiB leaves headroom below the 128 KiB ceiling. The cap counts BYTES, not
-# characters: Korean is 3 bytes per character, so a character-based cap would
-# reject a short Korean message while letting an oversized one through.
-MAX_PROMPT_BYTES = 64 * 1024
+# send_prompt delivers text through load-buffer on stdin, which is not subject
+# to Linux's per-argument cap (MAX_ARG_STRLEN, 128 KiB); a 192 KiB bracketed
+# paste was checked arriving byte-for-byte in a raw-mode pane. send_shell_line
+# is different: it hands the text to `send-keys -l` as ONE argv element, so
+# oversize text fails at execve instead of arriving -- it keeps its own cap
+# with headroom below that ceiling. Both caps count BYTES, not characters:
+# Korean is 3 bytes per character, so a character-based cap would reject a
+# short Korean message while letting an oversized one through.
+MAX_PROMPT_BYTES = 192 * 1024
+MAX_SHELL_LINE_BYTES = 64 * 1024
 _TMUX_TIMEOUT = 5
 _BUFFER_NAME = "ctb-prompt"
 
@@ -471,6 +473,8 @@ def send_shell_line(name: str, text: str) -> None:
     missing tmux binary -- caught here specifically so the error never
     carries `text` (a password, an API key) in its message or a log line.
     """
+    if len(text.encode("utf-8")) > MAX_SHELL_LINE_BYTES:
+        raise ValueError(f"shell line is over the {MAX_SHELL_LINE_BYTES} byte limit")
     trailing = _TRAILING_SEMICOLONS.search(text)
     body = text[:trailing.start()] if trailing else text
     semicolons = len(trailing.group()) if trailing else 0

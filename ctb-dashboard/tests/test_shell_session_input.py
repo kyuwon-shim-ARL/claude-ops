@@ -231,3 +231,10 @@ def test_a_logged_warning_on_timeout_does_not_contain_the_text(monkeypatch, capl
         with pytest.raises(RuntimeError):
             session_input.send_shell_line("claude_demo_sh", "export SECRET=topsecret123")
     assert "topsecret123" not in caplog.text
+
+
+def test_send_shell_line_rejects_text_over_its_cap(run):
+    with pytest.raises(ValueError):
+        session_input.send_shell_line(
+            "claude_demo_sh", "a" * (session_input.MAX_SHELL_LINE_BYTES + 1))
+    assert run.calls == [], "nothing should reach tmux"

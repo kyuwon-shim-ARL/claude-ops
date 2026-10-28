@@ -318,3 +318,22 @@ def test_the_enter_waits_for_the_text_to_land(stubborn):
     session_input.send_prompt("claude_demo", body)
     first_enter_at = next(i for i, (_, e) in enumerate(order) if e >= 1)
     assert first_enter_at >= 3, "Enter went before the text was seen in the box"
+
+
+def test_prompt_cap_is_three_times_the_old_64k():
+    """Raised 64 KiB -> 192 KiB. Prompts travel through load-buffer on stdin,
+    so the 128 KiB argv ceiling (MAX_ARG_STRLEN) does not bind them; a 192 KiB
+    bracketed paste was checked arriving byte-for-byte in a raw-mode pane."""
+    assert session_input.MAX_PROMPT_BYTES == 192 * 1024
+
+
+def test_prompt_between_old_and_new_cap_is_accepted():
+    text = "a" * (100 * 1024)
+    assert session_input._validate(text) == text
+
+
+def test_shell_line_cap_stays_below_the_argv_ceiling():
+    """send_shell_line passes the text as one argv element to send-keys, which
+    Linux caps at 128 KiB -- so the shell path keeps its own, lower cap."""
+    assert session_input.MAX_SHELL_LINE_BYTES < 128 * 1024
+    assert session_input.MAX_SHELL_LINE_BYTES < session_input.MAX_PROMPT_BYTES
