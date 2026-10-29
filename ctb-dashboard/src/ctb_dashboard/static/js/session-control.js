@@ -991,7 +991,7 @@
     input.setAttribute('aria-label', '프롬프트 입력');
     input.className = 'con-input';
     input.style.cssText = [
-      'flex:1', 'resize:none', 'padding:11px 13px',
+      'flex:1', 'resize:none', 'padding:11px 13px', 'box-sizing:border-box',
       /* 16px, and not a pixel less. Below that, iOS zooms the page in when the
        * field takes focus -- and it does not zoom back out when focus leaves,
        * so every tap on the box left the user pinching to get the screen back.
@@ -1279,6 +1279,118 @@
     queuePanel.setAttribute('aria-label', '처리 순서');
     bindQueuePanel(queuePanel);
 
+    /* The prompt box's height is the reader's to set, up to 80% of the console.
+     *
+     * A grip bar above the row, dragged with pointer events (mouse and touch
+     * alike; touch-action:none keeps the page from scrolling under the finger)
+     * and captured so the drag survives leaving the bar. preventDefault on the
+     * press keeps focus where it was -- a drag must not raise the iOS keyboard.
+     *
+     * The choice is kept as a FRACTION of the console's height, so a height
+     * picked on a tall screen becomes a proportionate one on a short screen
+     * instead of overflowing it. The box's default (rows=2) is the floor;
+     * with no saved choice no inline height is set at all. The log above is
+     * flex:1, so it gives the room back; a reader pinned to its bottom stays
+     * pinned through the change. */
+    var GRIP_MAX = 0.8;
+    var GRIP_DOUBLE_MS = 350;   /* two lifts this close, on the bar, are a double tap */
+    var gripFrac = null;
+    try {
+      var savedFrac = parseFloat(localStorage.getItem(INPUT_FRAC_KEY));
+      if (savedFrac > 0) gripFrac = savedFrac;
+    } catch (e) { /* default height */ }
+
+    /* The ceiling: 80% of the console, and never more than the box can take
+     * without the console outgrowing itself. The log (tailWrap) is the only
+     * thing that gives way, so the room the box may add is exactly the log's
+     * height with the box at its default -- read from the layout rather than
+     * summed from the header, strip, keys and grip. Call with the inline
+     * height cleared; `min` is the box's default height then. */
+    function gripCap(min) {
+      return Math.max(min, Math.min(Math.floor(root.clientHeight * GRIP_MAX),
+                                    min + tailWrap.offsetHeight));
+    }
+    function applyGrip() {
+      if (!root.clientHeight) return;   /* hidden: nothing to measure */
+      var follow = state.pinned;
+      input.style.height = '';
+      var min = input.offsetHeight;
+      if (gripFrac !== null && min) {
+        var h = Math.max(min, Math.min(gripCap(min), Math.round(gripFrac * root.clientHeight)));
+        if (h > min) input.style.height = h + 'px';
+      }
+      if (follow) keepTailFollowing(true);
+    }
+    function saveGrip() {
+      try {
+        if (gripFrac === null) localStorage.removeItem(INPUT_FRAC_KEY);
+        else localStorage.setItem(INPUT_FRAC_KEY, String(gripFrac));
+      } catch (e) { /* this visit only */ }
+    }
+
+    var grip = document.createElement('div');
+    grip.className = 'con-grip';
+    grip.setAttribute('role', 'separator');
+    grip.setAttribute('aria-orientation', 'horizontal');
+    grip.setAttribute('aria-label', '입력창 높이 조절 (더블탭: 기본값)');
+    grip.style.cssText =
+      'flex-shrink:0;height:18px;display:flex;align-items:center;justify-content:center;' +
+      'cursor:ns-resize;touch-action:none;-webkit-user-select:none;user-select:none;';
+    var gripPill = document.createElement('div');
+    gripPill.style.cssText =
+      'width:36px;height:4px;border-radius:99px;background:var(--con-dim);opacity:0.6;';
+    grip.appendChild(gripPill);
+
+    var gripDrag = null;
+    var gripLastUp = 0;
+    grip.addEventListener('pointerdown', function (e) {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      e.preventDefault();
+      try { grip.setPointerCapture(e.pointerId); } catch (err) { /* no capture */ }
+      input.style.height = '';
+      gripDrag = { id: e.pointerId, y: e.clientY, h0: input.offsetHeight,
+                   min: input.offsetHeight, moved: false };
+      gripDrag.cap = gripCap(gripDrag.min);
+      if (gripFrac !== null) {
+        gripDrag.h0 = Math.max(gripDrag.min, Math.min(gripDrag.cap,
+                               Math.round(gripFrac * root.clientHeight)));
+        input.style.height = gripDrag.h0 > gripDrag.min ? gripDrag.h0 + 'px' : '';
+      }
+    });
+    grip.addEventListener('pointermove', function (e) {
+      if (!gripDrag || e.pointerId !== gripDrag.id) return;
+      var dy = gripDrag.y - e.clientY;
+      if (Math.abs(dy) > 3) gripDrag.moved = true;
+      if (!gripDrag.moved) return;
+      var follow = state.pinned;
+      var h = Math.max(gripDrag.min, Math.min(gripDrag.cap, gripDrag.h0 + dy));
+      input.style.height = h > gripDrag.min ? h + 'px' : '';
+      gripFrac = h > gripDrag.min ? h / root.clientHeight : null;
+      if (follow) keepTailFollowing(true);
+    });
+    function endGrip(e) {
+      if (!gripDrag || e.pointerId !== gripDrag.id) return;
+      var d = gripDrag;
+      gripDrag = null;
+      if (d.moved) { saveGrip(); gripLastUp = 0; return; }
+      var now = Date.now();
+      if (e.type === 'pointerup' && now - gripLastUp < GRIP_DOUBLE_MS) {
+        gripLastUp = 0;
+        gripFrac = null;
+        saveGrip();
+        applyGrip();
+      } else {
+        gripLastUp = now;
+      }
+    }
+    grip.addEventListener('pointerup', endGrip);
+    grip.addEventListener('pointercancel', endGrip);
+    /* Opening, rotating, the keyboard and a split view all change the console's
+     * height; the saved fraction is re-read against the new one each time
+     * (and never rewritten by it, so the keyboard closing restores the choice). */
+    if (window.ResizeObserver) new ResizeObserver(applyGrip).observe(root);
+    else window.addEventListener('resize', applyGrip);
+
     root.appendChild(stripRow);
     root.appendChild(queuePanel);
     sttInit();
@@ -1286,6 +1398,7 @@
     root.appendChild(tailWrap);
     root.appendChild(status);
     root.appendChild(keys);
+    root.appendChild(grip);
     root.appendChild(row);
     keepCaret(root, input);
     bindDrop(root);
@@ -2674,6 +2787,7 @@
    * Hidden by default, and whether it is open is this viewer's choice, kept
    * in this browser. */
   var QUEUE_OPEN_KEY = 'ctb_console_queue_open';
+  var INPUT_FRAC_KEY = 'ctb_console_input_frac';
   var cq = { open: false, drag: null, marker: null, ghost: null, painted: null, scrollRaf: 0 };
   try { cq.open = localStorage.getItem(QUEUE_OPEN_KEY) === '1'; } catch (e) { /* closed */ }
 
