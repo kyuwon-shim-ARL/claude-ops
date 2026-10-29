@@ -1301,23 +1301,42 @@
     } catch (e) { /* default height */ }
 
     /* The ceiling: 80% of the console, and never more than the box can take
-     * without the console outgrowing itself. The log (tailWrap) is the only
-     * thing that gives way, so the room the box may add is exactly the log's
-     * height with the box at its default -- read from the layout rather than
-     * summed from the header, strip, keys and grip. Call with the inline
-     * height cleared; `min` is the box's default height then. */
+     * without the console outgrowing itself. The log is the only thing that
+     * gives way, so the room the box may add is what the log can give up with
+     * the box at its default -- its height above its own min-height floor,
+     * read from the layout rather than summed from the header, strip, keys
+     * and grip. Past that floor the pane overflows its wrapper upward and
+     * paints over the status line and the keys. While the box is taller than
+     * its default the floor is GRIP_LOG_FLOOR rather than the pane's own
+     * 120px, so a short screen (the keyboard up) still leaves the box room.
+     * Call with the inline height cleared; `min` is the box's default height
+     * then. */
+    var GRIP_LOG_FLOOR = '2.9em';   /* two lines of the log stay in view */
     function gripCap(min) {
+      var prev = tail.style.minHeight;
+      tail.style.minHeight = GRIP_LOG_FLOOR;
+      var cs = window.getComputedStyle(tail);
+      var floor = parseFloat(cs.minHeight) || 0;
+      if (cs.boxSizing !== 'border-box') {
+        floor += (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0) +
+                 (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+      }
+      var log = tailWrap.offsetHeight - (parseFloat(cs.marginTop) || 0) - (parseFloat(cs.marginBottom) || 0);
+      tail.style.minHeight = prev;
       return Math.max(min, Math.min(Math.floor(root.clientHeight * GRIP_MAX),
-                                    min + tailWrap.offsetHeight));
+                                    min + Math.max(0, log - floor)));
+    }
+    function setGripHeight(h, min) {
+      input.style.height = h > min ? h + 'px' : '';
+      tail.style.minHeight = h > min ? GRIP_LOG_FLOOR : '';
     }
     function applyGrip() {
       if (!root.clientHeight) return;   /* hidden: nothing to measure */
       var follow = state.pinned;
-      input.style.height = '';
+      setGripHeight(0, 0);
       var min = input.offsetHeight;
       if (gripFrac !== null && min) {
-        var h = Math.max(min, Math.min(gripCap(min), Math.round(gripFrac * root.clientHeight)));
-        if (h > min) input.style.height = h + 'px';
+        setGripHeight(Math.max(min, Math.min(gripCap(min), Math.round(gripFrac * root.clientHeight))), min);
       }
       if (follow) keepTailFollowing(true);
     }
@@ -1347,14 +1366,14 @@
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       e.preventDefault();
       try { grip.setPointerCapture(e.pointerId); } catch (err) { /* no capture */ }
-      input.style.height = '';
+      setGripHeight(0, 0);
       gripDrag = { id: e.pointerId, y: e.clientY, h0: input.offsetHeight,
                    min: input.offsetHeight, moved: false };
       gripDrag.cap = gripCap(gripDrag.min);
       if (gripFrac !== null) {
         gripDrag.h0 = Math.max(gripDrag.min, Math.min(gripDrag.cap,
                                Math.round(gripFrac * root.clientHeight)));
-        input.style.height = gripDrag.h0 > gripDrag.min ? gripDrag.h0 + 'px' : '';
+        setGripHeight(gripDrag.h0, gripDrag.min);
       }
     });
     grip.addEventListener('pointermove', function (e) {
@@ -1364,7 +1383,7 @@
       if (!gripDrag.moved) return;
       var follow = state.pinned;
       var h = Math.max(gripDrag.min, Math.min(gripDrag.cap, gripDrag.h0 + dy));
-      input.style.height = h > gripDrag.min ? h + 'px' : '';
+      setGripHeight(h, gripDrag.min);
       gripFrac = h > gripDrag.min ? h / root.clientHeight : null;
       if (follow) keepTailFollowing(true);
     });

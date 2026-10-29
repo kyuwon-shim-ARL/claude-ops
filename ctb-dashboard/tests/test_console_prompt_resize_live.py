@@ -172,3 +172,24 @@ def test_on_a_short_screen_the_box_never_pushes_the_console_past_its_height(h):
         if base <= 0:
             assert r["grip"] and r["keys"] and r["box"], r
         assert r["input"] <= r["rootH"] * 0.8 + 1
+
+
+@pytest.mark.parametrize("h", [844, 500])
+def test_at_the_top_the_log_does_not_paint_over_the_status_and_keys(h):
+    """The log pane has a floor (min-height) it will not shrink past. A cap that
+    counted the whole log as room let the box squeeze the log's wrapper to
+    nothing, and the pane overflowed it upward, covering the key pad."""
+    with open_board() as page:
+        open_console(page, 390, h)
+        drag(page, 5000)
+        r = page.evaluate("""(() => {
+          const e = window.ctbConsole._el();
+          const b = n => n.getBoundingClientRect();
+          return { tailBottom: b(e.tail).bottom, wrapBottom: b(e.tail.parentElement).bottom,
+                   statusTop: b(e.status).top, keysTop: b(e.keys).top, keysBottom: b(e.keys).bottom,
+                   gripTop: b(document.querySelector('#ctb-console .con-grip')).top };
+        })()""")
+        assert r["tailBottom"] <= r["wrapBottom"] + 1, r
+        assert r["tailBottom"] <= r["statusTop"] + 1, r
+        assert r["tailBottom"] <= r["keysTop"] + 1, r
+        assert r["keysBottom"] <= r["gripTop"] + 1, r
